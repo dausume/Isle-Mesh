@@ -1,0 +1,18 @@
+# @mesh-environments/localhost-mdns/proxy/Dockerfile.lh-mdns.mesh-proxy
+# This Dockerfile is for enabling a mesh specific reverse proxy for localhost or development only type servers.
+FROM nginx
+
+# Copy the cert and key for the backend so we can use them for mTLS
+COPY ssl/certs/mesh-app.crt /ssl/certs/mesh-app.crt
+COPY ssl/keys/mesh-app.key /ssl/keys/mesh-app.key
+
+COPY public-static-data/ /etc/nginx/static/
+
+# 
+COPY ssl/certs/backend.mesh-app.crt /ssl/certs/backend.mesh-app.crt
+
+COPY lh-mdns.proxy.conf /etc/nginx/nginx.conf
+
+# We want to assess what the appropriate environment variables are and setup our config while copying the needed ssl certs and keys
+# as needed for the proxy, while excluding the private keys that are used for re-encrypting, so that a compromise of
+# the proxy does not necessarily compromise the downstream servers, increasing potential security posture.

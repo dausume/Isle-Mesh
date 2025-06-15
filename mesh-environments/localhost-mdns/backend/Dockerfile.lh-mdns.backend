@@ -1,0 +1,23 @@
+# @mesh-environments/localhost-mdns/backend/Dockerfile.lh-mdns.backend
+# This is a mock backend, we serve just a static html page with re-encryption
+# of the html page using falcon-api.
+FROM python:3.11-slim
+
+WORKDIR /app
+COPY app.py .
+
+
+# Copy the cert and key for the backend so we can use them for mTLS
+COPY ssl/certs/backend.mesh-app.crt /ssl/certs/backend.mesh-app.crt
+COPY ssl/keys/backend.mesh-app.key /ssl/keys/backend.mesh-app.key
+# Copy the cert of the mesh-app, so we can confirm when traffic is coming from the proxy.
+# Note : This is being used to ensure ALL communications pass through the proxy, where this
+# cert is used to assure it is a proxy communication, and mesh-app.local and allsub-domains
+# are always routed through that proxy.
+COPY ssl/certs/mesh-app.crt /ssl/certs/mesh-app.crt
+
+RUN pip install falcon gunicorn
+
+# Make certain the command is all on one line, or it will throw an error.
+CMD ["gunicorn", "app:app", "-b", "0.0.0.0:8443", "--certfile=/ssl/certs/backend.mesh-app.crt", "--keyfile=/ssl/keys/backend.mesh-app.key", "--ca-certs=/ssl/certs/mesh-app.crt", "--cert-reqs=2"]  
+# Index 2 Configuration => ssl.CERT_REQUIRED (client must present a valid cert to connect)

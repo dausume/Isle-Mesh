@@ -1,0 +1,43 @@
+# docker-compose.lh-mdns.yml
+# Localhost mDNS stack — all certs baked into images
+services:
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.lh-mdns.backend
+    container_name: backend
+    ports:
+      - "8100:8443"  # 🔐 Optional: for testing, should require mTLS and fail if not routed through proxy
+    expose:
+      - "8443"
+    networks:
+      - meshnet
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.lh-mdns.frontend
+    container_name: frontend
+    ports:
+      - "8080:8443"  # ✅ Optional: direct HTTP testing
+    expose:
+      - "8443"
+    networks:
+      - meshnet
+
+  proxy:
+    build:
+      context: ./proxy
+      dockerfile: Dockerfile.lh-mdns.mesh-proxy
+    container_name: mesh-proxy
+    ports:
+      - "443:443"  # 🔐 HTTPS entrypoint
+      - "80:80"    # 🔁 Redirects to HTTPS
+    networks:
+      - meshnet
+
+
+networks:
+  meshnet:
+    driver: bridge

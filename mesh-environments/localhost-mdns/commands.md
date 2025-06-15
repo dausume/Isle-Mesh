@@ -1,0 +1,1 @@
+sudo docker compose -f docker-compose.lh-mdns.yml up --build --no-cache

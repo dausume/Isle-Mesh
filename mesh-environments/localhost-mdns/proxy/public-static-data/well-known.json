@@ -1,0 +1,19 @@
+{
+  "mesh-url": "https://mesh-app.local",
+  "mesh-url-description": "Main entry point to the mesh application. This may redirect users or services based on their role or intent.",
+
+  "user-access": "https://login.mesh-app.local",
+  "user-access-description": "This endpoint handles login and authentication for the mesh. Designed for end-user clarity, as opposed to a more developer-oriented 'auth' label.",
+
+  "frontend": "https://frontend.mesh-app.local",
+  "frontend-description": "User-facing frontend application for interacting with the mesh ecosystem.",
+
+  "backend": "https://backend.mesh-app.local",
+  "backend-description": "API backend and core processing logic for mesh services. Not intended for direct access by end-users.",
+
+  "robot-access-policy": "https://mesh-app.local/robots.txt",
+  "robot-access-policy-description": "Specifies the web crawler access policy for this domain.",
+
+  "site-map-access": "https://mesh-app.local/sitemap.xml",
+  "site-map-access-description": "Points to the sitemap listing all publicly discoverable and crawlable URLs within the mesh domain."
+}

@@ -1,0 +1,18 @@
+<?xml version="1.0" standalone='no'?><!--*-nxml-*-->
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<service-group>
+  <name replace-wildcards="yes">mesh-app.local</name>
+  <!-- HTTP on port 80 -->
+  <service>
+    <host-name>mesh-app.local</host-name>
+    <type>_http._tcp</type>
+    <port>80</port>
+  </service>
+
+  <!-- HTTPS on port 443 -->
+  <service>
+    <host-name>mesh-app.local</host-name>
+    <type>_https._tcp</type>
+    <port>443</port>
+  </service>
+</service-group>
