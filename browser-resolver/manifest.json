@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "Fix MDNS Subdomain Resolution",
+  "version": "1.0",
+  "description": "Redirect mesh-app subdomains to localhost",
+  "permissions": [
+    "webRequest",
+    "webRequestBlocking",
+    "declarativeNetRequest",
+    "declarativeNetRequestWithHostAccess"
+  ],
+  "host_permissions": [
+    "*://*.mesh-app.local/*"
+  ],
+  "background": {
+    "service_worker": "isle-mesh-resolver.js"
+  },
+  "action": {
+    "default_title": "Mesh Redirect"
+  }
+}

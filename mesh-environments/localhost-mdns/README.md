@@ -17,7 +17,7 @@ Command to generate ssh certs from this directory:
 
     {use generate mesh ssl sh as a command file} {provide a configuration file} {optional - provide path to the Base Directory, defaults to pwd} {optional - location of generate-mesh-ssl directory}
 
-    ../../generate_mesh_ssl.sh ./lh-mdns.env.conf ./
+    ../../ssl/generate_mesh_ssl.sh ./lh-mdns.env.conf ./
 
 ## Sample Structure for a full-stack localhost-mdns App.
 
@@ -38,10 +38,15 @@ We design a sample docker-compose structure with the following file structure:
         ssl/
             certs/
                 backend.mesh-app.crt
-                mash-app.crt
+                mesh-app.crt
             keys/
                 backend.mesh-app.key
-                mash-app.key
+                mesh-app.key
+            stores/
+                backend.keys.pki
+                proxy.keys.pki
+                backend.trust.pki
+                proxy.trust.pki
         docker-compose.lh-mdns.yml
         lh-mdns.env.conf
         README.md
@@ -57,9 +62,21 @@ We design a sample docker-compose structure with the following file structure:
         public-static-data/
             robots.txt
             well-known.json
-        generate_mesh_ssl.sh
-        generate_ssl_config.sh
-        generate_ssl.sh
+        ssl/
+            certs/
+                backend.mesh-app.crt
+                mesh-app.crt
+            keys/
+                backend.mesh-app.key
+                mesh-app.key
+            stores/
+                backend.keys.pki
+                proxy.keys.pki
+                backend.trust.pki
+                proxy.trust.pki
+            generate_mesh_ssl.sh
+            generate_ssl_config.sh
+            generate_ssl.sh
 
     In our containers, each should be allocated only the ssl files that they have need-to-know for.
     All containers use specific Dockerfiles, and specific entrypoint.sh files for them, so we can

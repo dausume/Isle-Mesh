@@ -3,7 +3,7 @@
 # of the html page using falcon-api.
 FROM python:3.11-slim
 
-WORKDIR /app
+# Copy application code
 COPY app.py .
 
 
@@ -16,8 +16,15 @@ COPY ssl/keys/backend.mesh-app.key /ssl/keys/backend.mesh-app.key
 # are always routed through that proxy.
 COPY ssl/certs/mesh-app.crt /ssl/certs/mesh-app.crt
 
-RUN pip install falcon gunicorn
+# Copy entrypoint script
+COPY entrypoint.sh /entrypoint.sh
 
-# Make certain the command is all on one line, or it will throw an error.
-CMD ["gunicorn", "app:app", "-b", "0.0.0.0:8443", "--certfile=/ssl/certs/backend.mesh-app.crt", "--keyfile=/ssl/keys/backend.mesh-app.key", "--ca-certs=/ssl/certs/mesh-app.crt", "--cert-reqs=2"]  
-# Index 2 Configuration => ssl.CERT_REQUIRED (client must present a valid cert to connect)
+# Ensure it is executable
+RUN chmod +x /entrypoint.sh
+
+# Install dependencies
+RUN pip install --no-cache-dir falcon
+
+
+# Use custom entrypoint script
+ENTRYPOINT ["/entrypoint.sh"]

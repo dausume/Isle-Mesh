@@ -40,6 +40,27 @@ if [ "$IS_SUBDOMAIN_REENCRYPT" == "true" ] && [ -n "$SUBDOMAIN_REENCRYPT_NAME" ]
     # Disable SAN expansion since this is now a single-cert
     ENABLE_SUBDOMAINS="false"
     SAN_ENTRIES="DNS:${BASE_URL}"
+
+    # --- Start: Add matching container name from REEMCRYPTED_SUBDOMAIN_CONTAINER_NAMES ---
+    IFS=',' read -ra SUBDOMAINS_INDEXED <<< "$SUBDOMAINS"
+    IFS=',' read -ra CONTAINER_NAMES <<< "$REEMCRYPTED_SUBDOMAIN_CONTAINER_NAMES"
+
+    MATCH_INDEX=-1
+    for i in "${!SUBDOMAINS_INDEXED[@]}"; do
+        if [ "${SUBDOMAINS_INDEXED[$i]}" == "$SUBDOMAIN_REENCRYPT_NAME" ]; then
+            MATCH_INDEX=$i
+            break
+        fi
+    done
+
+    if [ "$MATCH_INDEX" -ge 0 ] && [ "$MATCH_INDEX" -lt "${#CONTAINER_NAMES[@]}" ]; then
+        ORIGIN_CONTAINER="${CONTAINER_NAMES[$MATCH_INDEX]}"
+        SAN_ENTRIES="DNS:${BASE_URL},DNS:${ORIGIN_CONTAINER}"
+    else
+        echo "❌ Error: Could not resolve container name for subdomain '${SUBDOMAIN_REENCRYPT_NAME}'"
+        exit 1
+    fi
+    # --- End: Add matching container name from REEMCRYPTED_SUBDOMAIN_CONTAINER_NAMES ---
 else
     # --- Generate Subject Alternative Name Entries for a normal SSL Cert ---
     # Always include the main domain
