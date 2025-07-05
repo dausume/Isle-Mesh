@@ -1,4 +1,7 @@
 #!/bin/bash
+# mesh-mdns-broadcast.sh
+# This file is generally copied to the local system and then run using a systemd-service
+# as well as a pre-set environment file for congiuration.
 
 # === Config from environment ===
 APP_NAME="${APP_NAME:-mesh-app}"

@@ -1,5 +1,7 @@
 #!/bin/bash
 # Setup systemd-networkd
+# Detects the primary interface being used currently and shifts the user from using 
+# the default NetworkManager to using systemd.
 
 set -e
 

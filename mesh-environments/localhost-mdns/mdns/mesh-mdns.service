@@ -1,0 +1,14 @@
+[Unit]
+Description=Mesh App mDNS Broadcaster
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/mesh-mdns.env
+ExecStart=/usr/local/bin/mesh-mdns-broadcast.sh
+Restart=always
+RestartSec=5
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

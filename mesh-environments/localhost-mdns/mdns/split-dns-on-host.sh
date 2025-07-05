@@ -1,4 +1,7 @@
 #!/bin/bash
+# split-dns-on-host.sh
+# Provides split DNS capabilities to allow the usage of ISP (Internet Service Provider)
+# Based DNS alongside the DNS of our custom implemented mesh network.
 set -e
 
 echo "🔍 Detecting upstream DNS server..."
