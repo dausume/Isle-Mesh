@@ -1,0 +1,187 @@
+<mxfile host="app.diagrams.net" agent="Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:139.0) Gecko/20100101 Firefox/139.0" version="27.1.6">
+  <diagram name="Page-1" id="0bhvJRRIilfUCSptjL-P">
+    <mxGraphModel dx="2206" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-1" value="&lt;div&gt;Isle-Mesh Network Development Progression&lt;/div&gt;&lt;div&gt;Path&lt;/div&gt;" style="text;strokeColor=none;align=center;fillColor=none;html=1;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="260" y="30" width="100" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-12" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.25;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="kJFLQL0JrNmDqo-EpslL-2" target="kJFLQL0JrNmDqo-EpslL-7">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-2" value="&lt;div&gt;Local-Host MDNS&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;(Development Environment)&lt;/div&gt;&lt;div&gt;* Development Step 1 : Sets the standard for testing that mdns works in general on a given computer or piece of hardware and that the separation between mdns and standard ISP or intranet service works properly.&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;* Purpose : Allows developers to make Applications in a standardized and scalable manner using only the virtual resources on a single computer while not needing to worry about network resources, but develop in a way that minimal work is needed to adapt to real-world network scenarios.&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="-180" y="160" width="300" height="280" as="geometry" />
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-3" value="&lt;div&gt;Docker-Compose-Debian Apps&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;* Development Step 1 : Sets the Basis for making already straight forward docker-compose self-hosting into something more straight-forward, automating docker-compose setup and utility of the docker-compose cli using .deb and .sh files.&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;* Purpose : Simplification of the use of self-hostable Docker-Compose Apps, to make it more feasible for the average person to leverage them.&amp;nbsp; Granting the look/feel of normal applications for the newer standard of most open-source applications (docker-compose).&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="160" y="160" width="320" height="280" as="geometry" />
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-4" value="Parallelizable Work : Step 1 - Not Dependent on Prior Steps, can be developed independently." style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="-330" y="255" width="100" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-5" value="&lt;div&gt;Isle-Mesh CLI Tool&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;* Development Step 1 : Sets the basis for a cli tool to make it easier for developers and custom applications choosing to wrap the Isle-Mesh project to be able to navigate the .sh files and their purposes and execute them appropriately.&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;* Purpose : Act as an intermediary development step, providing an interface for manipulating networks and apps during the development stage up until it has been fully implemented and automated away via Docker Compose Apps : An App &amp;amp; Network Development Tool&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="520" y="160" width="320" height="280" as="geometry" />
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-7" value="&lt;div&gt;&quot;Island&quot; vLan-OpenWRT-mdns&lt;/div&gt;&lt;div&gt;&#39;Island App&#39;&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;* Development Step 2 : Sets the standard for creating a vLAN automatically for all computers it is installed on, and centralizing DNS into the OpenWRT server that already exists if it is detected one already exists.&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;* Purpose : Creates a basis for trust-seperation and network-seperation between your base devices and the virtual &#39;island&#39; layer, and automating away network-building by making it so that any devices with &#39;Island App&#39; installed that are connected directly via either ethernet or AP-mode enabled wifi-dongles (or equivalents), making any part of your &#39;real LAN&#39; that you are connected to which has the app installed, automatically become a part of your vLAN island allowing you to distribute resources.&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry y="500" width="300" height="280" as="geometry" />
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-10" value="" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" target="kJFLQL0JrNmDqo-EpslL-7">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="310" y="440" as="sourcePoint" />
+            <mxPoint x="360" y="390" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-13" value="&lt;div&gt;Isle-Mesh Orchestrator&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;* Development Step 2 : Create a suite of tools for automating development steps for converting an existing Docker-Compose Open Source Application into Isle-Mesh Compatible App.&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;* Purpose : Automate away steps needed for security, such as generating and tying together different encryption algorithms, certs, keys and coordinating them to be distributed only where needed to minimize security vulnerabilities.&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="370" y="500" width="370" height="280" as="geometry" />
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-14" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.719;entryY=0.011;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="kJFLQL0JrNmDqo-EpslL-5" target="kJFLQL0JrNmDqo-EpslL-13">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-15" value="&lt;div&gt;Batman-Reticulum Auto-Wifi-Mesh Gateway App&lt;/div&gt;&lt;div&gt;&#39;Archipelago App&#39;&lt;/div&gt;&lt;div&gt;* Development Step 3 : Creates the Mesh Intranet level to enable further distribution of resources with high bandwidth capbilities.&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;* Purpose : Creates a means of meshing together multiple Islands in an automated manner, while permitting control over new-joiners and the ability to control regulated vs unregulated traffic.&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;Allows for &#39;Mesh Intranets&#39; without needing any internet service provider, at least at building and small community scales where a continuous wifi-to-wifi meshing approach is feasible.&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="-250" y="820" width="300" height="280" as="geometry" />
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-37" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.25;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="kJFLQL0JrNmDqo-EpslL-16" target="kJFLQL0JrNmDqo-EpslL-31">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-16" value="ISP Internet-Gateway App" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="450" y="820" width="300" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-17" value="Reticulum LoRA Gateway App" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="100" y="820" width="300" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-18" value="Reticulum LoRA-WAN Gateway App" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="100" y="980" width="300" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-19" value="&lt;div&gt;Keycloak:Step-CA X509 &amp;amp; OIDC&lt;/div&gt;&lt;div&gt;&#39;Mesh-ID App&#39;&amp;nbsp;&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;* Purpose : Creates a complete and configurable means for performing per-app, per-island, or per-archipelago scale authentication and authorization with role and group based configuration capabilities.&amp;nbsp; With Step-CA we can create the custom means to issue X509 based authN &amp;amp; authZ and issue id-usb devices or id-cards.&amp;nbsp; Making industry &amp;amp; gov grade auth readily available for open-source mesh apps, while retaining permissive licensing for custom security implementation to secure further per-organization.&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="-590" y="820" width="300" height="280" as="geometry" />
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-20" value="" style="endArrow=classic;html=1;rounded=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;exitX=0;exitY=0.25;exitDx=0;exitDy=0;" edge="1" parent="1" source="kJFLQL0JrNmDqo-EpslL-7" target="kJFLQL0JrNmDqo-EpslL-19">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="-70" y="750" as="sourcePoint" />
+            <mxPoint x="-20" y="700" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-21" value="" style="endArrow=classic;html=1;rounded=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;exitX=0;exitY=0.596;exitDx=0;exitDy=0;exitPerimeter=0;" edge="1" parent="1" source="kJFLQL0JrNmDqo-EpslL-7" target="kJFLQL0JrNmDqo-EpslL-15">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="-70" y="750" as="sourcePoint" />
+            <mxPoint x="-20" y="700" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-22" value="" style="endArrow=classic;html=1;rounded=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;" edge="1" parent="1" source="kJFLQL0JrNmDqo-EpslL-7" target="kJFLQL0JrNmDqo-EpslL-17">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="-70" y="750" as="sourcePoint" />
+            <mxPoint x="-20" y="700" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-23" value="" style="endArrow=classic;html=1;rounded=0;entryX=0.007;entryY=0.075;entryDx=0;entryDy=0;entryPerimeter=0;exitX=0.9;exitY=1;exitDx=0;exitDy=0;exitPerimeter=0;" edge="1" parent="1" source="kJFLQL0JrNmDqo-EpslL-7" target="kJFLQL0JrNmDqo-EpslL-16">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="-70" y="750" as="sourcePoint" />
+            <mxPoint x="-20" y="700" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-24" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.467;exitY=1;exitDx=0;exitDy=0;exitPerimeter=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="kJFLQL0JrNmDqo-EpslL-17" target="kJFLQL0JrNmDqo-EpslL-25">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="70" y="1230" as="sourcePoint" />
+            <mxPoint x="240" y="1180" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-25" value="Reticulum LoRA Messaging App (Test Case)" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="100" y="900" width="300" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-26" value="" style="endArrow=classic;html=1;rounded=0;entryX=0.47;entryY=0;entryDx=0;entryDy=0;entryPerimeter=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;" edge="1" parent="1" source="kJFLQL0JrNmDqo-EpslL-25" target="kJFLQL0JrNmDqo-EpslL-18">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="70" y="1230" as="sourcePoint" />
+            <mxPoint x="120" y="1180" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-27" value="&lt;div&gt;&#39;Voting-Grade&#39; Self-Hostable Open Source Mesh Apps Are Viable at current standard of using &#39;Community Centers&#39;&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;* At this stage of development we can standardize and make e-democracy apps that are fully open-source and deployable anywhere with minimal resources, and can be scaled to handle any level of traffic while retaining isolation and security, while minimizing the need for specialized skills as resources.&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="-460" y="1160" width="370" height="210" as="geometry" />
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-29" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.128;entryY=0;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="kJFLQL0JrNmDqo-EpslL-19" target="kJFLQL0JrNmDqo-EpslL-27">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-30" value="" style="endArrow=classic;html=1;rounded=0;entryX=0.75;entryY=0;entryDx=0;entryDy=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;" edge="1" parent="1" source="kJFLQL0JrNmDqo-EpslL-15" target="kJFLQL0JrNmDqo-EpslL-27">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="80" y="1050" as="sourcePoint" />
+            <mxPoint x="130" y="1000" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-31" value="&lt;div&gt;OpenVPN-Gateway App&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;* Purpose : Allows further extension of &#39;Mesh Intranets&#39; via VPN over the Internet.&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="330" y="1140" width="170" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-32" value="Reticulum LoRA-WAN Alert Broadcast App (Test Case)" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="100" y="1050" width="300" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-33" value="" style="endArrow=classic;html=1;rounded=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;" edge="1" parent="1" source="kJFLQL0JrNmDqo-EpslL-18" target="kJFLQL0JrNmDqo-EpslL-32">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="429" y="1030" as="sourcePoint" />
+            <mxPoint x="420" y="1050" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-34" value="&lt;div&gt;MVP Community-Grade State-Based Mesh-Apps&lt;/div&gt;&lt;div&gt;Emergency Coordination Applications&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;* The basis exists for city and town scale pure-mesh Application Networks, using a combination of LoRa, LoRaWAN, and Archipelagos.&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;* Public Data is propagated over LoRaWAN, private data concentrated into state-deltas via Archipelagos for more efficient LoRa transmission, or transmitted directly over LoRA.&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;* High-Speed Application access occurs over Archipelagos, Archipelagos concentrate data into state-deltas, then send them over the low-speed and bandwidth LoRa Mesh for efficient mesh-networking.&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="-60" y="1140" width="360" height="230" as="geometry" />
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-35" value="&lt;div&gt;Onion/TOR-Gateway App&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;* Purpose : Allows access to resources from your Island/Archipelago over an ISP-Based TOR Network&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="515" y="1130" width="170" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-36" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.377;exitY=1.014;exitDx=0;exitDy=0;entryX=0.435;entryY=0.033;entryDx=0;entryDy=0;entryPerimeter=0;exitPerimeter=0;" edge="1" parent="1" source="kJFLQL0JrNmDqo-EpslL-16" target="kJFLQL0JrNmDqo-EpslL-35">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-38" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.728;entryY=0;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="kJFLQL0JrNmDqo-EpslL-32" target="kJFLQL0JrNmDqo-EpslL-34">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-39" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.75;exitY=1;exitDx=0;exitDy=0;entryX=0.269;entryY=0;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="kJFLQL0JrNmDqo-EpslL-15" target="kJFLQL0JrNmDqo-EpslL-34">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-40" value="&lt;div&gt;Isle-Mesh Hardware&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;* Develop Various single-type broadcast, reciever, and reciever-broadcaster devices with minimized compute capabilities and control-via-usb or control-via-usbc capabilities&lt;/div&gt;&lt;div&gt;* Purpose : To allow many types of devices with the capability to be plugged into a mostly-virtualized network, minimizing cost to the absolute minimum while allowing centralization of resources into a singular OpenWRT/Reticulum network with as many network device types as needed, using very small and low-cost incremental add-ons which all operate using reticulum.&lt;/div&gt;&lt;div&gt;* Utilize open source usb-wifi-dongles, usb-bluetooth-dongles, LoRa dongles, LoRAWAN dongles.&lt;/div&gt;&lt;div&gt;* Create dongle-equivalents for licensed radio devices, HAM radio devices, etc, to enable dynamic mesh-networking for small businesses with higher bandwidth devices.&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="230" y="1470" width="460" height="230" as="geometry" />
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-41" value="Mesh-Network Coordination Apps&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;* Creates a strategic basis for planning mesh-networks, assessing from the perspective of &#39;Controlled Archipelagos&#39; and &#39;Known Gateway Regions&#39; and &#39;Known Gateway Patterns&#39;.&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;* Controlled Archipelagos are effectively Intranets that you personally manage and know all details of, you can control creating and controlling &#39;Gateway Regions&#39; and &#39;Gateway Patterns&#39; for permissive access, relay, and transmission from your archipelago.&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;* &#39;Gateway Regions&#39; are static regions where a consistent transmission comes from a particular source.&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;* &#39;Gateway Patterns&#39; are patterns/functions, likely partially randomized to prevent predictability, where mobile network resources like loRaWAN with drones are used to relay or transmit information via reticulum.&amp;nbsp; These allow for planning reliable low-bandwidth and intermittent networks, which provide the baseline for operating under adversarial conditions such as blockaded regions where a group is preventing humanitarian aid or an authoritarian regime is blocking information access to dissent and opposing viewpoints towards active wars.&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="-265" y="1410" width="470" height="340" as="geometry" />
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-42" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.25;exitY=1;exitDx=0;exitDy=0;entryX=0.53;entryY=0.015;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="kJFLQL0JrNmDqo-EpslL-34" target="kJFLQL0JrNmDqo-EpslL-41">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-52" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.75;exitY=1;exitDx=0;exitDy=0;entryX=0.25;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="kJFLQL0JrNmDqo-EpslL-43" target="kJFLQL0JrNmDqo-EpslL-50">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-43" value="Isle-Mesh Strategic&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;* Expand the capabilities of Coordination Apps beyond the standard of what the average person might use, to a wider array or generalized set of network resources.&amp;nbsp; Allowing a fully modular set of network resources that are also easy to use and can incorporate strategic-level planning to be utilized even in adversarial conditions.&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;* While coordination apps might be able to be usable in Adversarial conditions with careful planning, by expanding and diversifying the resources used for Isle-Meshes (via Isle-Mesh-Hardware or other remote controllable network resources) we can attempt to make it economically and strategically unfeasible to fully block communications.&amp;nbsp; Enabling access to critical applications and coordination methods even under adversarial conditions in countries that seek to restrict freedom of information.&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="60" y="1780" width="500" height="220" as="geometry" />
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-44" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.75;exitY=1;exitDx=0;exitDy=0;entryX=0.14;entryY=0;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="kJFLQL0JrNmDqo-EpslL-41" target="kJFLQL0JrNmDqo-EpslL-43">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-45" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.25;exitY=1;exitDx=0;exitDy=0;entryX=0.444;entryY=-0.005;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="kJFLQL0JrNmDqo-EpslL-40" target="kJFLQL0JrNmDqo-EpslL-43">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-46" value="&lt;div&gt;Crypto-Gateway App&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;* Purpose : Allows access to decentralized and multi-party verifiable networks, creating &#39;mercenary-internet resources&#39; that are reliable backups for critical information that cannot be deleted or modified by an central authority besides the &#39;owner&#39; of the information.&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="515" y="1280" width="210" height="170" as="geometry" />
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-47" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.75;exitY=1;exitDx=0;exitDy=0;entryX=0.852;entryY=0.012;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="kJFLQL0JrNmDqo-EpslL-16" target="kJFLQL0JrNmDqo-EpslL-46">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-48" value="" style="endArrow=classic;html=1;rounded=0;exitX=1;exitY=0.25;exitDx=0;exitDy=0;entryX=0.005;entryY=0.189;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="kJFLQL0JrNmDqo-EpslL-46" target="kJFLQL0JrNmDqo-EpslL-49">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="510" y="1500" as="sourcePoint" />
+            <mxPoint x="1080" y="1410" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-49" value="&lt;div&gt;Proof-of-Work &amp;amp; Proof-of-Stake Standardization for Isle-Mesh-Compatible CryptoCurrency Networks&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;While Crypto is critical technology for reliable decentralized global infrastructure (since localities can be destroyed or silenced physically by natural disasters or militaries), certain &#39;crypto-patterns&#39; such as &#39;pure proof of stake&#39; patterns undermine the fundamental purpose of crypto by centralizing the network resources.&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;A viable Isle-Mesh compatible Cryptocurrency should likely focus on backend-only functionality, while allowing frontend and non-private info to be done via self-hosting primarily.&amp;nbsp; Since mesh-networks can perform the purpose of dApps more efficiently and with less work and resources, while still being decentralized and reliable.&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;Organization-level, Location-level, and person-level cryptocurrency identities can all be handled separately, with information being distributed efficiently for minimized cost and maximized efficiency, while ensuring reliability.&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;A viable CryptoCurrency Network approach should integrate organization and location level identities with Keycloak, such that Archipelagos can host servers where X.509 or oidc protocols can sync with cryptocurrency based backups of critical information.&amp;nbsp; Whereas personal identity should always be frontend-only for the self-hosted apps such that only e2e encrypted connections via crypto relays personal identity verified information, such that it acts as an assurance outside of community operated resources that the information is valid.&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;Both Proof-of-Work (and it&#39;s equivalent for storage, functions, transactions, encryptions) as well as Proof-of-Stake (for those that lack network resources but can afford small amounts for intermittent access to them), when combined create a collaborative method for communities and mercenary networks to collaborate to ensure thoroughly decentralized and reliable data storage, access, and permissions/security architecture.&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="780" y="1220" width="420" height="550" as="geometry" />
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-50" value="Isle-Mesh Generalizable Network Standard&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;* A fully generalized networking system that can deploy applications under adversarial conditions, be used to set up ISP competitors, or to implement simple local-scale mesh networks without any licensing requirements through automation.&amp;nbsp; While allowing decentralization, multi-party auth, self-auth, and rogue networks that enable difficult to control but easy to setup mesh-networks that can connect to the outside world and allow operation of critical communications and coordination even when being under information suppression by authoritarian regimes.&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="480" y="2060" width="500" height="220" as="geometry" />
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-55" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;" edge="1" parent="1" source="kJFLQL0JrNmDqo-EpslL-53" target="kJFLQL0JrNmDqo-EpslL-50">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-53" value="&lt;div&gt;Mesh Mercenary &amp;amp; Community Networks&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;Using a combination of mesh-networking and crypto-networking, we can generate identity-oriented networks based on cryptocurrencies, to enable mesh-network communities and mercenary-crypto-based communities to collaborate on multi-party networks.&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;This way no single group, country, or organization or even mesh needs to be trusted with your information.&amp;nbsp; It is decentralized using a chosen set of mercenary and community groups that any individual can choose, where the mercenary and community groups themselves set competitive pricing for their network resources.&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;These Crypto-Networks, if using Isle-Mesh resources, should be ensured to be protocols/methods that are genuinely mesh-compatible and multi-party configurable and verifiable.&amp;nbsp; This way we can use a combination of verifiable multi-party networks for people who trust them, and participatory/mercenary networks for people who prefer them, or simply keeping things at the local level for people who prefer that.&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="690" y="1790" width="500" height="240" as="geometry" />
+        </mxCell>
+        <mxCell id="kJFLQL0JrNmDqo-EpslL-54" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.584;entryY=0.018;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="kJFLQL0JrNmDqo-EpslL-49" target="kJFLQL0JrNmDqo-EpslL-53">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -1,0 +1,20 @@
+FROM ubuntu:22.04
+
+RUN apt-get update && apt-get install -y \
+  dnsmasq \
+  avahi-utils \
+  iproute2 \
+  iw \
+  systemd \
+  net-tools \
+  curl \
+  sudo \
+  dig \
+  bash \
+  && apt-get clean
+
+COPY scripts/ /opt/isle-mesh/
+RUN chmod +x /opt/isle-mesh/*.sh
+
+WORKDIR /opt/isle-mesh
+ENTRYPOINT ["bash", "check-isle-mesh-installed.sh"]
