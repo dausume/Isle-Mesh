@@ -136,7 +136,7 @@ This environment includes:
 
 🧭 Example mDNS Domains
 Subdomain	Description
-https://frontend.localhost.local	Your main SPA or dashboard
-https://backend.localhost.local	API service
+https://frontend.mesh-app.local	Your main SPA or dashboard
+https://backend.mesh-app.local	API service
 
 These domains are resolved only by your own computer using loopback mDNS and Nginx.

@@ -1,5 +1,6 @@
 #!/bin/bash
 # setup-wifi-access.sh
+#
 # This ensures that systemd-networkd can still be used to access your
 # normal ISP (Internet Service Provider) while still granting you
 # the complete flexibility of being able to also utilize mdns
@@ -25,6 +26,9 @@ read -rsp "Enter Wi-Fi Password: " PSK
 echo ""
 
 # Create wpa_supplicant config
+# The file should be named wpa_supplicant-<interface>.conf
+# This will allow systemd-networkd to use your normal Wi-Fi connection from your ISP.
+# Example: wpa_supplicant-wlp2s0.conf
 WPA_CONF="/etc/wpa_supplicant/wpa_supplicant-${WIFI_INTERFACE}.conf"
 echo "🔧 Writing wpa_supplicant config to $WPA_CONF..."
 sudo tee "$WPA_CONF" > /dev/null <<EOF

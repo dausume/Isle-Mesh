@@ -8,7 +8,6 @@ COPY ssl/keys/mesh-app.key /ssl/keys/mesh-app.key
 
 COPY public-static-data/ /etc/nginx/static/
 
-# 
 COPY ssl/certs/backend.mesh-app.crt /ssl/certs/backend.mesh-app.crt
 
 COPY lh-mdns.proxy.conf /etc/nginx/nginx.conf

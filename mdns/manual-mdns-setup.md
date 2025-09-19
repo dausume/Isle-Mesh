@@ -42,22 +42,53 @@ MulticastDNS=no
 DNS=75.75.75.75
 FallbackDNS=1.1.1.1
 
+# OR replace DNS and FallbackDNS with
+DNS=127.0.0.53
+FallbackDNS=1.1.1.1
+
+This switches use over to using dnsmasq to split our DNS between our standard DNS server and our mdns.
+
+# Ensure the dependency and build-configuation files are loaded
+
+The environment file should be at :
+    etc/isle-mesh/mesh-mdns.env
+
+For defining a test environment to ensure it is working on your computer use the localhost-mdns environment, copy the contents of :
+    ./mesh-environments/localhost-mdns/lh-mdns.env.conf
+    to:
+    /etc/isle-mesh/mesh-mdns.env
+
+If your terminal is at the IsleMesh source directory, /IsleMesh
+then use :
+    cp ./mesh-environments/localhost-mdns/lh-mdns.env.conf /etc/isle-mesh/mesh-mdns.env
+
+The mesh-mdns-broadcast.sh file should be at :
+    /usr/local/bin/isle-mesh/mesh-mdns-broadcast.sh
 
 # Setup avahi to run mdns services on system boot (act like a server)
-## Set the active mesh configuration file into /etc/mesh-mdns.env
-Copy the appropriate environment file to /etc with the exact name mesh-mdns.env
-to make it the active configuration file for the mdns service.
+
+## Set the active mesh configuration file into /etc/isle-mesh/mesh-mdns.env
+
+    Copy the appropriate environment file to /etc with the exact name mesh-mdns.env
+    to make it the active configuration file for the mdns service:
+        /etc/isle-mesh/mesh-mdns.env
+
 ## Set the service executable for mdns
-Copy the mesh-mdns-broadcast.sh file to the location /usr/local/bin/mesh-mdns-broadcast.sh
+    Copy the mesh-mdns-broadcast.sh file to the location /usr/local/bin/isle-mesh/mesh-mdns-broadcast.sh
+
 ## Make the service file in /etc/systemd/system/mesh-mdns.service
+
+Define the following file at :
+    /etc/systemd/system/mesh-mdns.service
+
 [Unit]
 Description=Mesh App mDNS Broadcaster
 After=network.target
 
 [Service]
 Type=simple
-EnvironmentFile=/etc/mesh-mdns.env
-ExecStart=/usr/local/bin/mesh-mdns-broadcast.sh
+EnvironmentFile=/etc/isle-mesh/mesh-mdns.env
+ExecStart=/usr/local/bin/isle-mesh/mesh-mdns-broadcast.sh
 Restart=always
 RestartSec=5
 Nice=10

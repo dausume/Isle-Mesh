@@ -2,11 +2,15 @@ version: "3.9"
 
 services:
   mesh-mdns-installer:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.lh-mdns.mdns
     privileged: true
     network_mode: host
     volumes: # Bind to the existing files on the computer in their standardized locations, if they do not exist we copy our default files to them.
-      - /etc:/etc
+      - /etc/isle-mesh:/etc/isle-mesh # Bind to etc/isle-mesh to ensure we can modify the isle-mesh configuration as needed
+      - /etc/dnsmasq.d:/etc/dnsmasq.d # Bind the dnsmasq daemon configuration so we can configure mesh and normal dns splitting
+      - /etc/systemd:/etc/systemd # Bind the systemd configuration so we configure the systemd configuration.
       - /usr/local/bin:/usr/local/bin
       - /etc/systemd/system:/etc/systemd/system
       - /lib/systemd/system:/lib/systemd/system

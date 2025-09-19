@@ -1,0 +1,142 @@
+<mxfile host="app.diagrams.net" agent="Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:142.0) Gecko/20100101 Firefox/142.0" version="28.1.1">
+  <diagram name="Page-1" id="ltwR8R8_V8N6ptWsErUI">
+    <mxGraphModel dx="2206" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="q32EcVtzX5m4fnPI3UMy-1" value="&lt;div&gt;localhost-mdns&lt;/div&gt;&lt;div&gt;(Isle-Mesh Development Environment)&lt;/div&gt;" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" parent="1" vertex="1">
+          <mxGeometry x="270" y="30" width="250" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="q32EcVtzX5m4fnPI3UMy-2" value="localhost (Host-Device)" style="swimlane;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="-210" y="120" width="1300" height="760" as="geometry" />
+        </mxCell>
+        <mxCell id="q32EcVtzX5m4fnPI3UMy-6" value="&lt;div&gt;DNS-masq / systemd-networkd&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;DNS-Splitter&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;Enables splitting DNS handling based on custom criteria.&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;.local &amp;amp; .mesh domains split to be handled via Isle-Mesh DNS, while all others are handled via standard DNS through the ISP - preventing the ISP from detecting if you are using Isle-Mesh&lt;/div&gt;" style="shape=hexagon;perimeter=hexagonPerimeter2;whiteSpace=wrap;html=1;fixedSize=1;" parent="q32EcVtzX5m4fnPI3UMy-2" vertex="1">
+          <mxGeometry x="700" y="110" width="390" height="190" as="geometry" />
+        </mxCell>
+        <mxCell id="q32EcVtzX5m4fnPI3UMy-7" value="mac-vLAN Docker-Compose App" style="swimlane;horizontal=0;whiteSpace=wrap;html=1;" parent="q32EcVtzX5m4fnPI3UMy-2" vertex="1">
+          <mxGeometry x="60" y="350" width="1230" height="410" as="geometry" />
+        </mxCell>
+        <mxCell id="q32EcVtzX5m4fnPI3UMy-27" value="frontend.mesh-app.local container" style="swimlane;whiteSpace=wrap;html=1;" parent="q32EcVtzX5m4fnPI3UMy-7" vertex="1">
+          <mxGeometry x="100" y="180" width="200" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="q32EcVtzX5m4fnPI3UMy-33" value="Angular, React, vue, svelt, or raw HTML Page" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" parent="q32EcVtzX5m4fnPI3UMy-27" vertex="1">
+          <mxGeometry x="50" y="60" width="100" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="q32EcVtzX5m4fnPI3UMy-32" value="frontend docker container reference" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" parent="q32EcVtzX5m4fnPI3UMy-7" vertex="1">
+          <mxGeometry x="40" y="100" width="140" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="q32EcVtzX5m4fnPI3UMy-35" value="backend.mesh-app.local container" style="swimlane;whiteSpace=wrap;html=1;" parent="q32EcVtzX5m4fnPI3UMy-7" vertex="1">
+          <mxGeometry x="360" y="180" width="200" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="q32EcVtzX5m4fnPI3UMy-36" value="Angular, React, vue, svelt, or raw HTML Page" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" parent="q32EcVtzX5m4fnPI3UMy-35" vertex="1">
+          <mxGeometry x="50" y="60" width="100" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="q32EcVtzX5m4fnPI3UMy-37" value="mTLS docker container reference" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" parent="q32EcVtzX5m4fnPI3UMy-7" vertex="1">
+          <mxGeometry x="410" y="70" width="90" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="q32EcVtzX5m4fnPI3UMy-38" value="&lt;br&gt;&lt;div&gt;backend cert + key for mTLS, Mesh-App Cert for mTLS&lt;/div&gt;" style="whiteSpace=wrap;html=1;aspect=fixed;" parent="q32EcVtzX5m4fnPI3UMy-7" vertex="1">
+          <mxGeometry x="530" y="230" width="90" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="q32EcVtzX5m4fnPI3UMy-39" value="mdns-setup-container" style="swimlane;whiteSpace=wrap;html=1;" parent="q32EcVtzX5m4fnPI3UMy-7" vertex="1">
+          <mxGeometry x="710" y="80" width="295" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="q32EcVtzX5m4fnPI3UMy-40" value="&lt;div&gt;Will setup mdns on the local machine as needed,&amp;nbsp;&lt;/div&gt;&lt;div&gt;then remove any unnecessary/extra files from setup&lt;/div&gt;" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;" parent="q32EcVtzX5m4fnPI3UMy-39" vertex="1">
+          <mxGeometry x="-5" y="30" width="300" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="q32EcVtzX5m4fnPI3UMy-8" value="&lt;div&gt;Nginx-Proxy&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;Accepts traffic through ports 80 and 443, permitting https, http, and WebSocket traffic.&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;Designates a singular mdns domain name, and many mdns-subdomain names, and re-directs traffic to the correct container based on the domain name despite them all resolving to this singular device&#39;s IP.&lt;/div&gt;" style="rhombus;whiteSpace=wrap;html=1;" parent="q32EcVtzX5m4fnPI3UMy-2" vertex="1">
+          <mxGeometry x="150" y="260" width="500" height="190" as="geometry" />
+        </mxCell>
+        <mxCell id="q32EcVtzX5m4fnPI3UMy-9" value="&lt;div&gt;avahi-daemon&amp;nbsp;&lt;/div&gt;&lt;div&gt;+ systemd-networkd&amp;nbsp;&lt;/div&gt;&lt;div&gt;+&amp;nbsp; services&lt;/div&gt;&lt;div&gt;+ /etc/hosts&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;General mdns subdomain networking resolver&lt;/div&gt;" style="whiteSpace=wrap;html=1;aspect=fixed;" parent="q32EcVtzX5m4fnPI3UMy-2" vertex="1">
+          <mxGeometry x="1150" y="260" width="140" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="q32EcVtzX5m4fnPI3UMy-11" value="ISP-DNS" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" parent="q32EcVtzX5m4fnPI3UMy-2" vertex="1">
+          <mxGeometry x="1150" y="60" width="60" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="q32EcVtzX5m4fnPI3UMy-12" value="" style="shape=flexArrow;endArrow=classic;startArrow=classic;html=1;rounded=0;entryX=0;entryY=0;entryDx=0;entryDy=0;exitX=0.964;exitY=0.821;exitDx=0;exitDy=0;exitPerimeter=0;" parent="q32EcVtzX5m4fnPI3UMy-2" source="q32EcVtzX5m4fnPI3UMy-6" target="q32EcVtzX5m4fnPI3UMy-9" edge="1">
+          <mxGeometry width="100" height="100" relative="1" as="geometry">
+            <mxPoint x="720" y="420" as="sourcePoint" />
+            <mxPoint x="820" y="320" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="q32EcVtzX5m4fnPI3UMy-13" value="Mesh-MDNS" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" parent="q32EcVtzX5m4fnPI3UMy-2" vertex="1">
+          <mxGeometry x="1060" y="280" width="90" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="q32EcVtzX5m4fnPI3UMy-14" value="Browser (Firefox, Chrome, etc...)" style="swimlane;horizontal=0;whiteSpace=wrap;html=1;startSize=50;" parent="q32EcVtzX5m4fnPI3UMy-2" vertex="1">
+          <mxGeometry x="110" y="40" width="430" height="190" as="geometry" />
+        </mxCell>
+        <mxCell id="q32EcVtzX5m4fnPI3UMy-15" value="Locally-hosted MDNS Frontend App" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;" parent="q32EcVtzX5m4fnPI3UMy-14" vertex="1">
+          <mxGeometry x="70" y="30" width="210" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="q32EcVtzX5m4fnPI3UMy-29" value="&lt;div&gt;Mesh-App&lt;/div&gt;&lt;div&gt;Cert&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;* To assert trust for everything behind nginx-proxy&lt;/div&gt;" style="whiteSpace=wrap;html=1;aspect=fixed;" parent="q32EcVtzX5m4fnPI3UMy-14" vertex="1">
+          <mxGeometry x="60" y="80" width="110" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="q32EcVtzX5m4fnPI3UMy-30" value="Uses backend.mesh-app.local in javascript for queries" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;" parent="q32EcVtzX5m4fnPI3UMy-14" vertex="1">
+          <mxGeometry x="40" y="60" width="310" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="q32EcVtzX5m4fnPI3UMy-18" value="" style="endArrow=classic;html=1;rounded=0;exitX=0;exitY=0.75;exitDx=0;exitDy=0;" parent="q32EcVtzX5m4fnPI3UMy-2" source="q32EcVtzX5m4fnPI3UMy-6" target="q32EcVtzX5m4fnPI3UMy-8" edge="1">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="740" y="400" as="sourcePoint" />
+            <mxPoint x="630" y="250" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="q32EcVtzX5m4fnPI3UMy-19" value="https://frontend.mesh-app.local" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" parent="q32EcVtzX5m4fnPI3UMy-2" vertex="1">
+          <mxGeometry x="470" y="100" width="200" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="q32EcVtzX5m4fnPI3UMy-20" value="" style="endArrow=classic;html=1;rounded=0;entryX=0.45;entryY=0;entryDx=0;entryDy=0;entryPerimeter=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;" parent="q32EcVtzX5m4fnPI3UMy-2" source="q32EcVtzX5m4fnPI3UMy-6" target="q32EcVtzX5m4fnPI3UMy-9" edge="1">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="740" y="400" as="sourcePoint" />
+            <mxPoint x="790" y="350" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="q32EcVtzX5m4fnPI3UMy-21" value="https://frontend.mesh-app.local" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" parent="q32EcVtzX5m4fnPI3UMy-2" vertex="1">
+          <mxGeometry x="1100" y="190" width="200" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="q32EcVtzX5m4fnPI3UMy-23" value="" style="endArrow=classic;html=1;rounded=0;entryX=0.841;entryY=1.016;entryDx=0;entryDy=0;entryPerimeter=0;exitX=-0.021;exitY=0.443;exitDx=0;exitDy=0;exitPerimeter=0;" parent="q32EcVtzX5m4fnPI3UMy-2" source="q32EcVtzX5m4fnPI3UMy-9" target="q32EcVtzX5m4fnPI3UMy-6" edge="1">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="740" y="400" as="sourcePoint" />
+            <mxPoint x="790" y="350" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="q32EcVtzX5m4fnPI3UMy-24" value="127.0.0.1 (localhost)" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" parent="q32EcVtzX5m4fnPI3UMy-2" vertex="1">
+          <mxGeometry x="1000" y="320" width="120" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="q32EcVtzX5m4fnPI3UMy-25" value="https://frontend.mesh-app.local" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" parent="q32EcVtzX5m4fnPI3UMy-2" vertex="1">
+          <mxGeometry x="460" y="240" width="200" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="q32EcVtzX5m4fnPI3UMy-26" value="+ 127.0.0.1 (localhost)" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" parent="q32EcVtzX5m4fnPI3UMy-2" vertex="1">
+          <mxGeometry x="500" y="260" width="120" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="q32EcVtzX5m4fnPI3UMy-28" value="&lt;div&gt;Mesh-App&lt;/div&gt;&lt;div&gt;Cert + Key,&lt;/div&gt;&lt;div&gt;backend cert for mTLS&lt;/div&gt;" style="whiteSpace=wrap;html=1;aspect=fixed;" parent="q32EcVtzX5m4fnPI3UMy-2" vertex="1">
+          <mxGeometry x="270" y="260" width="70" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="q32EcVtzX5m4fnPI3UMy-31" value="" style="endArrow=classic;startArrow=classic;html=1;rounded=0;exitX=0.25;exitY=0;exitDx=0;exitDy=0;entryX=0;entryY=1;entryDx=0;entryDy=0;" parent="q32EcVtzX5m4fnPI3UMy-2" source="q32EcVtzX5m4fnPI3UMy-27" target="q32EcVtzX5m4fnPI3UMy-8" edge="1">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="700" y="380" as="sourcePoint" />
+            <mxPoint x="750" y="330" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="q32EcVtzX5m4fnPI3UMy-34" value="" style="endArrow=classic;startArrow=classic;html=1;rounded=0;entryX=0.45;entryY=0;entryDx=0;entryDy=0;entryPerimeter=0;" parent="q32EcVtzX5m4fnPI3UMy-2" source="q32EcVtzX5m4fnPI3UMy-8" target="q32EcVtzX5m4fnPI3UMy-35" edge="1">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="530" y="480" as="sourcePoint" />
+            <mxPoint x="570" y="520" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="q32EcVtzX5m4fnPI3UMy-3" value="ISP-WAN" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" parent="1" vertex="1">
+          <mxGeometry x="1060" y="30" width="150" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="q32EcVtzX5m4fnPI3UMy-10" value="" style="shape=flexArrow;endArrow=classic;startArrow=classic;html=1;rounded=0;exitX=0.974;exitY=0.163;exitDx=0;exitDy=0;exitPerimeter=0;" parent="1" source="q32EcVtzX5m4fnPI3UMy-6" target="q32EcVtzX5m4fnPI3UMy-3" edge="1">
+          <mxGeometry width="100" height="100" relative="1" as="geometry">
+            <mxPoint x="470" y="520" as="sourcePoint" />
+            <mxPoint x="570" y="420" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="q32EcVtzX5m4fnPI3UMy-17" value="" style="endArrow=classic;html=1;rounded=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="1" target="q32EcVtzX5m4fnPI3UMy-6" edge="1">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="180" y="210" as="sourcePoint" />
+            <mxPoint x="540" y="450" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

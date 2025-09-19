@@ -1,0 +1,3 @@
+[submodule "embed-jinja"]
+	path = embed-jinja
+	url = https://github.com/dausume/embed-jinja.git

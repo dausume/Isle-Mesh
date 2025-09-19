@@ -17,7 +17,7 @@ echo "INTERFACE : $INTERFACE"
 DNS=$(grep '^nameserver' /etc/resolv.conf | head -n 1 | awk '{print $2}')
 
 if [[ -z "$INTERFACE" || -z "$DNS" ]]; then
-    echo "Failed to detect active interface or DNS server.  Aborting."
+    echo "Failed to detect active interface or DNS server.  Must have an internet connection for this install process until we implement Mesh-App Install network functionality.  Aborting."
     exit 1
 fi
 
@@ -32,6 +32,7 @@ sudo mkdir -p "$NETWORKD_DIR"
 # Creating network for normal internet access while choosing not to send mDNS to the wifi router since
 # we know many ISPs block it anyways
 # Let's just assume we always avoid the DNS router to simplify things.
+# The wpa_supplicant config created in setup-wifi-access.sh will handle the wifi connection.
 cat <<EOF | sudo tee "$NETWORKD_DIR/20-wifi.network"
 [Match]
 Name=$INTERFACE
@@ -42,24 +43,23 @@ MulticastDNS=no
 DNS=$DNS
 EOF
 
-# Step 5: Enable systemd-networkd and resolved
-sudo systemctl disable --now NetworkManager || true
+# Enable systemd-networkd and systemd-resolved
 sudo systemctl enable --now systemd-networkd
 sudo systemctl enable --now systemd-resolved
+
+# Link the stub resolver to /etc/resolv.conf so that normal DNS resolution works.
 sudo ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
 
 echo "⏳ Waiting for systemd-networkd to assign DNS..."
-sleep 10  # Give time for DHCP+DNS to finish
+sleep 10  # Give time for DHCP+DNS to finish starting up.
 
-# Step 6: Test if normal DNS is able to resolve using the dns server using dig.
+# Test if normal DNS is able to resolve using the dns server using dig.
 TEST_DOMAIN="example.com"
 echo "🔎 Testing DNS resolution for $TEST_DOMAIN..."
 if dig +short "$TEST_DOMAIN" > /dev/null; then
   echo "✅ DNS resolution working as expected."
 else
   echo "❌ DNS resolution failed. Reverting to NetworkManager."
-  sudo systemctl disable --now systemd-networkd
-  sudo systemctl disable --now systemd-resolved
   sudo systemctl enable --now NetworkManager
   sudo rm -f /etc/systemd/network/20-wifi.network
   sudo dhclient "$INTERFACE"

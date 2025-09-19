@@ -13,13 +13,13 @@ fi
 echo "🌐 Detected upstream DNS: $UPSTREAM_DNS"
 
 echo "📦 Installing dnsmasq if needed..."
-sudo apt-get update -qq
-sudo apt-get install -y dnsmasq
+#sudo apt-get update -qq
+#sudo apt-get install -y dnsmasq
 
 echo "🧹 Cleaning any old dnsmasq config..."
 sudo rm -f /etc/dnsmasq.d/split-dns.conf
 
-# 🔎 Pick an unused 127.0.0.X address
+# 🔎 Pick an unused 127.0.0.X address - loopback addresses for virtual IPs hosted locally
 echo "🔎 Searching for unused 127.0.0.X IP..."
 for i in {2..254}; do
   if ! ip addr show lo | grep -q "127.0.0.$i"; then
@@ -40,6 +40,7 @@ if ! ip addr show lo | grep -q "$DNSMASQ_IP"; then
   sudo ip addr add "$DNSMASQ_IP/8" dev lo
 fi
 
+# Configure dnsmasq for split DNS
 echo "⚙️ Writing dnsmasq split DNS config..."
 cat <<EOF | sudo tee /etc/dnsmasq.d/split-dns.conf > /dev/null
 interface=lo
@@ -51,16 +52,27 @@ no-resolv
 server=$UPSTREAM_DNS
 EOF
 
-echo "🔧 Ensuring systemd-resolved is active..."
-sudo systemctl enable systemd-resolved
-sudo systemctl start systemd-resolved
+# Ensure dnsmasq is enabled and started -> Should already be active if using systemd-networkd, setup
+# once already in the switch-to-systemd-networkd.sh script.
+#echo "🔧 Ensuring systemd-resolved is active..."
+#sudo systemctl enable systemd-resolved
+#sudo systemctl start systemd-resolved
 
+# Build " ~local ~mesh ..."
+ROUTE_DOMAINS="$(printf ' ~%s' "${MESH_DOMAINS[@]}")"
+ROUTE_DOMAINS="${ROUTE_DOMAINS# }"
+
+# Configure systemd-resolved to forward .local and .mesh to dnsmasq
+# Instead of setting domains statically, we should use the MESH_DOMAINS array to customizability
+# for configuration.  We need to substitute the ~local ~mesh part with a dynamic generation from the array.
+# Backup version if this does not work: Domains=~local ~mesh 
+MESH_DOMAINS=("local" "mesh")
 echo "⚙️ Configuring systemd-resolved to forward .local and .mesh to $DNSMASQ_IP..."
 sudo mkdir -p /etc/systemd/resolved.conf.d
 sudo tee /etc/systemd/resolved.conf.d/split-mdns.conf > /dev/null <<EOF
 [Resolve]
 DNS=$DNSMASQ_IP
-Domains=~local ~mesh
+Domains=$ROUTE_DOMAINS
 EOF
 
 echo "🔄 Restarting dnsmasq..."
@@ -72,7 +84,7 @@ sudo systemctl restart systemd-resolved
 echo "🔧 Updating /etc/resolv.conf to use systemd-resolved stub..."
 sudo ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
 
-echo "✅ Split DNS for .local and .mesh is now active via $DNSMASQ_IP"
+echo "✅ Split DNS for .local and .mesh is now active over loopback IP : $DNSMASQ_IP"
 
 echo "🔎 Testing .local/.mesh routing via dig..."
 dig +short @${DNSMASQ_IP} mesh-app.local || echo "❌ Failed: dig could not resolve mesh-app.local"
