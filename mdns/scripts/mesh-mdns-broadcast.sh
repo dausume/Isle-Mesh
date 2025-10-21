@@ -29,9 +29,9 @@ echo "🌐 Broadcasting mDNS for: ${HOSTS[*]}"
 echo "🔁 Using MAX_CONCURRENT=$MAX_CONCURRENT"
 
 # Broadcast each using avahi-publish -a -R (re-announcing, backgrounded)
-for fqdn in "${FQDNS[@]}"; do
-  echo "📡 Publishing: $fqdn → 127.0.0.1"
-  avahi-publish -a -R "$fqdn" 127.0.0.1 &
+for fqdn in "${HOSTS[@]}"; do
+  echo "📡 Publishing: $fqdn → $TARGET_IP"
+  avahi-publish -a -R "$fqdn" "$TARGET_IP" &
 done
 
 # Wait for all background jobs (so systemd doesn't kill this shell)

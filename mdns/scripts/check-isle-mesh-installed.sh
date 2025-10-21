@@ -1,13 +1,14 @@
 #!/bin/bash
 set -e
+# Should instead either load the default or load from the provided custom env file.
 
-ISLEMESH_DIR=$(sudo find / -type d -iname '*islemesh*' 2>/dev/null | head -n 1)
+ISLEMESH_DIR="${1:-/etc/isle-mesh}"
 echo "ISLEMESH_DIR=$ISLEMESH_DIR"
-CUSTOM_ENV_FILE="$1"
+CUSTOM_ENV_FILE="${2:-$ISLEMESH_DIR/mdns/scripts/mesh-mdns.conf}"
 # Used to inidicate if IsleMesh mDNS has had an initial install attempt run.
-INSTALL_FLAG="/etc/isle-mesh/.installed_started"
+INSTALL_FLAG="$ISLEMESH_DIR/.installed_started"
 # Used to indicate if IsleMesh mDNS install completed successfully.
-INSTALL_COMPLETE_FLAG="/etc/isle-mesh/.install_complete"
+INSTALL_COMPLETE_FLAG="$ISLEMESH_DIR/.install_complete"
 
 
 if [[ -f "$INSTALL_COMPLETE_FLAG" ]]; then
@@ -22,10 +23,18 @@ else
 fi
 
 echo "🔧 Starting full install..."
-./install-mesh-mdns.sh $CUSTOM_ENV_FILE
 
-# Create install marker
-mkdir -p /etc/isle-mesh
-touch "$INSTALL_FLAG"
+# Create install directory and mark installation as started
+sudo mkdir -p $ISLEMESH_DIR
+sudo touch "$INSTALL_FLAG"
 
-echo "✅ Installation complete. Marked at $INSTALL_FLAG."
+echo "📁 IsleMesh directory contents before install:"
+echo $(ls -l -all $ISLEMESH_DIR)
+
+# Run the installation - should be in cwd /opt/isle-mesh
+bash $ISLEMESH_DIR/mdns/scripts/install-mesh-mdns.sh "$CUSTOM_ENV_FILE" "$ISLEMESH_DIR"
+
+# Mark installation as complete
+sudo touch "$INSTALL_COMPLETE_FLAG"
+
+echo "✅ Installation complete. Marked at $INSTALL_COMPLETE_FLAG"

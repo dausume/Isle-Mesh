@@ -44,10 +44,27 @@ DNS=$DNS
 EOF
 
 # Enable systemd-networkd and systemd-resolved
-sudo systemctl enable --now systemd-networkd
-sudo systemctl enable --now systemd-resolved
+# Use nsenter to run systemctl on the host system (needed when running from container)
+if [ -f /.dockerenv ]; then
+  # Running in Docker - use nsenter to access host's systemd
+  nsenter --target 1 --mount --uts --ipc --net --pid -- systemctl enable --now systemd-networkd
+  nsenter --target 1 --mount --uts --ipc --net --pid -- systemctl enable --now systemd-resolved
+else
+  # Running directly on host
+  sudo systemctl enable --now systemd-networkd
+  sudo systemctl enable --now systemd-resolved
+fi
 
 # Link the stub resolver to /etc/resolv.conf so that normal DNS resolution works.
+# First remove the existing file/symlink, then create the new symlink
+# Handle the case where /etc/resolv.conf might be a bind mount (common in containers)
+if mountpoint -q /etc/resolv.conf 2>/dev/null; then
+  echo "⚠️ /etc/resolv.conf is a mount point, unmounting first..."
+  sudo umount /etc/resolv.conf || true
+fi
+# Use truncate instead of rm to handle busy files, then unlink
+sudo truncate -s 0 /etc/resolv.conf 2>/dev/null || true
+sudo unlink /etc/resolv.conf 2>/dev/null || sudo rm -f /etc/resolv.conf
 sudo ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
 
 echo "⏳ Waiting for systemd-networkd to assign DNS..."
@@ -60,7 +77,11 @@ if dig +short "$TEST_DOMAIN" > /dev/null; then
   echo "✅ DNS resolution working as expected."
 else
   echo "❌ DNS resolution failed. Reverting to NetworkManager."
-  sudo systemctl enable --now NetworkManager
+  if [ -f /.dockerenv ]; then
+    nsenter --target 1 --mount --uts --ipc --net --pid -- systemctl enable --now NetworkManager
+  else
+    sudo systemctl enable --now NetworkManager
+  fi
   sudo rm -f /etc/systemd/network/20-wifi.network
   sudo dhclient "$INTERFACE"
   exit 1

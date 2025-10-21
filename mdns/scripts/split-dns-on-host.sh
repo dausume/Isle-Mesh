@@ -5,7 +5,7 @@
 set -e
 
 echo "🔍 Detecting upstream DNS server..."
-UPSTREAM_DNS=$(resolvectl status | grep 'Current DNS Server' | awk '{print $4}')
+UPSTREAM_DNS=$(resolvectl status | grep 'Current DNS Server' | awk '{print $4}' | head -n1)
 if [[ -z "$UPSTREAM_DNS" ]]; then
   echo "❌ No upstream DNS server detected. Exiting."
   exit 1
@@ -13,8 +13,15 @@ fi
 echo "🌐 Detected upstream DNS: $UPSTREAM_DNS"
 
 echo "📦 Installing dnsmasq if needed..."
-#sudo apt-get update -qq
-#sudo apt-get install -y dnsmasq
+if [ -f /.dockerenv ]; then
+  # Running in Docker - use nsenter to install on host
+  nsenter --target 1 --mount --uts --ipc --net --pid -- apt-get update -qq
+  nsenter --target 1 --mount --uts --ipc --net --pid -- apt-get install -y dnsmasq
+else
+  # Running directly on host
+  sudo apt-get update -qq
+  sudo apt-get install -y dnsmasq
+fi
 
 echo "🧹 Cleaning any old dnsmasq config..."
 sudo rm -f /etc/dnsmasq.d/split-dns.conf
@@ -57,7 +64,7 @@ EOF
 #echo "🔧 Ensuring systemd-resolved is active..."
 #sudo systemctl enable systemd-resolved
 #sudo systemctl start systemd-resolved
-
+MESH_DOMAINS=("local" "mesh")
 # Build " ~local ~mesh ..."
 ROUTE_DOMAINS="$(printf ' ~%s' "${MESH_DOMAINS[@]}")"
 ROUTE_DOMAINS="${ROUTE_DOMAINS# }"
@@ -66,7 +73,7 @@ ROUTE_DOMAINS="${ROUTE_DOMAINS# }"
 # Instead of setting domains statically, we should use the MESH_DOMAINS array to customizability
 # for configuration.  We need to substitute the ~local ~mesh part with a dynamic generation from the array.
 # Backup version if this does not work: Domains=~local ~mesh 
-MESH_DOMAINS=("local" "mesh")
+
 echo "⚙️ Configuring systemd-resolved to forward .local and .mesh to $DNSMASQ_IP..."
 sudo mkdir -p /etc/systemd/resolved.conf.d
 sudo tee /etc/systemd/resolved.conf.d/split-mdns.conf > /dev/null <<EOF
@@ -75,11 +82,25 @@ DNS=$DNSMASQ_IP
 Domains=$ROUTE_DOMAINS
 EOF
 
-echo "🔄 Restarting dnsmasq..."
-sudo systemctl restart dnsmasq
+echo "🔄 Enabling and starting dnsmasq..."
+if [ -f /.dockerenv ]; then
+  # Running in Docker - use nsenter to access host's systemd
+  nsenter --target 1 --mount --uts --ipc --net --pid -- systemctl enable dnsmasq
+  nsenter --target 1 --mount --uts --ipc --net --pid -- systemctl restart dnsmasq
+else
+  # Running directly on host
+  sudo systemctl enable dnsmasq
+  sudo systemctl restart dnsmasq
+fi
 
 echo "🔄 Restarting systemd-resolved..."
-sudo systemctl restart systemd-resolved
+if [ -f /.dockerenv ]; then
+  # Running in Docker - use nsenter to access host's systemd
+  nsenter --target 1 --mount --uts --ipc --net --pid -- systemctl restart systemd-resolved
+else
+  # Running directly on host
+  sudo systemctl restart systemd-resolved
+fi
 
 echo "🔧 Updating /etc/resolv.conf to use systemd-resolved stub..."
 sudo ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf

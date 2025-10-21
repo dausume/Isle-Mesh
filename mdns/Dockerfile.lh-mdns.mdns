@@ -9,12 +9,18 @@ RUN apt-get update && apt-get install -y \
   net-tools \
   curl \
   sudo \
-  dig \
+  dnsutils \
+  wpasupplicant \
+  network-manager \
+  util-linux \
   bash \
   && apt-get clean
 
-COPY scripts/ /opt/isle-mesh/
-RUN chmod +x /opt/isle-mesh/*.sh
 
-WORKDIR /opt/isle-mesh
-ENTRYPOINT ["bash", "check-isle-mesh-installed.sh"]
+COPY scripts/ /etc/isle-mesh/mdns/scripts/
+COPY mesh-mdns.service /etc/isle-mesh/mdns/
+
+RUN chmod +rx /etc/isle-mesh/mdns/scripts/*.sh
+
+WORKDIR /etc/isle-mesh
+ENTRYPOINT ["bash", "/etc/isle-mesh/mdns/scripts/check-isle-mesh-installed.sh"]

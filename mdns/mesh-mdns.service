@@ -4,8 +4,8 @@ After=network.target
 
 [Service]
 Type=simple
-EnvironmentFile=/etc/mesh-mdns.env
-ExecStart=/usr/local/bin/mesh-mdns-broadcast.sh
+EnvironmentFile=/usr/local/etc/mesh-mdns.conf
+ExecStart=/usr/local/bin/isle-mesh/mesh-mdns-broadcast.sh
 Restart=always
 RestartSec=5
 Nice=10

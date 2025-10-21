@@ -7,14 +7,17 @@ services:
       dockerfile: Dockerfile.lh-mdns.mdns
     privileged: true
     network_mode: host
-    volumes: # Bind to the existing files on the computer in their standardized locations, if they do not exist we copy our default files to them.
-      - /etc/isle-mesh:/etc/isle-mesh # Bind to etc/isle-mesh to ensure we can modify the isle-mesh configuration as needed
-      - /etc/dnsmasq.d:/etc/dnsmasq.d # Bind the dnsmasq daemon configuration so we can configure mesh and normal dns splitting
-      - /etc/systemd:/etc/systemd # Bind the systemd configuration so we configure the systemd configuration.
-      - /usr/local/bin:/usr/local/bin
-      - /etc/systemd/system:/etc/systemd/system
-      - /lib/systemd/system:/lib/systemd/system
-      - /run/systemd:/run/systemd
-      - /etc/wpa_supplicant:/etc/wpa_supplicant
+    pid: host
+    volumes: # Only mount what we need to modify on the host system
+      - /etc/dnsmasq.d:/etc/dnsmasq.d # For split-DNS configuration
+      - /usr/local/bin:/usr/local/bin # For installing scripts to /usr/local/bin/isle-mesh
+      - /usr/local/etc:/usr/local/etc # For mesh-mdns.conf configuration file
+      - /etc/systemd/system:/etc/systemd/system # For installing mesh-mdns.service
+      - /run/systemd:/run/systemd # For systemd daemon communication
+      - /etc/wpa_supplicant:/etc/wpa_supplicant # For Wi-Fi configuration
+      - /etc/systemd/resolved.conf.d:/etc/systemd/resolved.conf.d # For resolved configuration
+      - /etc/systemd/network:/etc/systemd/network # For networkd configuration
+      - /var/run/dbus:/var/run/dbus:ro # For Network Manager D-Bus access
+      - /proc:/proc # For nsenter to access host processes
     restart: "no"
     container_name: mesh-mdns-installer

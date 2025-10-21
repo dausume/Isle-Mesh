@@ -3,16 +3,15 @@
 set -e
 
 echo "🚀 Starting full IsleMesh mDNS setup..."
-# Directory where IsleMesh open source project code is located and can be used for setup.
-ISLEMESH_SOURCE_DIR=$(sudo find / -type d -iname '*islemesh*' 2>/dev/null | head -n 1)
-# Directory where setup scripts are located in the IsleMesh project code.
-SCRIPTS_SOURCE_DIR="$ISLEMESH_SOURCE_DIR/mdns/scripts"
-echo "ISLEMESH_SOURCE_DIR=$ISLEMESH_SOURCE_DIR"
-
 # Specify the file path to the custom environment configuration file for defining the mesh network settings.
 CUSTOM_ENV_FILE="$1"
+# Directory where IsleMesh open source project code is located and can be used for setup.
+ISLEMESH_DIR="${2:-/etc/isle-mesh}"
+# Directory where setup scripts are located in the IsleMesh project code.
+SCRIPTS_SOURCE_DIR="$ISLEMESH_DIR/mdns/scripts"
+echo "ISLEMESH_DIR=$ISLEMESH_DIR"
 
-if [[ ! -f "$CUSTOM_ENV_FILE" ]]; then
+if [ ! -f "$CUSTOM_ENV_FILE" ]; then
   echo "❌ Provided env file does not exist: $CUSTOM_ENV_FILE"
   exit 1
 fi
@@ -47,22 +46,51 @@ sudo "$TARGET_SCRIPTS_DIR/switch-to-systemd-networkd.sh"
 echo "🌐 Setting up split-DNS routing..."
 sudo "$TARGET_SCRIPTS_DIR/split-dns-on-host.sh"
 
+# === Install and configure avahi-daemon ===
+echo "📡 Installing avahi-daemon for mDNS broadcasting..."
+if [ -f /.dockerenv ]; then
+  # Running in Docker - use nsenter to run apt on the host
+  nsenter --target 1 --mount --uts --ipc --net --pid -- apt-get update -qq
+  nsenter --target 1 --mount --uts --ipc --net --pid -- apt-get install -y avahi-daemon avahi-utils
+  nsenter --target 1 --mount --uts --ipc --net --pid -- systemctl enable avahi-daemon
+  nsenter --target 1 --mount --uts --ipc --net --pid -- systemctl start avahi-daemon
+else
+  # Running directly on host
+  sudo apt-get update -qq
+  sudo apt-get install -y avahi-daemon avahi-utils
+  sudo systemctl enable avahi-daemon
+  sudo systemctl start avahi-daemon
+fi
+
 # === Configure systemd service ===
 TARGET_SERVICE_PATH="/etc/systemd/system/mesh-mdns.service"
-TARGET_ENV_PATH="/etc/mesh-mdns.conf"
+TARGET_ENV_PATH="/usr/local/etc/mesh-mdns.conf"
 
 echo "📁 Copying env file to $TARGET_ENV_PATH..."
+sudo mkdir -p /usr/local/etc
 sudo cp "$CUSTOM_ENV_FILE" "$TARGET_ENV_PATH"
 sudo chmod 644 "$TARGET_ENV_PATH"
 
 echo "📡 Writing systemd service to $TARGET_SERVICE_PATH..."
-sudo cp "./mesh-mdns.service" $TARGET_SERVICE_PATH
+sudo cp "$ISLEMESH_DIR/mdns/mesh-mdns.service" "$TARGET_SERVICE_PATH"
 
 echo "🔄 Reloading systemd and enabling mesh-mdns.service..."
-sudo systemctl daemon-reexec
-sudo systemctl enable --now mesh-mdns.service
+# Use nsenter to run systemctl on the host system (needed when running from container)
+if [ -f /.dockerenv ]; then
+  # Running in Docker - use nsenter to access host's systemd
+  nsenter --target 1 --mount --uts --ipc --net --pid -- systemctl daemon-reexec
+  nsenter --target 1 --mount --uts --ipc --net --pid -- systemctl enable --now mesh-mdns.service
+else
+  # Running directly on host
+  sudo systemctl daemon-reexec
+  sudo systemctl enable --now mesh-mdns.service
+fi
 
 echo "🔍 Testing DNS resolution of mesh-app.local via dig..."
 dig +short mesh-app.local || echo "⚠️ DNS may not be routing as expected"
 
-echo "✅ Setup complete. Scripts installed to $TARGET_SCRIPTS_DIR, env file is at $TARGET_ENV_PATH, and mDNS broadcasting is active."
+echo "✅ Setup complete."
+echo "   📁 Scripts installed to: $TARGET_SCRIPTS_DIR"
+echo "   📄 Config file at: $TARGET_ENV_PATH"
+echo "   🔧 Service file at: $TARGET_SERVICE_PATH"
+echo "   📡 mDNS broadcasting is active."
