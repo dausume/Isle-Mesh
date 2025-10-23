@@ -1,0 +1,26 @@
+{# HTTPS server without mTLS for subdomain (like frontend) #}
+    # {{ subdomain }}.{{ base_domain }} https server proxy
+    # No re-encryption or mTLS here, we just use https.
+    server {
+        listen 443 ssl;
+        server_name {{ subdomain }}.{{ base_domain }};
+
+        # For the proxy level we still use the base {{ base_domain }} cert for communicating to sub-domains,
+        # for the case of the frontend we perform no re-encrypt step since we are emulating this being 'hosted on the same network'.
+        ssl_certificate /ssl/certs/{{ base_cert }};
+        ssl_certificate_key /ssl/keys/{{ base_key }};
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_ciphers HIGH:!aNULL:!MD5;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Host $server_name;
+
+        location / {
+            proxy_pass http://{{ upstream_name }};
+
+            proxy_set_header Host $host;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        }
+
+    }

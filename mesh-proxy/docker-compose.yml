@@ -1,0 +1,57 @@
+# docker-compose.yml for mesh-proxy builder
+#
+# This setup allows you to automatically generate nginx proxy configurations
+# from any docker-compose.yml file by mounting it into the container.
+#
+# Usage:
+#   docker-compose run mesh-proxy-builder
+#   docker-compose run mesh-proxy-builder --domain your-domain.local
+#   docker-compose run mesh-proxy-builder --compose /input/custom-compose.yml
+
+version: '3.8'
+
+services:
+  mesh-proxy-builder:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mesh-proxy-builder
+    volumes:
+      # Mount input docker-compose files
+      - ../localhost-mdns:/input/localhost-mdns:ro
+      # Mount output directory (where generated configs go)
+      - ./output:/mesh-proxy/output
+      # Optionally mount other mesh environments
+      - ../:/input/mesh-environments:ro
+    environment:
+      # Default configuration
+      INPUT_COMPOSE: /input/localhost-mdns/docker-compose.lh-mdns.yml
+      BASE_DOMAIN: mesh-app.local
+      BASE_CERT: mesh-app.crt
+      BASE_KEY: mesh-app.key
+      MTLS_SERVICES: backend
+      OUTPUT_FILE: /mesh-proxy/output/nginx-mesh-proxy.conf
+    # Override command to customize build
+    # Example: docker-compose run mesh-proxy-builder --domain custom.local
+    command: []
+
+  # Watcher service that automatically rebuilds when docker-compose changes
+  mesh-proxy-watcher:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mesh-proxy-watcher
+    volumes:
+      - ../localhost-mdns:/input/localhost-mdns:ro
+      - ./output:/mesh-proxy/output
+      - ../:/input/mesh-environments:ro
+    environment:
+      INPUT_COMPOSE: /input/localhost-mdns/docker-compose.lh-mdns.yml
+      BASE_DOMAIN: mesh-app.local
+      BASE_CERT: mesh-app.crt
+      BASE_KEY: mesh-app.key
+      MTLS_SERVICES: backend
+      OUTPUT_FILE: /mesh-proxy/output/nginx-mesh-proxy.conf
+      WATCH_MODE: "true"
+      WATCH_INTERVAL: "10"
+    command: ["--watch"]

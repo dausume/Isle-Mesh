@@ -1,0 +1,45 @@
+{# Main template that assembles all segments #}
+{% extends "segments/base.conf.j2" %}
+
+{% block upstreams %}
+{# Generate upstream blocks for each service #}
+{% for service in services %}
+{% set service_name = service.service_name %}
+{% set service_port = service.service_port %}
+{% include "segments/upstream.conf.j2" %}
+{% endfor %}
+{% endblock %}
+
+{% block security_headers %}
+{# Generate security headers with all subdomains #}
+{% include "segments/security-headers.conf.j2" with context %}
+{% endblock %}
+
+{% block servers %}
+{# Generate base domain HTTP server #}
+{% set is_default = true %}
+{% include "segments/server-http-base.conf.j2" with context %}
+
+{# Generate base domain HTTPS server #}
+{% set is_default = true %}
+{% set enable_static_files = true %}
+{% include "segments/server-https-base.conf.j2" with context %}
+
+{# Generate subdomain servers for each service #}
+{% for service in services %}
+{% set subdomain = service.subdomain %}
+{% set upstream_name = service.name %}
+
+{# HTTP server for subdomain #}
+{% include "segments/server-http-subdomain.conf.j2" with context %}
+
+{# HTTPS server for subdomain - mTLS or simple based on service config #}
+{% if service.mtls %}
+{% set subdomain_cert = subdomain ~ "." ~ base_domain ~ ".crt" %}
+{% include "segments/server-https-subdomain-mtls.conf.j2" with context %}
+{% else %}
+{% include "segments/server-https-subdomain-simple.conf.j2" with context %}
+{% endif %}
+
+{% endfor %}
+{% endblock %}

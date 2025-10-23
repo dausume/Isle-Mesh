@@ -1,0 +1,17 @@
+{
+    "name":"isle-cli",
+    "version":"0.0.1",
+    "description": "A CLI for managing Docker Compose projects for Isle-Mesh",
+    "main":"index.js",
+    "bin":{
+        "isle":"index.js"
+    },
+    "keywords": [
+    "CLI",
+    "Docker",
+    "docker-compose",
+    "Isle-Mesh"
+    ],
+    "dependencies": {},
+    "author":"Dustin Etts"
+}

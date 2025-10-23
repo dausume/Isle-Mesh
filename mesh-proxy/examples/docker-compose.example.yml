@@ -1,0 +1,84 @@
+# Example docker-compose.yml showing how to configure services for mesh-proxy
+#
+# The mesh-proxy builder will extract service information and generate
+# nginx configuration automatically based on this file.
+
+services:
+
+  # Backend service with mTLS enabled
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.backend
+    container_name: backend
+    ports:
+      - "8100:8443"  # Optional external port for testing
+    expose:
+      - "8443"       # Internal port used by nginx upstream
+    networks:
+      - meshnet
+    labels:
+      # Optional: Override subdomain name (defaults to service name)
+      mesh.subdomain: "backend"
+      # Optional: Enable mTLS for this service (defaults to false)
+      mesh.mtls: "true"
+
+  # Frontend service with simple HTTPS (no mTLS)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.frontend
+    container_name: frontend
+    ports:
+      - "8080:8443"  # Optional external port for testing
+    expose:
+      - "8443"       # Internal port used by nginx upstream
+    networks:
+      - meshnet
+    labels:
+      # Optional: Override subdomain name
+      mesh.subdomain: "frontend"
+      # mesh.mtls defaults to false, so no need to specify
+
+  # API service with custom subdomain and mTLS
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile.api
+    container_name: api
+    expose:
+      - "8000"
+    networks:
+      - meshnet
+    labels:
+      mesh.subdomain: "api"
+      mesh.mtls: "true"
+
+  # Proxy service - will be automatically excluded from routing
+  proxy:
+    build:
+      context: ./proxy
+      dockerfile: Dockerfile.mesh-proxy
+    container_name: mesh-proxy
+    ports:
+      - "443:443"  # HTTPS entrypoint
+      - "80:80"    # HTTP entrypoint
+    networks:
+      - meshnet
+    # No labels needed - proxy service is automatically filtered out
+
+networks:
+  meshnet:
+    driver: bridge
+
+# After creating this docker-compose.yml, build your proxy config with:
+#
+#   cd mesh-environments/mesh-proxy
+#   ./build-mesh-proxy.sh --compose /path/to/docker-compose.yml --domain your-domain.local
+#
+# The generated configuration will include:
+# - Upstream blocks for backend, frontend, and api
+# - HTTP and HTTPS server blocks for each subdomain
+# - mTLS configuration for backend and api services
+# - Security headers (CORS, CSP) for all services
+# - Base domain server blocks for your-domain.local
