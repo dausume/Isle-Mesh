@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  python-api:
+    build: .
+    container_name: python-api
+    ports:
+      - "5000:5000"
+    environment:
+      - ENVIRONMENT=development
+      - PORT=5000
+      - API_KEY=test-api-key-123
+    env_file:
+      - .env
+    labels:
+      mesh.subdomain: "api"
+      mesh.mtls: "false"

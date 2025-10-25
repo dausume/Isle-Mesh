@@ -1,0 +1,15 @@
+version: '3.8'
+
+networks:
+  from-scratch-mesh-app_meshnet:
+    driver: bridge
+
+services:
+  # Add your services here
+  # Example:
+  # myservice:
+  #   image: nginx:alpine
+  #   networks:
+  #     - from-scratch-mesh-app_meshnet
+  #   expose:
+  #     - "80"

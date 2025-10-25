@@ -7,7 +7,7 @@ This document explains how to use the containerized version of the mesh-proxy bu
 ### 1. Build the Docker Image
 
 ```bash
-cd mesh-environments/mesh-proxy
+cd mesh-prototypes/mesh-proxy
 docker build -t mesh-proxy-builder .
 ```
 
@@ -21,7 +21,7 @@ docker-compose run --rm mesh-proxy-builder
 docker-compose run --rm mesh-proxy-builder --domain custom.local
 
 # Build with custom docker-compose file
-docker-compose run --rm mesh-proxy-builder --compose /input/mesh-environments/isle/docker-compose.yml
+docker-compose run --rm mesh-proxy-builder --compose /input/mesh-prototypes/isle/docker-compose.yml
 
 # Build with specific mTLS services
 docker-compose run --rm mesh-proxy-builder --service-mtls backend --service-mtls api
@@ -50,7 +50,7 @@ mesh-proxy-builder (container)
 │   └── output/               # Generated configs (mounted from host)
 ├── /input/                   # Mounted input files (read-only)
 │   ├── localhost-mdns/       # Default environment
-│   └── mesh-environments/    # All environments
+│   └── mesh-prototypes/    # All environments
 └── /docker-entrypoint.sh     # Automation script
 ```
 
@@ -60,7 +60,7 @@ The docker-compose.yml mounts:
 
 1. **Input directories (read-only)**:
    - `../localhost-mdns` → `/input/localhost-mdns`
-   - `../` → `/input/mesh-environments`
+   - `../` → `/input/mesh-prototypes`
 
 2. **Output directory (read-write)**:
    - `./output` → `/mesh-proxy/output`
@@ -91,7 +91,7 @@ Build for a different mesh environment:
 
 ```bash
 docker-compose run --rm mesh-proxy-builder \
-    --compose /input/mesh-environments/isle/docker-compose.yml \
+    --compose /input/mesh-prototypes/isle/docker-compose.yml \
     --domain isle-mesh.local
 ```
 
@@ -152,7 +152,7 @@ Create a `.env` file in the mesh-proxy directory:
 
 ```bash
 # .env
-INPUT_COMPOSE=/input/mesh-environments/isle/docker-compose.yml
+INPUT_COMPOSE=/input/mesh-prototypes/isle/docker-compose.yml
 BASE_DOMAIN=isle-mesh.local
 MTLS_SERVICES=backend api
 WATCH_INTERVAL=5
@@ -190,7 +190,7 @@ name: Build Mesh Proxy Config
 on:
   push:
     paths:
-      - 'mesh-environments/*/docker-compose*.yml'
+      - 'mesh-prototypes/*/docker-compose*.yml'
 
 jobs:
   build-proxy:
@@ -200,7 +200,7 @@ jobs:
 
       - name: Build proxy config
         run: |
-          cd mesh-environments/mesh-proxy
+          cd mesh-prototypes/mesh-proxy
           docker build -t mesh-proxy-builder .
           docker run --rm \
             -v $(pwd)/output:/mesh-proxy/output \
@@ -211,7 +211,7 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: nginx-config
-          path: mesh-environments/mesh-proxy/output/nginx-mesh-proxy.conf
+          path: mesh-prototypes/mesh-proxy/output/nginx-mesh-proxy.conf
 ```
 
 ### GitLab CI Example
@@ -222,7 +222,7 @@ build-proxy:
   services:
     - docker:dind
   script:
-    - cd mesh-environments/mesh-proxy
+    - cd mesh-prototypes/mesh-proxy
     - docker build -t mesh-proxy-builder .
     - docker run --rm
         -v $(pwd)/output:/mesh-proxy/output
@@ -230,7 +230,7 @@ build-proxy:
         mesh-proxy-builder
   artifacts:
     paths:
-      - mesh-environments/mesh-proxy/output/nginx-mesh-proxy.conf
+      - mesh-prototypes/mesh-proxy/output/nginx-mesh-proxy.conf
 ```
 
 ## Troubleshooting
@@ -305,7 +305,7 @@ ENVIRONMENTS=("localhost-mdns" "isle" "archipelago")
 for env in "${ENVIRONMENTS[@]}"; do
     echo "Building config for $env..."
     docker-compose run --rm mesh-proxy-builder \
-        --compose "/input/mesh-environments/$env/docker-compose.yml" \
+        --compose "/input/mesh-prototypes/$env/docker-compose.yml" \
         --domain "${env}.local" \
         --output "/mesh-proxy/output/${env}-proxy.conf"
 done

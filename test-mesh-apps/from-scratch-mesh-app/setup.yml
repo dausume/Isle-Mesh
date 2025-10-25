@@ -1,0 +1,15 @@
+# setup.yml - Environment configuration for from-scratch-mesh-app
+current-setup:
+  env: dev
+
+environments:
+  dev:
+    domain: localhost
+    expose_ports_on_localhost: true
+    projects:
+      from-scratch-mesh-app: { path: . }
+
+  production:
+    domain: scratch-app.local
+    projects:
+      from-scratch-mesh-app: { path: . }

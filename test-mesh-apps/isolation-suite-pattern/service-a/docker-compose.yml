@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  service-a:
+    build: .
+    container_name: service-a-isolation
+    ports:
+      - "5001:5000"
+    environment:
+      - SERVICE_NAME=service-a
+      - PORT=5000
+      - DEPLOYMENT_MODE=isolation
+    labels:
+      mesh.isolation: "true"
+      mesh.suite: "false"
+      mesh.service.name: "service-a"
+      mesh.service.type: "api"
+      mesh.deployment.standalone: "true"
+    networks:
+      - service-a-network
+    restart: unless-stopped
+
+networks:
+  service-a-network:
+    driver: bridge
+    labels:
+      mesh.network.type: "isolation"
+      mesh.network.service: "service-a"

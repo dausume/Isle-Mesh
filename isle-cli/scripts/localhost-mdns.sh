@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Get the project root (parent of isle-cli)
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 # Path to localhost-mdns directory
-LOCALHOST_MDNS_DIR="$PROJECT_ROOT/mesh-environments/localhost-mdns"
+LOCALHOST_MDNS_DIR="$PROJECT_ROOT/mesh-prototypes/localhost-mdns"
 
 # Check if localhost-mdns directory exists
 if [ ! -d "$LOCALHOST_MDNS_DIR" ]; then

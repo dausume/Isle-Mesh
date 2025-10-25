@@ -1,4 +1,4 @@
-@mesh-apps/mesh-environments/vlan-mdns-host
+@mesh-apps/mesh-prototypes/vlan-mdns-host
 
 The vLAN mDNS Host - Virtual Network Build
 

@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  service-a:
+    build: ../service-a
+    container_name: service-a-suite
+    ports:
+      - "5001:5000"
+    environment:
+      - SERVICE_NAME=service-a
+      - PORT=5000
+      - DEPLOYMENT_MODE=suite
+    labels:
+      mesh.isolation: "false"
+      mesh.suite: "true"
+      mesh.service.name: "service-a"
+      mesh.service.type: "api"
+      mesh.deployment.standalone: "false"
+      mesh.suite.role: "data-provider"
+    networks:
+      - suite-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  service-b:
+    build: ../service-b
+    container_name: service-b-suite
+    ports:
+      - "6001:6000"
+    environment:
+      - SERVICE_NAME=service-b
+      - PORT=6000
+      - DEPLOYMENT_MODE=suite
+      - SERVICE_A_URL=http://service-a:5000
+    labels:
+      mesh.isolation: "false"
+      mesh.suite: "true"
+      mesh.service.name: "service-b"
+      mesh.service.type: "processor"
+      mesh.deployment.standalone: "false"
+      mesh.suite.role: "data-processor"
+      mesh.depends_on: "service-a"
+    depends_on:
+      service-a:
+        condition: service_healthy
+    networks:
+      - suite-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+networks:
+  suite-network:
+    driver: bridge
+    labels:
+      mesh.network.type: "suite"
+      mesh.network.shared: "true"
+      mesh.suite.name: "service-suite"

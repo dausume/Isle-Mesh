@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  service-b:
+    build: .
+    container_name: service-b-isolation
+    ports:
+      - "6001:6000"
+    environment:
+      - SERVICE_NAME=service-b
+      - PORT=6000
+      - DEPLOYMENT_MODE=isolation
+    labels:
+      mesh.isolation: "true"
+      mesh.suite: "false"
+      mesh.service.name: "service-b"
+      mesh.service.type: "processor"
+      mesh.deployment.standalone: "true"
+    networks:
+      - service-b-network
+    restart: unless-stopped
+
+networks:
+  service-b-network:
+    driver: bridge
+    labels:
+      mesh.network.type: "isolation"
+      mesh.network.service: "service-b"

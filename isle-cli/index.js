@@ -8,13 +8,25 @@ const path = require('path');
 const projectRoot = path.resolve(__dirname, '..');
 
 const scriptPaths = {
+    // Core commands
+    'isle-core': path.join(__dirname, 'scripts', 'isle-core.sh'),
+    'config': path.join(__dirname, 'scripts', 'config.sh'),
+    'discover': path.join(__dirname, 'scripts', 'discover.sh'),
+
+    // Project tools
+    'mesh-proxy': path.join(__dirname, 'scripts', 'mesh-proxy.sh'),
+    'embed-jinja': path.join(__dirname, 'scripts', 'embed-jinja.sh'),
+    'ssl': path.join(__dirname, 'scripts', 'ssl.sh'),
+    'scaffold': path.join(__dirname, 'scripts', 'scaffold.sh'),
+
+    // System tools
+    'mdns': path.join(__dirname, 'scripts', 'mdns.sh'),
+    'sample': path.join(__dirname, 'scripts', 'sample.sh'),
+
+    // Legacy/utility
     'test-cli': path.join(__dirname, 'scripts', 'test-cli.sh'),
     'uninstall': path.join(__dirname, 'scripts', 'uninstall.sh'),
     'run': path.join(__dirname, 'scripts', 'run.sh'),
-    'mesh-proxy': path.join(__dirname, 'scripts', 'mesh-proxy.sh'),
-    'embed-jinja': path.join(__dirname, 'scripts', 'embed-jinja.sh'),
-    'mdns': path.join(__dirname, 'scripts', 'mdns.sh'),
-    'sample': path.join(__dirname, 'scripts', 'sample.sh'),
     'localhost-mdns': path.join(__dirname, 'scripts', 'localhost-mdns.sh'),
 };
 
@@ -107,7 +119,7 @@ const subcommand = process.argv[3];
 const extraArgs = process.argv.slice(4);
 
 // Commands that require Docker
-const dockerCommands = ['run', 'mesh-proxy', 'proxy', 'embed-jinja', 'jinja', 'mdns', 'sample', 'localhost-mdns'];
+const dockerCommands = ['run', 'mesh-proxy', 'proxy', 'embed-jinja', 'jinja', 'mdns', 'sample', 'localhost-mdns', 'scaffold'];
 
 // Validate scripts on initialization
 if (!validateScripts()) {
@@ -122,6 +134,17 @@ if (dockerCommands.includes(command)) {
 }
 
 switch (command) {
+  // Core simplified commands
+  case 'init':
+  case 'up':
+  case 'down':
+  case 'prune':
+  case 'logs':
+  case 'ps':
+    const coreArgs = [command, subcommand, ...extraArgs].filter(Boolean).join(' ');
+    // Run core commands from the user's current working directory, not projectRoot
+    execSync(`bash ${scriptPaths['isle-core']} ${coreArgs}`, { stdio: 'inherit' });
+    break;
   case 'test-cli':
     execSync(`bash ${scriptPaths['test-cli']}`, { stdio: 'inherit' });
     break;
@@ -171,50 +194,134 @@ switch (command) {
     const legacyArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
     execSync(`bash ${scriptPaths['localhost-mdns']} ${legacyArgs}`, { stdio: 'inherit', cwd: projectRoot });
     break;
+  case 'ssl':
+    // SSL certificate management
+    const sslArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
+    execSync(`bash ${scriptPaths['ssl']} ${sslArgs}`, { stdio: 'inherit', cwd: projectRoot });
+    break;
+  case 'scaffold':
+  case 'convert':
+    // Scaffold a docker-compose app into a mesh-app
+    const scaffoldArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
+    execSync(`bash ${scriptPaths['scaffold']} ${scaffoldArgs}`, { stdio: 'inherit', cwd: projectRoot });
+    break;
+  case 'config':
+    // Manage CLI configuration
+    const configArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
+    execSync(`bash ${scriptPaths['config']} ${configArgs}`, { stdio: 'inherit', cwd: projectRoot });
+    break;
+  case 'discover':
+    // Discover .local domains
+    const discoverArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
+    execSync(`bash ${scriptPaths['discover']} ${discoverArgs}`, { stdio: 'inherit', cwd: projectRoot });
+    break;
   case 'help':
     console.log(`Isle-Mesh CLI - Orchestrate Isle-Mesh Docker Compose projects
 
-Usage:
-  isle <command> [subcommand] [options]
+╔═══════════════════════════════════════════════════════════════╗
+║                    CORE COMMANDS (Simplified)                 ║
+╚═══════════════════════════════════════════════════════════════╝
 
-Commands:
-  test-cli              - Test if the CLI is working
-  uninstall             - Uninstall this CLI tool globally
+Getting Started:
+  isle init [options]           - Initialize a new mesh-app project
+    -f, --file FILE             - Convert from existing docker-compose.yml
+    -o, --output DIR            - Output directory (default: current)
+    -d, --domain DOMAIN         - Base domain (default: mesh-app.local)
+    -n, --name NAME             - Project name (auto-detected)
 
-  run [project]         - Run a specific project using Docker Compose
+Managing Services (like docker-compose):
+  isle up [--build]             - Start mesh-app services
+  isle down [-v]                - Stop mesh-app services
+  isle logs [service]           - View service logs
+  isle ps                       - List running services
+  isle prune [-f]               - Clean up all mesh resources
 
-  mesh-proxy|proxy [action] - Manage mesh-proxy
-    up                  - Start the mesh-proxy services
-    down                - Stop the mesh-proxy services
-    build               - Build the mesh-proxy builder
-    logs                - View mesh-proxy logs
+Configuration:
+  isle config set-project <path> - Set current mesh-app project
+  isle config get-project        - Get current project path
+  isle config show               - Show all configuration
 
-  embed-jinja|jinja [action] - Manage embed-jinja (framework automation)
-    up/start            - Start embed-jinja auto workflow
-    down/stop           - Stop embed-jinja services
-    logs                - View workflow logs
-    app-logs            - View application logs
-    status              - Show service status
-    clean               - Clean and reset
+Discovery:
+  isle discover [command]        - Discover .local domains
+    all                          - Discover from all sources (default)
+    docker                       - Check Docker container labels
+    nginx                        - Check Nginx configurations
+    hosts                        - Check /etc/hosts entries
+    mdns                         - Check mDNS/Avahi services
+    test                         - Discover and test URL accessibility
+    export [file]                - Export discovered domains to JSON
 
-  mdns [action]         - Manage Isle Mesh mDNS system setup (REAL infrastructure)
-    install/up          - Install mDNS on host system
-    uninstall/down      - Uninstall mDNS from host
-    status              - Check installation status
-    broadcast           - Test mDNS broadcast
+╔═══════════════════════════════════════════════════════════════╗
+║                    ADVANCED COMMANDS                          ║
+╚═══════════════════════════════════════════════════════════════╝
 
-  sample <name> [action] - Manage sample/demo environments (EXAMPLES)
-    localhost-mdns      - Hand-crafted localhost mDNS demo
-    list                - List available samples
+Project Tools:
+  mesh-proxy|proxy [action]     - Manage mesh-proxy
+    up                          - Start the mesh-proxy services
+    down                        - Stop the mesh-proxy services
+    build                       - Build the mesh-proxy builder
+    logs                        - View mesh-proxy logs
 
-  help                  - Show this help message
+  embed-jinja|jinja [action]    - Manage embed-jinja (framework automation)
+    up/start                    - Start embed-jinja auto workflow
+    down/stop                   - Stop embed-jinja services
+    logs                        - View workflow logs
+    app-logs                    - View application logs
+    status                      - Show service status
+    clean                       - Clean and reset
 
-Examples:
-  isle mesh-proxy build                # Build mesh proxy
-  isle jinja up                        # Start embed-jinja automation
-  isle mdns install                    # Install real mDNS system
-  isle sample localhost-mdns up        # Start demo environment
-  isle sample list                     # List sample projects
+  ssl [action]                  - Manage SSL certificates
+    generate                    - Generate basic SSL certificate
+    generate-mesh               - Generate mesh SSL with subdomains
+    list                        - List all certificates
+    info <name>                 - Show certificate info
+    verify <name>               - Verify certificate
+    clean                       - Remove all certificates
+
+  scaffold <compose-file> [opts] - Convert docker-compose to mesh-app
+    -o, --output DIR            - Output directory
+    -d, --domain DOMAIN         - Base domain
+    -n, --name NAME             - Project name
+
+System Tools:
+  mdns [action]                 - Manage Isle Mesh mDNS system
+    install/up                  - Install mDNS on host system
+    uninstall/down              - Uninstall mDNS from host
+    status                      - Check installation status
+
+  sample <name> [action]        - Manage sample/demo environments
+    localhost-mdns              - Hand-crafted localhost mDNS demo
+    list                        - List available samples
+
+Utility:
+  test-cli                      - Test if the CLI is working
+  uninstall                     - Uninstall this CLI tool globally
+  help                          - Show this help message
+
+╔═══════════════════════════════════════════════════════════════╗
+║                    QUICK START EXAMPLES                       ║
+╚═══════════════════════════════════════════════════════════════╝
+
+1. Convert existing docker-compose app:
+   isle init -f docker-compose.yml -d myapp.local
+   isle up --build
+
+2. Create new mesh-app from scratch:
+   mkdir my-mesh-app && cd my-mesh-app
+   isle init
+   # Edit docker-compose.mesh-app.yml to add your services
+   isle up
+
+3. Manage running mesh-app:
+   isle logs backend              # View backend logs
+   isle ps                        # List services
+   isle down                      # Stop all services
+   isle prune                     # Clean up resources
+
+4. Advanced usage:
+   isle scaffold app.yml -o ./mesh-output
+   isle ssl generate-mesh config/ssl.env.conf
+   isle mdns install
     `);
     break;
   default:

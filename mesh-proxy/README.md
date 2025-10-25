@@ -46,7 +46,7 @@ mesh-proxy/
 **No dependencies needed!** The Docker approach includes everything you need.
 
 ```bash
-cd mesh-environments/mesh-proxy
+cd mesh-prototypes/mesh-proxy
 
 # Build the Docker image
 make docker-build
@@ -94,7 +94,7 @@ pip3 install --user jinja2
 The easiest way to build a proxy configuration is using the wrapper script:
 
 ```bash
-cd mesh-environments/mesh-proxy
+cd mesh-prototypes/mesh-proxy
 
 # Build with defaults (uses localhost-mdns docker-compose)
 ./build-mesh-proxy.sh
@@ -259,7 +259,7 @@ To use the generated configuration in your mesh environment:
 
 ```bash
 # Build the configuration
-cd mesh-environments/mesh-proxy
+cd mesh-prototypes/mesh-proxy
 ./build-mesh-proxy.sh
 
 # Copy to your proxy directory

@@ -73,7 +73,7 @@ networks:
 
 # After creating this docker-compose.yml, build your proxy config with:
 #
-#   cd mesh-environments/mesh-proxy
+#   cd mesh-prototypes/mesh-proxy
 #   ./build-mesh-proxy.sh --compose /path/to/docker-compose.yml --domain your-domain.local
 #
 # The generated configuration will include:

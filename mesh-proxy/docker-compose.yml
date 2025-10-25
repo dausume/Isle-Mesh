@@ -22,7 +22,7 @@ services:
       # Mount output directory (where generated configs go)
       - ./output:/mesh-proxy/output
       # Optionally mount other mesh environments
-      - ../:/input/mesh-environments:ro
+      - ../:/input/mesh-prototypes:ro
     environment:
       # Default configuration
       INPUT_COMPOSE: /input/localhost-mdns/docker-compose.lh-mdns.yml
@@ -44,7 +44,7 @@ services:
     volumes:
       - ../localhost-mdns:/input/localhost-mdns:ro
       - ./output:/mesh-proxy/output
-      - ../:/input/mesh-environments:ro
+      - ../:/input/mesh-prototypes:ro
     environment:
       INPUT_COMPOSE: /input/localhost-mdns/docker-compose.lh-mdns.yml
       BASE_DOMAIN: mesh-app.local

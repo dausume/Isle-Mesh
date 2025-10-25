@@ -1,0 +1,11 @@
+# isle-mesh.yml - Mesh network configuration
+mesh:
+  name: from-scratch-mesh-app
+  domain: scratch-app.local
+  version: "1.0.0"
+
+network:
+  name: from-scratch-mesh-app_meshnet
+  driver: bridge
+
+services: {}

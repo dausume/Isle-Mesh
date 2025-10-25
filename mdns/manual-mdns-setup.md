@@ -54,13 +54,13 @@ The environment file should be at :
     etc/isle-mesh/mesh-mdns.env
 
 For defining a test environment to ensure it is working on your computer use the localhost-mdns environment, copy the contents of :
-    ./mesh-environments/localhost-mdns/lh-mdns.env.conf
+    ./mesh-prototypes/localhost-mdns/lh-mdns.env.conf
     to:
     /etc/isle-mesh/mesh-mdns.env
 
 If your terminal is at the IsleMesh source directory, /IsleMesh
 then use :
-    cp ./mesh-environments/localhost-mdns/lh-mdns.env.conf /etc/isle-mesh/mesh-mdns.env
+    cp ./mesh-prototypes/localhost-mdns/lh-mdns.env.conf /etc/isle-mesh/mesh-mdns.env
 
 The mesh-mdns-broadcast.sh file should be at :
     /usr/local/bin/isle-mesh/mesh-mdns-broadcast.sh

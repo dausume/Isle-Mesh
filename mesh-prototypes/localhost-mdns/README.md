@@ -56,7 +56,7 @@ We design a sample docker-compose structure with the following file structure:
     At a lower level, since it is used across multiple environments for sample-apps we also have the generate-mesh-ssl shells.
 
     @mdns-webapp-setup/
-        mesh-environments/
+        mesh-prototypes/
             localhost-mdns/
             ...other-environments/
         public-static-data/
