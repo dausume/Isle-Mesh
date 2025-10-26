@@ -195,9 +195,9 @@ switch (command) {
     execSync(`bash ${scriptPaths['localhost-mdns']} ${legacyArgs}`, { stdio: 'inherit', cwd: projectRoot });
     break;
   case 'ssl':
-    // SSL certificate management
+    // SSL certificate management (runs from user's current directory)
     const sslArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
-    execSync(`bash ${scriptPaths['ssl']} ${sslArgs}`, { stdio: 'inherit', cwd: projectRoot });
+    execSync(`bash ${scriptPaths['ssl']} ${sslArgs}`, { stdio: 'inherit' });
     break;
   case 'scaffold':
   case 'convert':

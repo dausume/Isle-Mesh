@@ -6,18 +6,18 @@ version: '3.8'
 
 # Project-level mesh configuration
 labels:
-  mesh.domain: "python-app.local"
+  mesh.domain: "mesh-app.local"
   mesh.enabled: "true"
 
 networks:
-  python-app_meshnet:
+  mesh-converted_meshnet:
     driver: bridge
 
 services:
   # Mesh Proxy Service
   mesh-proxy:
     image: nginx:alpine
-    container_name: python-app_mesh_proxy
+    container_name: mesh-converted_mesh_proxy
     ports:
       - "80:80"
       - "443:443"
@@ -26,7 +26,7 @@ services:
       - ./ssl/certs:/etc/nginx/ssl/certs:ro
       - ./ssl/keys:/etc/nginx/ssl/keys:ro
     networks:
-      - python-app_meshnet
+      - mesh-converted_meshnet
     depends_on:
       - python-api
 
@@ -44,6 +44,6 @@ services:
       mesh.subdomain: "api"
       mesh.mtls: "false"
     networks:
-      - python-app_meshnet
+      - mesh-converted_meshnet
     env_file:
       - ./config/.env

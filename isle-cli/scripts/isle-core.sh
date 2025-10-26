@@ -175,6 +175,11 @@ cmd_init() {
     # Convert existing docker-compose file
     echo "Initializing mesh-app from $compose_file..."
     bash "$SCRIPT_DIR/scaffold.sh" "$compose_file" -o "$output_dir" -d "$domain" ${project_name:+-n "$project_name"}
+
+    # Auto-generate SSL certificates after conversion
+    echo ""
+    echo "Generating SSL certificates..."
+    bash "$SCRIPT_DIR/ssl.sh" auto "$output_dir"
   else
     # Create new mesh-app from scratch
     echo "Creating new mesh-app project..."
@@ -253,6 +258,11 @@ EOF
     echo "✓ Created setup.yml"
     echo "✓ Created docker-compose.mesh-app.yml"
     echo "✓ Created isle-mesh.yml"
+
+    # Auto-generate SSL certificates for new projects
+    echo ""
+    echo "Generating SSL certificates..."
+    bash "$SCRIPT_DIR/ssl.sh" auto "$output_dir"
   fi
 
   # Set as current project

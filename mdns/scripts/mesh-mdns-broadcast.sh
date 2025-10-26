@@ -1,42 +1,67 @@
 #!/bin/bash
 # mesh-mdns-broadcast.sh
 # This file is generally copied to the local system and then run using a systemd-service
-# as well as a pre-set environment file for congiuration.
+# as well as a pre-set environment file for configuration.
 
 # === Config from environment ===
-APP_NAME="${APP_NAME:-mesh-app}"
-CERT_AND_KEY_NAME="${CERT_AND_KEY_NAME:-$APP_NAME}"
-BASE_URL="${APP_NAME}.local"
-SUBDOMAINS="${SUBDOMAINS:-backend,frontend}"
-MAX_CONCURRENT="${MAX_CONCURRENT:-1}"
+DOMAIN_LIST_FILE="${DOMAIN_LIST_FILE:-/usr/local/etc/mesh-mdns-domains.list}"
 TARGET_IP="${TARGET_IP:-127.0.0.1}"
+MAX_CONCURRENT="${MAX_CONCURRENT:-0}"  # 0 = unlimited
+VERBOSE="${VERBOSE:-false}"
 
-echo "APP_NAME : $APP_NAME"
-echo "BASE_URL : $BASE_URL"
-echo "SUBDOMAINS : $SUBDOMAINS"
-echo "MAX_CONCURRENT : $MAX_CONCURRENT"
-echo "TARGET_IP : $TARGET_IP"
+# Fallback to legacy SUBDOMAINS method if domain list file doesn't exist
+APP_NAME="${APP_NAME:-mesh-app}"
+BASE_URL="${APP_NAME}.local"
+SUBDOMAINS="${SUBDOMAINS:-}"
 
-# === Build domain list ===
-IFS=',' read -ra SUBS <<< "$SUBDOMAINS"
+[ "$VERBOSE" = "true" ] && echo "TARGET_IP: $TARGET_IP"
+[ "$VERBOSE" = "true" ] && echo "MAX_CONCURRENT: $MAX_CONCURRENT"
+[ "$VERBOSE" = "true" ] && echo "DOMAIN_LIST_FILE: $DOMAIN_LIST_FILE"
 
-HOSTS=("$BASE_URL")
-for sub in "${SUBS[@]}"; do
-  HOSTS+=("${sub}.${BASE_URL}")
-done
+# === Load domains ===
+HOSTS=()
 
-echo "🌐 Broadcasting mDNS for: ${HOSTS[*]}"
-echo "🔁 Using MAX_CONCURRENT=$MAX_CONCURRENT"
+if [ -f "$DOMAIN_LIST_FILE" ]; then
+  # Read from domain list file
+  while IFS= read -r domain; do
+    # Skip empty lines and comments
+    [[ -n "$domain" && ! "$domain" =~ ^# ]] && HOSTS+=("$domain")
+  done < "$DOMAIN_LIST_FILE"
+  [ "$VERBOSE" = "true" ] && echo "Loaded ${#HOSTS[@]} domain(s) from $DOMAIN_LIST_FILE"
+elif [ -n "$SUBDOMAINS" ]; then
+  # Legacy fallback: build from SUBDOMAINS env var
+  IFS=',' read -ra SUBS <<< "$SUBDOMAINS"
+  HOSTS=("$BASE_URL")
+  for sub in "${SUBS[@]}"; do
+    HOSTS+=("${sub}.${BASE_URL}")
+  done
+  [ "$VERBOSE" = "true" ] && echo "Built ${#HOSTS[@]} domain(s) from SUBDOMAINS (legacy mode)"
+else
+  echo "❌ No domains configured. Create $DOMAIN_LIST_FILE or set SUBDOMAINS"
+  exit 1
+fi
 
-# Broadcast each using avahi-publish -a -R (re-announcing, backgrounded)
+# === Broadcast domains ===
+ACTIVE_JOBS=0
+
 for fqdn in "${HOSTS[@]}"; do
-  echo "📡 Publishing: $fqdn → $TARGET_IP"
+  # Wait if we've hit the concurrent limit
+  if [ "$MAX_CONCURRENT" -gt 0 ]; then
+    while [ "$ACTIVE_JOBS" -ge "$MAX_CONCURRENT" ]; do
+      wait -n 2>/dev/null || true
+      ((ACTIVE_JOBS--))
+    done
+  fi
+
+  # Start broadcast (no echo in loop - minimal overhead)
   avahi-publish -a -R "$fqdn" "$TARGET_IP" &
+  ((ACTIVE_JOBS++))
 done
 
-# Wait for all background jobs (so systemd doesn't kill this shell)
+[ "$VERBOSE" = "true" ] && echo "Broadcasting ${#HOSTS[@]} domain(s) to $TARGET_IP"
+
+# Wait for all background jobs
 wait
 
-# Leave one blank line at the end to ensure compatibility with legacy systems/.
 # Keep container alive
-tail -f /dev/null
+exec tail -f /dev/null

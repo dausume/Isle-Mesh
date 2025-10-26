@@ -1,0 +1,15 @@
+{
+  "source_compose": "/home/dustin/Desktop/IsleMesh/test-mesh-apps/python-app-only/mesh-converted/docker-compose.yml",
+  "generated_at": "2025-10-23T16:13:22-04:00",
+  "services": {
+    "python-api": {
+      "env_files": [
+        {"path": ".env", "resolved": "/home/dustin/Desktop/IsleMesh/test-mesh-apps/python-app-only/mesh-converted/.env"}
+      ],
+      "environment": {
+
+
+      }
+    }
+  }
+}

@@ -20,9 +20,11 @@ print_help() {
   echo "Usage: isle ssl <action> [options]"
   echo ""
   echo "Actions:"
+  echo "  auto [dir]                 - Auto-generate config & SSL from mesh-app (default: current dir)"
   echo "  generate <env-file>        - Generate SSL certificates using basic generator"
   echo "  generate-mesh <env-file>   - Generate mesh SSL with subdomains"
   echo "  generate-config <env-file> - Generate OpenSSL config for SAN/subdomains"
+  echo "  create-env-config [dir]    - Create ssl.env.conf from docker-compose.mesh-app.yml"
   echo "  list                       - List all generated certificates"
   echo "  clean                      - Remove all generated certificates"
   echo "  info <cert-name>           - Show info about a specific certificate"
@@ -30,8 +32,14 @@ print_help() {
   echo "  help                       - Show this help message"
   echo ""
   echo "Examples:"
-  echo "  isle ssl generate .env.conf"
-  echo "  isle ssl generate-mesh .env.conf"
+  echo "  # Auto-generate everything from mesh-app directory"
+  echo "  cd /path/to/mesh-app && isle ssl auto"
+  echo "  "
+  echo "  # Or step by step:"
+  echo "  isle ssl create-env-config /path/to/mesh-app"
+  echo "  isle ssl generate-mesh /path/to/mesh-app/config/ssl.env.conf"
+  echo "  "
+  echo "  # Other commands"
   echo "  isle ssl list"
   echo "  isle ssl info my-cert"
   echo "  isle ssl clean"
@@ -176,6 +184,44 @@ verify_cert() {
 
 # Main command handler - routes to appropriate function based on action
 case "$ACTION" in
+  # Auto-generate config and SSL certificates from mesh-app directory
+  auto)
+    MESH_DIR="${1:-.}"
+    MESH_DIR=$(realpath "$MESH_DIR")
+
+    echo "Auto-generating SSL config and certificates for: $MESH_DIR"
+
+    # Step 1: Generate ssl.env.conf
+    echo ""
+    echo "[1/2] Generating ssl.env.conf..."
+    bash "$SCRIPT_DIR/generate-ssl-env-config.sh" "$MESH_DIR"
+
+    # Step 2: Generate SSL certificates
+    echo ""
+    echo "[2/2] Generating SSL certificates..."
+    SSL_ENV_FILE="$MESH_DIR/config/ssl.env.conf"
+
+    if [ ! -f "$SSL_ENV_FILE" ]; then
+      echo "Error: Failed to generate ssl.env.conf"
+      exit 1
+    fi
+
+    bash "$SSL_DIR/generate_mesh_ssl.sh" "$SSL_ENV_FILE" "$MESH_DIR" "$SSL_DIR"
+
+    echo ""
+    echo "✓ SSL certificates generated successfully!"
+    echo ""
+    echo "Certificates location:"
+    echo "  Certs: $MESH_DIR/ssl/certs/"
+    echo "  Keys:  $MESH_DIR/ssl/keys/"
+    ;;
+
+  # Create ssl.env.conf from docker-compose.mesh-app.yml and isle-mesh.yml
+  create-env-config)
+    MESH_DIR="${1:-.}"
+    bash "$SCRIPT_DIR/generate-ssl-env-config.sh" "$MESH_DIR"
+    ;;
+
   # Generate a basic SSL certificate using the simple generator
   generate)
     ENV_FILE="$1"
