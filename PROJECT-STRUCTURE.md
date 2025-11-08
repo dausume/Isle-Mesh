@@ -192,7 +192,6 @@ isle init
 
 ## Questions?
 
-- **"Where do I test CLI features?"** → `/test-mesh-apps`
 - **"Where are reference implementations?"** → `/mesh-prototypes`
 - **"How do I use the CLI?"** → See `GETTING-STARTED.md`
 - **"How do I create a test case?"** → `cd test-mesh-apps && isle init`

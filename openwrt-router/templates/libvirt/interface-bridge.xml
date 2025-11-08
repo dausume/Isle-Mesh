@@ -1,0 +1,5 @@
+    <!-- Ethernet Bridge: {{BRIDGE_NAME}} for {{ISLE_NAME}} -->
+    <interface type='bridge'>
+      <source bridge='{{BRIDGE_NAME}}'/>
+      <model type='virtio'/>
+    </interface>

@@ -1,0 +1,63 @@
+# Isle-Mesh Port Detection Rules (Event-Driven)
+#
+# These udev rules trigger ONLY when hardware events occur:
+# - USB device plugged in/removed
+# - Ethernet cable plugged in (link up)
+#
+# NO CONTINUOUS POLLING! More efficient and resource-friendly.
+#
+# Installation:
+#   sudo cp 99-isle-mesh-ports.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules
+#   sudo udevadm trigger
+#
+
+########################################################################
+# USB WiFi Adapter Detection
+########################################################################
+
+# Atheros chipsets
+ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="0cf3", ENV{ISLE_MESH_DEVICE}="wifi", \
+    RUN+="/usr/local/bin/isle-port-event usb %p"
+
+# Realtek chipsets
+ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ENV{ISLE_MESH_DEVICE}="wifi", \
+    RUN+="/usr/local/bin/isle-port-event usb %p"
+
+# Ralink/MediaTek chipsets
+ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="148f", ENV{ISLE_MESH_DEVICE}="wifi", \
+    RUN+="/usr/local/bin/isle-port-event usb %p"
+
+# TP-Link devices
+ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="2357", ENV{ISLE_MESH_DEVICE}="wifi", \
+    RUN+="/usr/local/bin/isle-port-event usb %p"
+
+# Alfa Networks
+ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="8812", ENV{ISLE_MESH_DEVICE}="wifi", \
+    RUN+="/usr/local/bin/isle-port-event usb %p"
+
+# Generic USB WiFi (802.11 wireless network adapters)
+ACTION=="add", SUBSYSTEM=="usb", ATTRS{bInterfaceClass}=="e0", ATTRS{bInterfaceSubClass}=="01", ENV{ISLE_MESH_DEVICE}="wifi", \
+    RUN+="/usr/local/bin/isle-port-event usb %p"
+
+########################################################################
+# Ethernet Link Detection (Cable Plugged In)
+########################################################################
+
+# Trigger when Ethernet cable is plugged in (carrier detected)
+# This uses the net subsystem and checks for INTERFACE
+ACTION=="add|change", SUBSYSTEM=="net", KERNEL=="eth*|enp*|eno*", ENV{ID_NET_NAME}=="?*", \
+    ATTR{carrier}=="1", ENV{ISLE_MESH_DEVICE}="ethernet", \
+    RUN+="/usr/local/bin/isle-port-event ethernet $env{INTERFACE}"
+
+# Alternative: Also trigger on operstate change to "up"
+ACTION=="change", SUBSYSTEM=="net", KERNEL=="eth*|enp*|eno*", ENV{ID_NET_NAME}=="?*", \
+    ATTR{operstate}=="up", ENV{ISLE_MESH_DEVICE}="ethernet", \
+    RUN+="/usr/local/bin/isle-port-event ethernet $env{INTERFACE}"
+
+########################################################################
+# Logging (Optional)
+########################################################################
+
+# Log all Isle-Mesh device events
+ENV{ISLE_MESH_DEVICE}=="?*", RUN+="/usr/bin/logger -t isle-udev 'Isle-Mesh device event: $env{ACTION} $env{SUBSYSTEM} $env{KERNEL}'"

@@ -1,0 +1,7 @@
+# Runtime directory for generated configurations
+runtime/
+
+# Downloaded images (large files)
+images/*.qcow2
+images/*.img
+images/*.img.gz

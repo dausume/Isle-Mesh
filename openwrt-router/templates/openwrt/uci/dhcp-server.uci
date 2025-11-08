@@ -1,0 +1,27 @@
+#!/bin/sh
+# DHCP server configuration for Isle vLAN
+# Generated from template: openwrt/uci/dhcp-server.uci
+
+set -e
+
+# Backup existing config
+cp /etc/config/dhcp /etc/config/dhcp.bak 2>/dev/null || true
+
+# Configure DHCP server for isle vLAN
+uci -q delete dhcp.{{ISLE_UCI}} 2>/dev/null || true
+uci set dhcp.{{ISLE_UCI}}=dhcp
+uci set dhcp.{{ISLE_UCI}}.interface='{{ISLE_UCI}}'
+uci set dhcp.{{ISLE_UCI}}.start='{{DHCP_START}}'
+uci set dhcp.{{ISLE_UCI}}.limit='{{DHCP_LIMIT}}'
+uci set dhcp.{{ISLE_UCI}}.leasetime='{{DHCP_LEASETIME}}'
+uci set dhcp.{{ISLE_UCI}}.dhcpv4='server'
+uci set dhcp.{{ISLE_UCI}}.dynamicdhcp='1'
+
+# Optional: Reserve range for remote nginx proxy containers with virtual MACs
+# MAC pattern: 02:00:00:00:{{VLAN_ID}}:XX
+uci add dhcp tag
+uci set dhcp.@tag[-1].name='isle-proxy-{{VLAN_ID}}'
+uci set dhcp.@tag[-1].match='02:00:00:00:{{VLAN_ID}}:*'
+
+uci commit dhcp
+/etc/init.d/dnsmasq restart || true

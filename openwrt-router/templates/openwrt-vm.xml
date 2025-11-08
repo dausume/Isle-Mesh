@@ -1,0 +1,111 @@
+<domain type='kvm'>
+  <name>openwrt-router</name>
+  <metadata>
+    <description>OpenWRT Virtual Router for Isle-Mesh Network</description>
+  </metadata>
+
+  <!-- Memory: 512MB should be sufficient for OpenWRT -->
+  <memory unit='MiB'>512</memory>
+  <currentMemory unit='MiB'>512</currentMemory>
+
+  <!-- 2 vCPUs for better performance -->
+  <vcpu placement='static'>2</vcpu>
+
+  <os>
+    <type arch='x86_64' machine='pc-q35-6.2'>hvm</type>
+    <boot dev='hd'/>
+  </os>
+
+  <features>
+    <acpi/>
+    <apic/>
+  </features>
+
+  <cpu mode='host-passthrough' check='none'/>
+
+  <clock offset='utc'>
+    <timer name='rtc' tickpolicy='catchup'/>
+    <timer name='pit' tickpolicy='delay'/>
+    <timer name='hpet' present='no'/>
+  </clock>
+
+  <on_poweroff>destroy</on_poweroff>
+  <on_reboot>restart</on_reboot>
+  <on_crash>restart</on_crash>
+
+  <pm>
+    <suspend-to-mem enabled='no'/>
+    <suspend-to-disk enabled='no'/>
+  </pm>
+
+  <devices>
+    <emulator>/usr/bin/qemu-system-x86_64</emulator>
+
+    <!-- Primary disk - OpenWRT root filesystem -->
+    <disk type='file' device='disk'>
+      <driver name='qemu' type='qcow2'/>
+      <source file='__OPENWRT_IMAGE_PATH__'/>
+      <target dev='vda' bus='virtio'/>
+      <address type='pci' domain='0x0000' bus='0x03' slot='0x00' function='0x0'/>
+    </disk>
+
+    <!-- Management Network Interface (eth0) -->
+    <!-- This is for accessing OpenWRT web interface and SSH -->
+    <!-- This should strictly allow commands going into the Router, and/or managing it from the browser interface -->
+    <interface type='bridge'>
+      <source bridge='br-mgmt'/>
+      <model type='virtio'/>
+      <address type='pci' domain='0x0000' bus='0x01' slot='0x00' function='0x0'/>
+    </interface>
+
+    <!-- Isle Network Interface (eth1) -->
+    <!-- This will carry vLAN-tagged traffic for all isles -> Should connect to physical ethernet or wifi connections, -->
+    <!-- However, these connections should only be bridged/occupied by the VM, they become blocked off for the base kernel -->
+    <interface type='bridge'>
+      <source bridge='br-isles'/>
+      <model type='virtio'/>
+      <address type='pci' domain='0x0000' bus='0x02' slot='0x00' function='0x0'/>
+    </interface>
+
+    <!-- Serial console for debugging -->
+    <serial type='pty'>
+      <target type='isa-serial' port='0'>
+        <model name='isa-serial'/>
+      </target>
+    </serial>
+
+    <console type='pty'>
+      <target type='serial' port='0'/>
+    </console>
+
+    <!-- VGA graphics for VNC access -->
+    <graphics type='vnc' port='-1' autoport='yes' listen='127.0.0.1'>
+      <listen type='address' address='127.0.0.1'/>
+    </graphics>
+
+    <video>
+      <model type='qxl' ram='65536' vram='65536' vgamem='16384' heads='1' primary='yes'/>
+      <address type='pci' domain='0x0000' bus='0x00' slot='0x01' function='0x0'/>
+    </video>
+
+    <!-- Virtio RNG for better entropy -->
+    <rng model='virtio'>
+      <backend model='random'>/dev/urandom</backend>
+      <address type='pci' domain='0x0000' bus='0x04' slot='0x00' function='0x0'/>
+    </rng>
+
+    <!-- USB Controller for WiFi adapter passthrough -->
+    <controller type='usb' index='0' model='qemu-xhci' ports='8'>
+      <address type='pci' domain='0x0000' bus='0x05' slot='0x00' function='0x0'/>
+    </controller>
+
+    <!-- USB Passthrough Devices (WiFi adapters) -->
+    <!-- These will be dynamically added based on port-mapping.conf -->
+    __USB_DEVICES__
+
+    <!-- Ethernet Passthrough Interfaces -->
+    <!-- These will be dynamically added based on port-mapping.conf -->
+    __ETHERNET_DEVICES__
+
+  </devices>
+</domain>

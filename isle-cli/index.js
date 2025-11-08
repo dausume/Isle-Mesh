@@ -8,26 +8,15 @@ const path = require('path');
 const projectRoot = path.resolve(__dirname, '..');
 
 const scriptPaths = {
-    // Core commands
-    'isle-core': path.join(__dirname, 'scripts', 'isle-core.sh'),
-    'config': path.join(__dirname, 'scripts', 'config.sh'),
-    'discover': path.join(__dirname, 'scripts', 'discover.sh'),
+    // Namespace commands
+    'app': path.join(__dirname, 'scripts', 'app.sh'),
+    'router': path.join(__dirname, 'scripts', 'router.sh'),
+    'agent': path.join(__dirname, 'scripts', 'agent.sh'),
 
-    // Project tools
-    'mesh-proxy': path.join(__dirname, 'scripts', 'mesh-proxy.sh'),
-    'embed-jinja': path.join(__dirname, 'scripts', 'embed-jinja.sh'),
-    'ssl': path.join(__dirname, 'scripts', 'ssl.sh'),
-    'scaffold': path.join(__dirname, 'scripts', 'scaffold.sh'),
-
-    // System tools
-    'mdns': path.join(__dirname, 'scripts', 'mdns.sh'),
-    'sample': path.join(__dirname, 'scripts', 'sample.sh'),
-
-    // Legacy/utility
-    'test-cli': path.join(__dirname, 'scripts', 'test-cli.sh'),
+    // Top-level utilities
+    'install': path.join(__dirname, 'scripts', 'install.sh'),
     'uninstall': path.join(__dirname, 'scripts', 'uninstall.sh'),
-    'run': path.join(__dirname, 'scripts', 'run.sh'),
-    'localhost-mdns': path.join(__dirname, 'scripts', 'localhost-mdns.sh'),
+    'permissions': path.join(__dirname, 'scripts', 'permissions.sh'),
 };
 
 const makeExecutable = (filePath) => {
@@ -118,8 +107,25 @@ const command = process.argv[2];
 const subcommand = process.argv[3];
 const extraArgs = process.argv.slice(4);
 
-// Commands that require Docker
-const dockerCommands = ['run', 'mesh-proxy', 'proxy', 'embed-jinja', 'jinja', 'mdns', 'sample', 'localhost-mdns', 'scaffold'];
+// Helper function to show error for commands without namespace
+const showNamespaceError = (attemptedCommand) => {
+  console.error('\x1b[31m%s\x1b[0m', '═══════════════════════════════════════════════════════════════');
+  console.error('\x1b[31m%s\x1b[0m', '  ERROR: Command Requires Namespace');
+  console.error('\x1b[31m%s\x1b[0m', '═══════════════════════════════════════════════════════════════');
+  console.error('\x1b[33m%s\x1b[0m', `\nThe command '${attemptedCommand}' requires a namespace specifier.\n`);
+  console.log('Isle CLI commands are organized into three categories:\n');
+  console.log('  \x1b[36m%s\x1b[0m', '• isle app <command>     - Mesh application management');
+  console.log('  \x1b[36m%s\x1b[0m', '• isle router <command>  - Router and network management');
+  console.log('  \x1b[36m%s\x1b[0m', '• isle agent <command>   - Agent and bridge management\n');
+  console.log('Examples:');
+  console.log('  \x1b[32m%s\x1b[0m', `  isle app ${attemptedCommand}`);
+  console.log('  \x1b[32m%s\x1b[0m', `  isle router ${attemptedCommand}\n`);
+  console.log('For more information, run: \x1b[36mile help\x1b[0m');
+  console.error('\x1b[31m%s\x1b[0m', '═══════════════════════════════════════════════════════════════\n');
+};
+
+// Commands that require Docker (app commands will check internally)
+const dockerCommands = ['app'];
 
 // Validate scripts on initialization
 if (!validateScripts()) {
@@ -134,197 +140,135 @@ if (dockerCommands.includes(command)) {
 }
 
 switch (command) {
-  // Core simplified commands
+  case 'app':
+    // All mesh application commands
+    const appArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
+    execSync(`bash ${scriptPaths['app']} ${appArgs}`, { stdio: 'inherit', cwd: projectRoot });
+    break;
+
+  case 'router':
+    // All router management commands
+    const routerArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
+    try {
+      execSync(`bash ${scriptPaths['router']} ${routerArgs}`, { stdio: 'inherit', cwd: projectRoot });
+    } catch (error) {
+      // Router script already displayed error message, just exit with same code
+      process.exit(error.status || 1);
+    }
+    break;
+
+  case 'agent':
+    // All agent and bridge management commands
+    const agentArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
+    execSync(`bash ${scriptPaths['agent']} ${agentArgs}`, { stdio: 'inherit', cwd: projectRoot });
+    break;
+
+  case 'install':
+    // Install system dependencies with optional target (app/router/agent/all)
+    const installArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
+    execSync(`bash ${scriptPaths['install']} ${installArgs}`, { stdio: 'inherit', cwd: projectRoot });
+    break;
+
+  case 'uninstall':
+    // Uninstall with optional target (app/router/all)
+    const uninstallArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
+    execSync(`bash ${scriptPaths['uninstall']} ${uninstallArgs}`, { stdio: 'inherit', cwd: projectRoot });
+    break;
+
+  case 'permissions':
+    // Manage file permissions for Isle-Mesh
+    const permissionsArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
+    execSync(`bash ${scriptPaths['permissions']} ${permissionsArgs}`, { stdio: 'inherit', cwd: projectRoot });
+    break;
+
+  case 'help':
+  case undefined:
+    console.log(`\x1b[1mIsle-Mesh CLI\x1b[0m - Zero-configuration mesh networking for containerized applications
+
+╔═══════════════════════════════════════════════════════════════╗
+║                    COMMAND STRUCTURE                          ║
+╚═══════════════════════════════════════════════════════════════╝
+
+Isle commands are organized into three main categories:
+
+  \x1b[36misle app <command>\x1b[0m      Mesh application management
+                          • Initialize and scaffold apps
+                          • Start/stop services (init, up, down, logs, ps)
+                          • Service discovery and SSL
+                          • Configuration management
+
+  \x1b[36misle router <command>\x1b[0m   Router and network management
+                          • OpenWRT router lifecycle
+                          • Network configuration and testing
+                          • Security and isolation verification
+
+  \x1b[36misle agent <command>\x1b[0m    Agent and bridge management
+                          • Automatic bridge creation (coming soon)
+                          • Nginx-to-router connectivity
+                          • Bridge lifecycle management
+
+╔═══════════════════════════════════════════════════════════════╗
+║                    GLOBAL COMMANDS                            ║
+╚═══════════════════════════════════════════════════════════════╝
+
+  isle install [target]   Install dependencies (app/router/agent/all)
+  isle uninstall [target] Uninstall components (app/router/all)
+  isle permissions        Manage file permissions
+  isle help               Show this help message
+
+╔═══════════════════════════════════════════════════════════════╗
+║                    DETAILED HELP                              ║
+╚═══════════════════════════════════════════════════════════════╝
+
+For detailed command information:
+
+  \x1b[32misle app help\x1b[0m           Show all mesh application commands
+  \x1b[32misle router help\x1b[0m        Show all router management commands
+  \x1b[32misle agent help\x1b[0m         Show all agent commands
+
+╔═══════════════════════════════════════════════════════════════╗
+║                    QUICK START                                ║
+╚═══════════════════════════════════════════════════════════════╝
+
+1. Initialize a new mesh app:
+   \x1b[33misle app init -d myapp.local\x1b[0m
+   \x1b[33misle app up --build\x1b[0m
+
+2. Setup router for network isolation:
+   \x1b[33msudo isle install router\x1b[0m
+   \x1b[33msudo isle router up test-router\x1b[0m
+
+3. Scaffold existing docker-compose:
+   \x1b[33misle app scaffold docker-compose.yml -d myapp.local\x1b[0m
+   \x1b[33misle app up\x1b[0m
+
+For more examples and documentation, visit:
+https://github.com/yourusername/IsleMesh
+    `);
+    break;
+
+  // Handle old commands without namespace - show helpful error
   case 'init':
   case 'up':
   case 'down':
-  case 'prune':
   case 'logs':
   case 'ps':
-    const coreArgs = [command, subcommand, ...extraArgs].filter(Boolean).join(' ');
-    // Run core commands from the user's current working directory, not projectRoot
-    execSync(`bash ${scriptPaths['isle-core']} ${coreArgs}`, { stdio: 'inherit' });
-    break;
-  case 'test-cli':
-    execSync(`bash ${scriptPaths['test-cli']}`, { stdio: 'inherit' });
-    break;
-  case 'uninstall':
-    execSync(`bash ${scriptPaths['uninstall']}`, { stdio: 'inherit' });
-    break;
-  case 'run':
-    if (subcommand) {
-      // Run a specific project with subcommand
-      const projectScript = scriptPaths[subcommand];
-      if (projectScript) {
-        const args = extraArgs.join(' ');
-        execSync(`bash ${projectScript} ${args}`, { stdio: 'inherit', cwd: projectRoot });
-      } else {
-        console.log(`Unknown project: ${subcommand}`);
-        console.log('Available projects: mesh-proxy, embed-jinja, localhost-mdns');
-        process.exit(1);
-      }
-    } else {
-      // Legacy run command
-      execSync(`bash ${scriptPaths['run']}`, { stdio: 'inherit' });
-    }
-    break;
+  case 'prune':
+  case 'scaffold':
+  case 'config':
+  case 'discover':
+  case 'ssl':
   case 'mesh-proxy':
   case 'proxy':
-    const proxyArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
-    execSync(`bash ${scriptPaths['mesh-proxy']} ${proxyArgs}`, { stdio: 'inherit', cwd: projectRoot });
-    break;
   case 'embed-jinja':
   case 'jinja':
-    const jinjaArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
-    execSync(`bash ${scriptPaths['embed-jinja']} ${jinjaArgs}`, { stdio: 'inherit', cwd: projectRoot });
-    break;
   case 'mdns':
-    // Real mDNS system setup
-    const mdnsArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
-    execSync(`bash ${scriptPaths['mdns']} ${mdnsArgs}`, { stdio: 'inherit', cwd: projectRoot });
-    break;
   case 'sample':
-    // Sample/demo environments
-    const sampleArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
-    execSync(`bash ${scriptPaths['sample']} ${sampleArgs}`, { stdio: 'inherit', cwd: projectRoot });
-    break;
-  case 'localhost-mdns':
-    // Legacy support - redirect to sample command
-    console.log("Note: 'isle localhost-mdns' is now 'isle sample localhost-mdns'");
-    const legacyArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
-    execSync(`bash ${scriptPaths['localhost-mdns']} ${legacyArgs}`, { stdio: 'inherit', cwd: projectRoot });
-    break;
-  case 'ssl':
-    // SSL certificate management (runs from user's current directory)
-    const sslArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
-    execSync(`bash ${scriptPaths['ssl']} ${sslArgs}`, { stdio: 'inherit' });
-    break;
-  case 'scaffold':
-  case 'convert':
-    // Scaffold a docker-compose app into a mesh-app
-    const scaffoldArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
-    execSync(`bash ${scriptPaths['scaffold']} ${scaffoldArgs}`, { stdio: 'inherit', cwd: projectRoot });
-    break;
-  case 'config':
-    // Manage CLI configuration
-    const configArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
-    execSync(`bash ${scriptPaths['config']} ${configArgs}`, { stdio: 'inherit', cwd: projectRoot });
-    break;
-  case 'discover':
-    // Discover .local domains
-    const discoverArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
-    execSync(`bash ${scriptPaths['discover']} ${discoverArgs}`, { stdio: 'inherit', cwd: projectRoot });
-    break;
-  case 'help':
-    console.log(`Isle-Mesh CLI - Orchestrate Isle-Mesh Docker Compose projects
+    showNamespaceError(command);
+    process.exit(1);
 
-╔═══════════════════════════════════════════════════════════════╗
-║                    CORE COMMANDS (Simplified)                 ║
-╚═══════════════════════════════════════════════════════════════╝
-
-Getting Started:
-  isle init [options]           - Initialize a new mesh-app project
-    -f, --file FILE             - Convert from existing docker-compose.yml
-    -o, --output DIR            - Output directory (default: current)
-    -d, --domain DOMAIN         - Base domain (default: mesh-app.local)
-    -n, --name NAME             - Project name (auto-detected)
-
-Managing Services (like docker-compose):
-  isle up [--build]             - Start mesh-app services
-  isle down [-v]                - Stop mesh-app services
-  isle logs [service]           - View service logs
-  isle ps                       - List running services
-  isle prune [-f]               - Clean up all mesh resources
-
-Configuration:
-  isle config set-project <path> - Set current mesh-app project
-  isle config get-project        - Get current project path
-  isle config show               - Show all configuration
-
-Discovery:
-  isle discover [command]        - Discover .local domains
-    all                          - Discover from all sources (default)
-    docker                       - Check Docker container labels
-    nginx                        - Check Nginx configurations
-    hosts                        - Check /etc/hosts entries
-    mdns                         - Check mDNS/Avahi services
-    test                         - Discover and test URL accessibility
-    export [file]                - Export discovered domains to JSON
-
-╔═══════════════════════════════════════════════════════════════╗
-║                    ADVANCED COMMANDS                          ║
-╚═══════════════════════════════════════════════════════════════╝
-
-Project Tools:
-  mesh-proxy|proxy [action]     - Manage mesh-proxy
-    up                          - Start the mesh-proxy services
-    down                        - Stop the mesh-proxy services
-    build                       - Build the mesh-proxy builder
-    logs                        - View mesh-proxy logs
-
-  embed-jinja|jinja [action]    - Manage embed-jinja (framework automation)
-    up/start                    - Start embed-jinja auto workflow
-    down/stop                   - Stop embed-jinja services
-    logs                        - View workflow logs
-    app-logs                    - View application logs
-    status                      - Show service status
-    clean                       - Clean and reset
-
-  ssl [action]                  - Manage SSL certificates
-    generate                    - Generate basic SSL certificate
-    generate-mesh               - Generate mesh SSL with subdomains
-    list                        - List all certificates
-    info <name>                 - Show certificate info
-    verify <name>               - Verify certificate
-    clean                       - Remove all certificates
-
-  scaffold <compose-file> [opts] - Convert docker-compose to mesh-app
-    -o, --output DIR            - Output directory
-    -d, --domain DOMAIN         - Base domain
-    -n, --name NAME             - Project name
-
-System Tools:
-  mdns [action]                 - Manage Isle Mesh mDNS system
-    install/up                  - Install mDNS on host system
-    uninstall/down              - Uninstall mDNS from host
-    status                      - Check installation status
-
-  sample <name> [action]        - Manage sample/demo environments
-    localhost-mdns              - Hand-crafted localhost mDNS demo
-    list                        - List available samples
-
-Utility:
-  test-cli                      - Test if the CLI is working
-  uninstall                     - Uninstall this CLI tool globally
-  help                          - Show this help message
-
-╔═══════════════════════════════════════════════════════════════╗
-║                    QUICK START EXAMPLES                       ║
-╚═══════════════════════════════════════════════════════════════╝
-
-1. Convert existing docker-compose app:
-   isle init -f docker-compose.yml -d myapp.local
-   isle up --build
-
-2. Create new mesh-app from scratch:
-   mkdir my-mesh-app && cd my-mesh-app
-   isle init
-   # Edit docker-compose.mesh-app.yml to add your services
-   isle up
-
-3. Manage running mesh-app:
-   isle logs backend              # View backend logs
-   isle ps                        # List services
-   isle down                      # Stop all services
-   isle prune                     # Clean up resources
-
-4. Advanced usage:
-   isle scaffold app.yml -o ./mesh-output
-   isle ssl generate-mesh config/ssl.env.conf
-   isle mdns install
-    `);
-    break;
   default:
-    console.log('Unknown command. Use "isle help" to see available commands.');
+    console.log('\x1b[31mUnknown command:\x1b[0m', command);
+    console.log('\nUse \x1b[36mile help\x1b[0m to see available commands.');
     process.exit(1);
 }

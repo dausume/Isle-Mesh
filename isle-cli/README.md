@@ -1,6 +1,6 @@
 # Isle-CLI
 
-A CLI tool for managing and orchestrating Isle-Mesh Docker Compose projects.
+A CLI tool for managing Isle-Mesh: zero-configuration mesh networking for containerized applications.
 
 ## Installation
 
@@ -13,54 +13,115 @@ npm link
 
 After doing so, `isle` commands will be available globally wherever npm is available.
 
-## Usage
+## Command Structure
+
+Isle commands are organized into three main categories:
+
+### `isle app <command>` - Mesh Application Management
+Manage mesh applications, services, and configurations.
+
+### `isle router <command>` - Router Management
+Manage OpenWRT virtual routers for network isolation.
+
+### `isle agent <command>` - Agent Management (Coming Soon)
+Automatic bridge management between containers and routers.
+
+## Quick Start
+
+### 1. Initialize a Mesh Application
 
 ```bash
-isle <command> [subcommand] [options]
+# Convert existing docker-compose
+isle app init -f docker-compose.yml -d myapp.local
+
+# Or create from scratch
+mkdir my-mesh-app && cd my-mesh-app
+isle app init -d myapp.local
 ```
 
-### Available Commands
+### 2. Manage Application Services
 
-**Project Management:**
-- `isle mesh-proxy [action]` or `isle proxy [action]` - Manage mesh-proxy
-- `isle embed-jinja [action]` or `isle jinja [action]` - Manage embed-jinja
-- `isle localhost-mdns [action]` or `isle mdns [action]` - Manage localhost-mdns
+```bash
+# Start services
+isle app up --build
 
-**Utility Commands:**
-- `isle test-cli` - Test if the CLI is working
+# View logs
+isle app logs [service-name]
+
+# Stop services
+isle app down
+
+# List running services
+isle app ps
+```
+
+### 3. Setup Router (Optional)
+
+```bash
+# Install router dependencies
+sudo isle install router
+
+# Initialize secure router
+sudo isle router init
+
+# Check router status
+isle router status
+```
+
+## Common Commands
+
+### Application Commands
+- `isle app init` - Initialize new mesh-app
+- `isle app up` - Start services
+- `isle app down` - Stop services
+- `isle app logs` - View logs
+- `isle app discover` - Discover .local domains
+- `isle app config` - Manage configuration
+- `isle app scaffold` - Convert docker-compose
+
+### Router Commands
+- `isle router list` - List routers
+- `isle router up <name>` - Start router
+- `isle router down <name>` - Stop router
+- `isle router status` - Show status
+- `isle router help` - Detailed router help
+
+### Global Commands
+- `isle install [target]` - Install dependencies (app/router/agent/all)
 - `isle help` - Show help message
 - `isle uninstall` - Uninstall the CLI globally
 
-### Examples
+## Getting Help
+
+For detailed command information:
 
 ```bash
-# Start mesh-proxy builder
-isle mesh-proxy build
-
-# Start localhost-mdns stack
-isle mdns up
-
-# View logs for embed-jinja
-isle jinja logs
-
-# Stop localhost-mdns
-isle localhost-mdns down
-
-# Run mesh-proxy watcher
-isle proxy watch
-
-# View status of localhost-mdns services
-isle mdns status
+isle help              # Overview
+isle app help          # All app commands
+isle router help       # All router commands
+isle agent help        # Agent commands (coming soon)
 ```
 
-### Project-Specific Actions
+## Migration from Old Commands
 
-Each project supports common actions like:
-- `up` - Start services in detached mode
-- `down` - Stop services
-- `build` - Build images
-- `rebuild` - Stop, rebuild, and restart
-- `logs` - View logs
-- `status` - Show running containers
+If you used Isle CLI before the restructuring:
 
-Use `isle <project> help` to see project-specific options.
+```bash
+# Old command          →  New command
+isle init              →  isle app init
+isle up                →  isle app up
+isle down              →  isle app down
+isle logs              →  isle app logs
+isle discover          →  isle app discover
+isle config            →  isle app config
+```
+
+All old commands now require a namespace specifier (`app`, `router`, or `agent`).
+
+## Documentation
+
+For comprehensive documentation, see:
+- [CLI-ARCHITECTURE.md](CLI-ARCHITECTURE.md) - Complete architecture
+- [QUICK-REFERENCE.md](QUICK-REFERENCE.md) - Command reference
+- [EXTENSION-GUIDE.md](EXTENSION-GUIDE.md) - Adding new features
+- [UNINSTALL-GUIDE.md](UNINSTALL-GUIDE.md) - Uninstallation guide

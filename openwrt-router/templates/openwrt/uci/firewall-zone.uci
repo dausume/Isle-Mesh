@@ -1,0 +1,20 @@
+#!/bin/sh
+# Firewall zone configuration for Isle
+# Generated from template: openwrt/uci/firewall-zone.uci
+
+set -e
+
+# Backup existing config
+cp /etc/config/firewall /etc/config/firewall.bak 2>/dev/null || true
+
+# Create isolated zone for isle
+uci -q delete firewall.{{ISLE_UCI}} 2>/dev/null || true
+uci add firewall zone
+uci set firewall.@zone[-1].name='{{ISLE_UCI}}'
+uci set firewall.@zone[-1].network='{{ISLE_UCI}}'
+uci set firewall.@zone[-1].input='ACCEPT'
+uci set firewall.@zone[-1].output='ACCEPT'
+uci set firewall.@zone[-1].forward='REJECT'
+
+uci commit firewall
+/etc/init.d/firewall restart || true

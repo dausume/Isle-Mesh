@@ -1,0 +1,27 @@
+#!/bin/sh
+# mDNS reflector configuration using Avahi
+# Generated from template: openwrt/uci/mdns-reflector.uci
+
+set -e
+
+# Install avahi-daemon config
+cat > /etc/avahi/avahi-daemon.conf <<'AVAHI_EOF'
+[server]
+use-ipv4=yes
+use-ipv6=no
+enable-reflector=yes
+reflect-ipv=yes
+
+[publish]
+publish-addresses=yes
+publish-domain=yes
+publish-workstation=no
+
+[reflector]
+enable-reflector=yes
+reflect-ipv=yes
+AVAHI_EOF
+
+# Enable and restart avahi
+/etc/init.d/avahi-daemon enable
+/etc/init.d/avahi-daemon restart || true

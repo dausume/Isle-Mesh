@@ -1,0 +1,26 @@
+# Isle-Mesh USB Hotplug Detection Rules
+#
+# These udev rules trigger the port detection service when USB devices
+# are plugged in or removed.
+#
+# Installation:
+#   sudo cp 99-isle-mesh-usb.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules
+#   sudo udevadm trigger
+#
+
+# Detect USB WiFi adapters (common chipsets)
+# Atheros
+ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="0cf3", ENV{ISLE_MESH_WIFI}="1", RUN+="/usr/local/bin/isle-hotplug-handler usb-add %k"
+# Realtek
+ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ENV{ISLE_MESH_WIFI}="1", RUN+="/usr/local/bin/isle-hotplug-handler usb-add %k"
+# Ralink/MediaTek
+ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="148f", ENV{ISLE_MESH_WIFI}="1", RUN+="/usr/local/bin/isle-hotplug-handler usb-add %k"
+# TP-Link
+ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="2357", ENV{ISLE_MESH_WIFI}="1", RUN+="/usr/local/bin/isle-hotplug-handler usb-add %k"
+
+# Generic USB network devices
+ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{bInterfaceClass}=="02", RUN+="/usr/local/bin/isle-hotplug-handler usb-add %k"
+
+# USB device removal
+ACTION=="remove", SUBSYSTEM=="usb", ENV{ISLE_MESH_WIFI}=="1", RUN+="/usr/local/bin/isle-hotplug-handler usb-remove %k"

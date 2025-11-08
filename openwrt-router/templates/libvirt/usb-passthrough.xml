@@ -1,0 +1,7 @@
+    <!-- USB Device: {{DESCRIPTION}} -->
+    <hostdev mode='subsystem' type='usb' managed='yes'>
+      <source>
+        <vendor id='{{VENDOR_ID}}'/>
+        <product id='{{PRODUCT_ID}}'/>
+      </source>
+    </hostdev>

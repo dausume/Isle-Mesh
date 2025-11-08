@@ -1,0 +1,20 @@
+[Unit]
+Description=Isle-Mesh Port Detection Initialization
+Documentation=https://github.com/your-org/isle-mesh
+After=network.target libvirtd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/isle-port-init
+RemainAfterExit=yes
+
+# Run as root (needed for detecting ISP interface)
+User=root
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=isle-port-init
+
+[Install]
+WantedBy=multi-user.target

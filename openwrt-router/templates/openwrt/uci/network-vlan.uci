@@ -1,0 +1,23 @@
+#!/bin/sh
+# Network configuration for Isle vLAN
+# Generated from template: openwrt/uci/network-vlan.uci
+
+set -e
+
+# Backup existing config
+cp /etc/config/network /etc/config/network.bak 2>/dev/null || true
+
+# Ensure 802.1q module is loaded
+modprobe 8021q 2>/dev/null || true
+
+# Create tagged subinterface for isle
+# Device: {{ISLE_IF_DEV}} (base: {{ISLE_IF_BASE}}, vlan: {{VLAN_ID}})
+uci -q delete network.{{ISLE_UCI}} 2>/dev/null || true
+uci set network.{{ISLE_UCI}}=interface
+uci set network.{{ISLE_UCI}}.proto='static'
+uci set network.{{ISLE_UCI}}.device='{{ISLE_IF_DEV}}'
+uci set network.{{ISLE_UCI}}.ipaddr='{{ISLE_IP}}'
+uci set network.{{ISLE_UCI}}.netmask='{{ISLE_NETMASK}}'
+
+uci commit network
+/etc/init.d/network restart || true

@@ -1,0 +1,39 @@
+<domain type='kvm'>
+  <name>{{VM_NAME}}</name>
+  <metadata>
+    <description>OpenWRT Isle-Mesh Router - Network interfaces managed dynamically</description>
+  </metadata>
+  <memory unit='MiB'>{{MEMORY}}</memory>
+  <currentMemory unit='MiB'>{{MEMORY}}</currentMemory>
+  <vcpu placement='static'>{{VCPUS}}</vcpu>
+  <os>
+    <type arch='x86_64' machine='pc-q35-6.2'>hvm</type>
+    <boot dev='hd'/>
+  </os>
+  <features><acpi/><apic/></features>
+  <cpu mode='host-passthrough' check='none'/>
+  <clock offset='utc'>
+    <timer name='rtc' tickpolicy='catchup'/>
+    <timer name='pit' tickpolicy='delay'/>
+    <timer name='hpet' present='no'/>
+  </clock>
+  <on_poweroff>destroy</on_poweroff>
+  <on_reboot>restart</on_reboot>
+  <on_crash>restart</on_crash>
+  <devices>
+    <emulator>/usr/bin/qemu-system-x86_64</emulator>
+    <disk type='file' device='disk'>
+      <driver name='qemu' type='qcow2'/>
+      <source file='{{IMAGE_PATH}}'/>
+      <target dev='vda' bus='virtio'/>
+    </disk>
+    <serial type='pty'>
+      <target type='isa-serial' port='0'><model name='isa-serial'/></target>
+    </serial>
+    <console type='pty'><target type='serial' port='0'/></console>
+    <graphics type='vnc' port='-1' autoport='yes' listen='127.0.0.1'>
+      <listen type='address' address='127.0.0.1'/>
+    </graphics>
+    <video><model type='qxl' ram='65536' vram='65536' vgamem='16384' heads='1' primary='yes'/></video>
+  </devices>
+</domain>
