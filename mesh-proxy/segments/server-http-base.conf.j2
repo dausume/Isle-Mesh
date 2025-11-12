@@ -3,8 +3,8 @@
     server {
         listen 80{% if is_default %} default_server{% endif %};
 
-        # mDNS server name auto-inserted from configuration
-        server_name {{ base_domain }};
+        # Dual-domain support: mDNS (.local) and mesh DNS (.vlan)
+        server_name {{ base_domain }} {% if base_domain.endswith('.local') %}{{ base_domain.replace('.local', '.vlan') }}{% endif %};
 
         # Put a default SEO, using raw html,css,js on here that robots can parse to perform indexing and robots.txt page on here.
 

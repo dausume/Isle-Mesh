@@ -41,13 +41,16 @@ show_help() {
     echo ""
     echo -e "${GREEN}WHAT GETS REMOVED:${NC}"
     echo ""
-    echo -e "  ${YELLOW}Basic uninstall (no options):${NC}"
+    echo -e "  ${YELLOW}Always removed (no options needed):${NC}"
+    echo -e "    • Stops isle-agent container"
+    echo -e "    • Stops all mesh app containers"
+    echo -e "    • Removes Docker networks (isle-agent-net, isle-br-0)"
+    echo -e "    • Removes /etc/isle-mesh directory (with sudo)"
     echo -e "    • Unlinks the isle CLI from npm"
-    echo -e "    • Prompts before removing system components"
-    echo -e "    • Prompts before removing dependencies"
     echo ""
     echo -e "  ${YELLOW}With --all:${NC}"
-    echo -e "    • Port detection system and udev rules"
+    echo -e "    • OpenWRT router VM (prompts for confirmation)"
+    echo -e "    • isle-br-0 bridge interface"
     echo -e "    • System service configurations"
     echo ""
     echo -e "  ${YELLOW}With --remove-deps:${NC}"
@@ -173,7 +176,75 @@ echo -e "║              Isle-Mesh Uninstall                              ║"
 echo -e "╚═══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
-# Step 1: Unlink npm package
+# Get script directory and project root
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CLI_DIR="$(dirname "$SCRIPT_DIR")"
+PROJECT_ROOT="$(dirname "$CLI_DIR")"
+AGENT_MANAGER="${PROJECT_ROOT}/isle-agent/scripts/agent-manager.sh"
+
+# Step 1: Stop running services
+log_step "Stopping Isle Services"
+
+# Stop the isle-agent if it's running
+if docker ps --filter "name=isle-agent" --format '{{.Names}}' | grep -q "isle-agent"; then
+    log_info "Stopping isle-agent..."
+    if [[ -f "${AGENT_MANAGER}" ]]; then
+        bash "${AGENT_MANAGER}" stop || log_warning "Failed to stop agent gracefully, will force remove"
+    fi
+
+    # Force remove if still running
+    if docker ps -a --filter "name=isle-agent" --format '{{.Names}}' | grep -q "isle-agent"; then
+        log_info "Force removing isle-agent container..."
+        docker rm -f isle-agent 2>/dev/null || true
+    fi
+    log_success "isle-agent stopped"
+else
+    log_info "isle-agent is not running"
+fi
+
+# Stop any mesh apps (containers with isle.component label)
+log_info "Checking for running mesh apps..."
+MESH_APPS=$(docker ps -a --filter "label=isle.component" --format '{{.Names}}' | grep -v "^isle-agent$" || true)
+if [[ -n "$MESH_APPS" ]]; then
+    log_info "Found mesh apps, stopping them..."
+    echo "$MESH_APPS" | while read -r container; do
+        log_info "Stopping $container..."
+        docker stop "$container" 2>/dev/null || true
+        docker rm "$container" 2>/dev/null || true
+    done
+    log_success "Mesh apps stopped"
+else
+    log_info "No mesh apps found"
+fi
+
+# Clean up Docker networks
+log_info "Cleaning up Docker networks..."
+for network in "isle-agent-net" "isle-br-0"; do
+    if docker network ls --format '{{.Name}}' | grep -q "^${network}$"; then
+        log_info "Removing network ${network}..."
+        docker network rm "${network}" 2>/dev/null || log_warning "Failed to remove network ${network} (may still be in use)"
+    fi
+done
+
+# Clean up /etc/isle-mesh directory
+if [[ -d "/etc/isle-mesh" ]]; then
+    log_info "Removing /etc/isle-mesh directory..."
+    if sudo -n true 2>/dev/null; then
+        sudo rm -rf /etc/isle-mesh
+        log_success "/etc/isle-mesh removed"
+    else
+        log_warning "/etc/isle-mesh exists but requires sudo to remove"
+        echo ""
+        echo "  Run: sudo rm -rf /etc/isle-mesh"
+        echo ""
+    fi
+else
+    log_info "/etc/isle-mesh directory not found"
+fi
+
+log_success "Isle services stopped and cleaned up"
+
+# Step 2: Unlink npm package
 log_step "Removing Isle CLI"
 
 log_info "Unlinking isle CLI from npm..."
@@ -195,10 +266,52 @@ if [[ "$REMOVE_ALL" == false ]]; then
     fi
 fi
 
-# Step 2: Remove system components if requested
+# Step 3: Remove system components if requested
 if [[ "$REMOVE_ALL" == true ]]; then
     log_step "Removing System Components"
-    log_info "No system components to remove"
+
+    # Check for OpenWRT router VM
+    if command -v virsh &>/dev/null; then
+        ROUTER_VM=$(virsh list --all | grep "openwrt-isle-router" | awk '{print $2}' || true)
+        if [[ -n "$ROUTER_VM" ]]; then
+            log_info "Found OpenWRT router VM: $ROUTER_VM"
+            echo ""
+            read -p "Do you want to destroy the OpenWRT router VM? (y/N): " destroy_router
+
+            if [[ "$destroy_router" =~ ^[Yy]$ ]]; then
+                log_info "Stopping router VM..."
+                virsh destroy "$ROUTER_VM" 2>/dev/null || log_info "Router VM is not running"
+
+                log_info "Undefining router VM..."
+                virsh undefine "$ROUTER_VM" --remove-all-storage 2>/dev/null || virsh undefine "$ROUTER_VM" 2>/dev/null || true
+
+                log_success "Router VM removed"
+            else
+                log_info "Router VM preserved"
+            fi
+        else
+            log_info "No OpenWRT router VM found"
+        fi
+    else
+        log_info "virsh not installed, skipping router VM check"
+    fi
+
+    # Remove isle-br-0 bridge if it exists
+    if ip link show isle-br-0 &>/dev/null; then
+        log_info "Removing isle-br-0 bridge..."
+        if sudo -n true 2>/dev/null; then
+            sudo ip link delete isle-br-0 2>/dev/null || log_warning "Failed to remove isle-br-0 bridge"
+            log_success "isle-br-0 bridge removed"
+        else
+            log_warning "isle-br-0 bridge exists but requires sudo to remove"
+            echo ""
+            echo "  Run: sudo ip link delete isle-br-0"
+            echo ""
+        fi
+    else
+        log_info "isle-br-0 bridge not found"
+    fi
+
     log_success "System components check complete"
 fi
 
@@ -221,7 +334,8 @@ if [[ "$REMOVE_DEPS" == true ]]; then
         log_error "Sudo required to remove system dependencies"
         echo ""
         echo -e "Run: ${CYAN}sudo isle uninstall --all --remove-deps${NC}"
-        exit 1
+        echo ""
+        exit 0
     fi
 
     log_step "Removing Isle-Mesh Dependencies"
@@ -424,6 +538,31 @@ if [[ "$REMOVE_DEPS" == true ]]; then
             echo "         Remove manually if no longer needed"
         fi
     fi
+fi
+
+# Step 4: Clean up Docker images
+log_step "Cleaning Up Docker Images"
+
+ISLE_IMAGES=$(docker images --filter "reference=isle-*" --format "{{.Repository}}:{{.Tag}}" || true)
+if [[ -n "$ISLE_IMAGES" ]]; then
+    log_info "Found Isle-Mesh Docker images:"
+    echo "$ISLE_IMAGES" | while read -r image; do
+        echo "  - $image"
+    done
+    echo ""
+    read -p "Remove Isle-Mesh Docker images? (y/N): " remove_images
+
+    if [[ "$remove_images" =~ ^[Yy]$ ]]; then
+        echo "$ISLE_IMAGES" | while read -r image; do
+            log_info "Removing $image..."
+            docker rmi "$image" 2>/dev/null || log_warning "Failed to remove $image"
+        done
+        log_success "Docker images removed"
+    else
+        log_info "Docker images preserved"
+    fi
+else
+    log_info "No Isle-Mesh Docker images found"
 fi
 
 echo ""

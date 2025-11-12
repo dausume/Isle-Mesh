@@ -1,0 +1,120 @@
+# Isle Agent Config Fragment
+# Generated for: {{ app_name }}
+# Domain: {{ base_domain }}
+# Generated at: {{ timestamp }}
+
+# Upstream definitions for {{ app_name }}
+{% for service in services %}
+upstream {{ app_name }}_{{ service.service_name }} {
+    server {{ service.service_name }}:{{ service.service_port }};
+    keepalive 32;
+}
+{% endfor %}
+
+# HTTP Server - Redirect to HTTPS
+server {
+    listen 80;
+    server_name {{ base_domain }}{% for service in services %} {{ service.subdomain }}.{{ base_domain }}{% endfor %};
+
+    # Security headers
+    add_header X-Frame-Options "DENY" always;
+    add_header X-Content-Type-Options "nosniff" always;
+
+    # Redirect all HTTP to HTTPS
+    return 301 https://$host$request_uri;
+}
+
+# HTTPS Server - Base Domain
+server {
+    listen 443 ssl http2;
+    server_name {{ base_domain }};
+
+    # SSL Configuration
+    ssl_certificate /etc/nginx/ssl/certs/{{ base_cert }};
+    ssl_certificate_key /etc/nginx/ssl/keys/{{ base_key }};
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
+
+    # Security headers
+    {% include 'security-headers.conf.j2' %}
+
+    # Base domain routes to first service or default
+    location / {
+        {% if services|length > 0 %}
+        proxy_pass https://{{ app_name }}_{{ services[0].service_name }};
+        {% else %}
+        return 200 "{{ app_name }} - No services configured\n";
+        add_header Content-Type text/plain;
+        {% endif %}
+
+        # Proxy settings
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+    }
+}
+
+# HTTPS Servers - Subdomains
+{% for service in services %}
+server {
+    listen 443 ssl http2;
+    server_name {{ service.subdomain }}.{{ base_domain }};
+
+    # SSL Configuration
+    ssl_certificate /etc/nginx/ssl/certs/{{ base_cert }};
+    ssl_certificate_key /etc/nginx/ssl/keys/{{ base_key }};
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
+
+    {% if service.mtls %}
+    # mTLS Configuration - Client certificate required
+    ssl_client_certificate /etc/nginx/ssl/certs/ca-{{ base_domain }}.crt;
+    ssl_verify_client on;
+    ssl_verify_depth 2;
+    {% endif %}
+
+    # Security headers
+    {% include 'security-headers.conf.j2' %}
+
+    # Proxy to backend service
+    location / {
+        proxy_pass https://{{ app_name }}_{{ service.service_name }};
+
+        # Proxy settings
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+
+        {% if service.mtls %}
+        # Pass client certificate info to backend
+        proxy_set_header X-Client-Cert $ssl_client_cert;
+        proxy_set_header X-Client-Verify $ssl_client_verify;
+        proxy_set_header X-Client-DN $ssl_client_s_dn;
+        {% endif %}
+
+        # Timeouts
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+
+    # Health check endpoint
+    location /health {
+        access_log off;
+        return 200 "{{ app_name }}/{{ service.service_name }} healthy\n";
+        add_header Content-Type text/plain;
+    }
+}
+{% endfor %}

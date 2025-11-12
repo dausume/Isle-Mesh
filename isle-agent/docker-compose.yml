@@ -1,0 +1,74 @@
+version: '3.8'
+
+# Isle Agent - Unified nginx proxy container with virtual MAC address
+# This container runs independently of mesh apps and merges their configs
+
+services:
+  isle-agent:
+    image: nginx:alpine
+    container_name: isle-agent
+    restart: unless-stopped
+
+    # Virtual MAC address for OpenWRT DHCP isolation
+    # Format: 02:00:00:00:VLAN:XX (locally administered)
+    mac_address: "02:00:00:00:0a:01"
+
+    ports:
+      - "80:80"
+      - "443:443"
+
+    volumes:
+      # Master nginx config (merged from all app fragments)
+      - /etc/isle-mesh/agent/nginx.conf:/etc/nginx/nginx.conf:ro
+
+      # App config fragments (generated per mesh-app)
+      - /etc/isle-mesh/agent/configs:/etc/nginx/configs:ro
+
+      # SSL certificates (shared across all apps)
+      - /etc/isle-mesh/agent/ssl/certs:/etc/nginx/ssl/certs:ro
+      - /etc/isle-mesh/agent/ssl/keys:/etc/nginx/ssl/keys:ro
+
+      # Agent state and logs
+      - /etc/isle-mesh/agent/logs:/var/log/nginx
+
+    networks:
+      isle-agent-net:
+      isle-br-0:
+        # No IP assigned - will get DHCP from OpenWRT router
+        priority: 100
+
+    labels:
+      isle.component: "agent"
+      isle.role: "proxy"
+      isle.version: "1.0.0"
+
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  # Internal docker network for app containers to reach agent
+  isle-agent-net:
+    driver: bridge
+    name: isle-agent-net
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+  # Macvlan network on isle-br-0 for OpenWRT router connectivity
+  # Requirements:
+  #   1. Host bridge isle-br-0 must exist (created by agent-manager.sh)
+  #   2. OpenWRT router's eth1 connected to isle-br-0 bridge
+  #   3. Agent uses virtual MAC (02:00:00:00:0a:01) for DHCP isolation
+  # Result:
+  #   - Agent container appears on isle-br-0 as a separate L2 device
+  #   - OpenWRT DHCP server assigns IP based on virtual MAC
+  #   - Agent becomes reachable at mesh domain (e.g., mesh-app.local)
+  isle-br-0:
+    driver: macvlan
+    driver_opts:
+      parent: isle-br-0
+    name: isle-br-0

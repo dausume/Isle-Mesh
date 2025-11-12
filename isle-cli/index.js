@@ -14,9 +14,11 @@ const scriptPaths = {
     'agent': path.join(__dirname, 'scripts', 'agent.sh'),
 
     // Top-level utilities
+    'create': path.join(__dirname, 'scripts', 'create.sh'),
     'install': path.join(__dirname, 'scripts', 'install.sh'),
     'uninstall': path.join(__dirname, 'scripts', 'uninstall.sh'),
     'permissions': path.join(__dirname, 'scripts', 'permissions.sh'),
+    'fix-docker': path.join(__dirname, 'scripts', 'fix-docker-cgroups.sh'),
 };
 
 const makeExecutable = (filePath) => {
@@ -163,6 +165,12 @@ switch (command) {
     execSync(`bash ${scriptPaths['agent']} ${agentArgs}`, { stdio: 'inherit', cwd: projectRoot });
     break;
 
+  case 'create':
+    // One-command setup: agent + router + sample app
+    const createArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
+    execSync(`bash ${scriptPaths['create']} ${createArgs}`, { stdio: 'inherit', cwd: projectRoot });
+    break;
+
   case 'install':
     // Install system dependencies with optional target (app/router/agent/all)
     const installArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
@@ -172,13 +180,28 @@ switch (command) {
   case 'uninstall':
     // Uninstall with optional target (app/router/all)
     const uninstallArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
-    execSync(`bash ${scriptPaths['uninstall']} ${uninstallArgs}`, { stdio: 'inherit', cwd: projectRoot });
+    try {
+      execSync(`bash ${scriptPaths['uninstall']} ${uninstallArgs}`, { stdio: 'inherit', cwd: projectRoot });
+    } catch (error) {
+      // Exit with the same code as the script, but don't show Node.js error stack
+      process.exit(error.status || 1);
+    }
     break;
 
   case 'permissions':
     // Manage file permissions for Isle-Mesh
     const permissionsArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
     execSync(`bash ${scriptPaths['permissions']} ${permissionsArgs}`, { stdio: 'inherit', cwd: projectRoot });
+    break;
+
+  case 'fix-docker':
+    // Fix Docker systemd D-Bus issues
+    const fixDockerArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
+    try {
+      execSync(`bash ${scriptPaths['fix-docker']} ${fixDockerArgs}`, { stdio: 'inherit', cwd: projectRoot });
+    } catch (error) {
+      process.exit(error.status || 1);
+    }
     break;
 
   case 'help':
@@ -211,9 +234,11 @@ Isle commands are organized into three main categories:
 ║                    GLOBAL COMMANDS                            ║
 ╚═══════════════════════════════════════════════════════════════╝
 
+  isle create             Complete setup (agent + router + sample app)
   isle install [target]   Install dependencies (app/router/agent/all)
   isle uninstall [target] Uninstall components (app/router/all)
   isle permissions        Manage file permissions
+  isle fix-docker [cmd]   Check/fix Docker cgroup configuration issues
   isle help               Show this help message
 
 ╔═══════════════════════════════════════════════════════════════╗
@@ -230,17 +255,24 @@ For detailed command information:
 ║                    QUICK START                                ║
 ╚═══════════════════════════════════════════════════════════════╝
 
-1. Initialize a new mesh app:
-   \x1b[33misle app init -d myapp.local\x1b[0m
-   \x1b[33misle app up --build\x1b[0m
+1. Complete setup with one command (recommended for first-time users):
+   \x1b[33misle create\x1b[0m
 
-2. Setup router for network isolation:
-   \x1b[33msudo isle install router\x1b[0m
-   \x1b[33msudo isle router up test-router\x1b[0m
+   This sets up agent, router, and a sample app to demonstrate Isle Mesh.
 
-3. Scaffold existing docker-compose:
-   \x1b[33misle app scaffold docker-compose.yml -d myapp.local\x1b[0m
-   \x1b[33misle app up\x1b[0m
+2. Or set up components individually:
+
+   a. Initialize a new mesh app:
+      \x1b[33misle app init -d myapp.local\x1b[0m
+      \x1b[33misle app up --build\x1b[0m
+
+   b. Setup router for network isolation:
+      \x1b[33msudo isle install router\x1b[0m
+      \x1b[33msudo isle router init\x1b[0m
+
+   c. Scaffold existing docker-compose:
+      \x1b[33misle app scaffold docker-compose.yml -d myapp.local\x1b[0m
+      \x1b[33misle app up\x1b[0m
 
 For more examples and documentation, visit:
 https://github.com/yourusername/IsleMesh

@@ -35,10 +35,12 @@ CUSTOM_IMAGE=""
 main() {
   cat << EOF >&2
 $(printf '%b' "${CYAN:-}")╔═══════════════════════════════════════════════════════════════╗
-║          OpenWRT Router Initialization for Isle-Mesh          ║
+║       OpenWRT Router VM Creation (Step 1 of Isle Setup)      ║
 ║                                                                ║
-║  This script creates an OpenWRT VM with NO network interfaces ║
-║  Ports are assigned dynamically for security and flexibility  ║
+║  • Creates OpenWRT VM                                         ║
+║  • Configures br-mgmt (management) for SSH access             ║
+║  • Configures isle-br-0 for local isle-agent connectivity     ║
+║  • Isolated network: No external IP exposure                  ║
 ╚═══════════════════════════════════════════════════════════════╝$(printf '%b' "${NC:-}")
 EOF
 
@@ -49,9 +51,19 @@ EOF
   setup_libvirt_permissions
   download_image
 
+  # Create bridges BEFORE VM creation (VM template references them)
+  create_bridges
+
   local XML_FILE
   XML_FILE="$(create_vm_xml)"
   create_vm "$XML_FILE"
+
+  # Verify network setup (interfaces already in VM template)
+  run_bridge_setup
+
+  download_openwrt_packages
+  copy_packages_to_router
+  install_and_configure_packages
   show_next_steps
   log_success "Initialization complete!"
 }

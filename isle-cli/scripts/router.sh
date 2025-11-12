@@ -61,6 +61,88 @@ log_warning() {
     echo -e "${YELLOW}[WARNING]${NC} $1"
 }
 
+# Wrapper for virsh commands that tries without sudo first, then with sudo
+virsh_cmd() {
+    # Try without sudo first (for users with libvirt group access)
+    if virsh "$@" 2>/dev/null; then
+        return 0
+    fi
+
+    # Fall back to sudo if needed
+    sudo virsh "$@" 2>/dev/null
+}
+
+# Get the IP address of a router VM by looking up its MAC in ARP table
+get_router_ip() {
+    local vm_name="$1"
+
+    # Get MAC address from VM configuration
+    local mac_address=$(virsh_cmd dumpxml "$vm_name" | grep "mac address" | head -1 | sed -n "s/.*mac address='\([^']*\)'.*/\1/p")
+
+    if [[ -z "$mac_address" ]]; then
+        return 1
+    fi
+
+    # Look up IP in ARP table
+    local ip_address=$(arp -n | grep -i "$mac_address" | awk '{print $1}' | head -1)
+
+    if [[ -z "$ip_address" ]]; then
+        return 1
+    fi
+
+    echo "$ip_address"
+    return 0
+}
+
+# Select router and get its IP address
+# If only one router running, auto-select it
+# If multiple routers running, show interactive menu
+select_router_with_ip() {
+    local routers=()
+    local router_ips=()
+
+    # Find all running routers
+    while IFS= read -r vm; do
+        if [[ -n "$vm" ]]; then
+            local ip=$(get_router_ip "$vm")
+            if [[ -n "$ip" ]]; then
+                routers+=("$vm")
+                router_ips+=("$ip")
+            fi
+        fi
+    done < <(virsh_cmd list --state-running | grep -E "openwrt|router" | awk '{print $2}')
+
+    # No routers found
+    if [[ ${#routers[@]} -eq 0 ]]; then
+        log_error "No running routers found or routers not responding on network"
+        return 1
+    fi
+
+    # Single router - auto-select
+    if [[ ${#routers[@]} -eq 1 ]]; then
+        echo "${routers[0]}|${router_ips[0]}"
+        return 0
+    fi
+
+    # Multiple routers - show interactive menu
+    echo ""
+    log_info "Multiple routers detected. Please select one:"
+    echo ""
+
+    PS3="Select router (1-${#routers[@]}): "
+    select choice in "${routers[@]}"; do
+        if [[ -n "$choice" ]]; then
+            local idx=$((REPLY - 1))
+            echo "${routers[$idx]}|${router_ips[$idx]}"
+            return 0
+        else
+            log_error "Invalid selection. Please try again."
+        fi
+    done
+
+    return 1
+}
+
 # Check if router directory exists
 check_router_dir() {
     if [[ ! -d "$ROUTER_DIR" ]]; then
@@ -252,10 +334,10 @@ cmd_init() {
     check_sudo
 
     echo -e "${CYAN}╔═══════════════════════════════════════════════════════════════╗"
-    echo -e "║          Initialize Isle-Mesh Router (Secure Mode)            ║"
+    echo -e "║          Initialize Isle-Mesh Router (Complete Setup)         ║"
     echo -e "║                                                                ║"
-    echo -e "║  This creates a secure OpenWRT router VM with NO network      ║"
-    echo -e "║  interfaces. You'll assign ports dynamically for security.    ║"
+    echo -e "║  Creates OpenWRT router VM and configures vLAN networking,    ║"
+    echo -e "║  DHCP server, and discovery beacon for mesh connectivity.     ║"
     echo -e "╚═══════════════════════════════════════════════════════════════╝${NC}"
     echo ""
 
@@ -271,16 +353,8 @@ cmd_init() {
     fi
 
     # Run the router initialization script
+    # (This calls setup-isle-mesh-router.sh which provides comprehensive output)
     bash "$ROUTER_DIR/scripts/router-init.sh" "$@"
-
-    echo ""
-    log_success "Router initialized successfully!"
-    echo ""
-    echo -e "${CYAN}Next Steps:${NC}"
-    echo ""
-    echo "  1. Add connections to your router:"
-    echo -e "     ${GREEN}sudo isle router add-connection${NC}"
-    echo ""
 }
 
 # Add Connection - Interactively add ports
@@ -404,6 +478,64 @@ cmd_security() {
 
     # Run the security verification script
     bash "$ROUTER_DIR/scripts/verify-network-isolation.sh" "$@"
+}
+
+# Discover mDNS - Discover .local domains from router
+cmd_discover_mdns() {
+    check_router_dir
+
+    if [[ ! -f "$ROUTER_DIR/scripts/utilities/discover-mdns-domains.sh" ]]; then
+        log_error "mDNS discovery script not found: $ROUTER_DIR/scripts/utilities/discover-mdns-domains.sh"
+        exit 1
+    fi
+
+    # Detect router and its IP
+    local router_info=$(select_router_with_ip)
+    if [[ $? -ne 0 ]] || [[ -z "$router_info" ]]; then
+        log_error "Could not detect router IP address"
+        echo ""
+        echo "Make sure a router is running and accessible on the network."
+        echo "Run 'isle router status' to check router status."
+        exit 1
+    fi
+
+    local ROUTER_VM=$(echo "$router_info" | cut -d'|' -f1)
+    local ROUTER_IP=$(echo "$router_info" | cut -d'|' -f2)
+
+    log_info "Using router: $ROUTER_VM at $ROUTER_IP"
+    echo ""
+
+    # Run the mDNS discovery script with the detected IP
+    bash "$ROUTER_DIR/scripts/utilities/discover-mdns-domains.sh" "$ROUTER_IP" "$@"
+}
+
+# Domains - Manage .vlan domain mappings
+cmd_domains() {
+    check_router_dir
+
+    if [[ ! -f "$ROUTER_DIR/scripts/utilities/manage-vlan-domains.sh" ]]; then
+        log_error "Domain management script not found: $ROUTER_DIR/scripts/utilities/manage-vlan-domains.sh"
+        exit 1
+    fi
+
+    # Detect router and its IP
+    local router_info=$(select_router_with_ip)
+    if [[ $? -ne 0 ]] || [[ -z "$router_info" ]]; then
+        log_error "Could not detect router IP address"
+        echo ""
+        echo "Make sure a router is running and accessible on the network."
+        echo "Run 'isle router status' to check router status."
+        exit 1
+    fi
+
+    local ROUTER_VM=$(echo "$router_info" | cut -d'|' -f1)
+    local ROUTER_IP=$(echo "$router_info" | cut -d'|' -f2)
+
+    log_info "Using router: $ROUTER_VM at $ROUTER_IP"
+    echo ""
+
+    # Run the domain management script with the detected IP
+    bash "$ROUTER_DIR/scripts/utilities/manage-vlan-domains.sh" "$ROUTER_IP" "$@"
 }
 
 # List - List all routers
@@ -644,6 +776,98 @@ cmd_delete() {
     log_success "Router $ROUTER_NAME deleted successfully"
 }
 
+# Destroy - Complete cleanup with confirmation
+cmd_destroy() {
+    check_router_dir
+    check_sudo
+
+    local CLEANUP_MODE="vm-only"
+    local FORCE_FLAG=""
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --full)
+                CLEANUP_MODE="full"
+                shift
+                ;;
+            --vm-only)
+                CLEANUP_MODE="vm-only"
+                shift
+                ;;
+            -f|--force)
+                FORCE_FLAG="--force"
+                shift
+                ;;
+            -h|--help)
+                cat << EOF
+${BLUE}╔═══════════════════════════════════════════════════════════════╗
+║              Isle Router Destroy Command                      ║
+╚═══════════════════════════════════════════════════════════════╝${NC}
+
+Completely removes the OpenWRT router VM and cleans up bridges by default.
+
+${GREEN}USAGE:${NC}
+  sudo isle router destroy [options]
+
+${GREEN}OPTIONS:${NC}
+  --vm-only           Only destroy VM, keep bridges (br-mgmt, isle-br-*)
+  --full              Destroy VM and remove all bridges (DEFAULT)
+  -f, --force         Skip confirmation prompts (DANGEROUS!)
+  -h, --help          Show this help message
+
+${GREEN}EXAMPLES:${NC}
+
+  ${YELLOW}# Complete cleanup (removes everything) - DEFAULT${NC}
+  sudo isle router destroy
+
+  ${YELLOW}# Remove VM only (keeps bridges for re-initialization)${NC}
+  sudo isle router destroy --vm-only
+
+  ${YELLOW}# Force removal without confirmation${NC}
+  sudo isle router destroy --force
+
+${GREEN}WHAT GETS DELETED:${NC}
+
+${CYAN}Default (--full):${NC}
+  - OpenWRT router VM and configuration
+  - All router settings and customizations
+  - br-mgmt (management bridge)
+  - All isle-br-* bridges (isle-br-0, isle-br-1, etc.)
+  - Any containers using these bridges will lose connectivity
+
+${CYAN}With --vm-only:${NC}
+  - OpenWRT router VM and configuration
+  - All router settings and customizations
+  - Bridges are preserved for quick re-initialization
+
+${RED}WARNING:${NC} This action cannot be undone!
+
+${GREEN}RECOVERY:${NC}
+  To recreate the router: ${CYAN}sudo isle router init${NC}
+
+EOF
+                exit 0
+                ;;
+            *)
+                log_error "Unknown option: $1"
+                echo ""
+                echo "Run 'sudo isle router destroy --help' for usage"
+                exit 1
+                ;;
+        esac
+    done
+
+    # Check if destroy script exists
+    if [[ ! -f "$ROUTER_DIR/scripts/router-setup/router-destroy.sh" ]]; then
+        log_error "Destroy script not found: $ROUTER_DIR/scripts/router-setup/router-destroy.sh"
+        exit 1
+    fi
+
+    # Call the destroy script with appropriate flags
+    bash "$ROUTER_DIR/scripts/router-setup/router-destroy.sh" --$CLEANUP_MODE $FORCE_FLAG
+}
+
 # Status - Show router status
 cmd_status() {
     check_router_dir
@@ -670,19 +894,19 @@ cmd_status() {
     local RUNNING_COUNT=0
 
     # Check for all known router types
-    if sudo virsh list --all 2>/dev/null | grep -q "openwrt-test"; then
+    if virsh_cmd list --all | grep -q "openwrt-test"; then
         ALL_ROUTERS+=("openwrt-test")
     fi
 
-    if sudo virsh list --all 2>/dev/null | grep -q "^.*openwrt-router "; then
+    if virsh_cmd list --all | grep -q "^.*openwrt-router "; then
         ALL_ROUTERS+=("openwrt-router")
     fi
 
-    if sudo virsh list --all 2>/dev/null | grep -q "openwrt-isle-router"; then
+    if virsh_cmd list --all | grep -q "openwrt-isle-router"; then
         ALL_ROUTERS+=("openwrt-isle-router")
     fi
 
-    if sudo virsh list --all 2>/dev/null | grep -q "router-core"; then
+    if virsh_cmd list --all | grep -q "router-core"; then
         ALL_ROUTERS+=("router-core")
     fi
 
@@ -697,7 +921,7 @@ cmd_status() {
     fi
 
     for vm in "${ALL_ROUTERS[@]}"; do
-        local STATE=$(sudo virsh list --all 2>/dev/null | grep "$vm" | awk '{print $3}')
+        local STATE=$(virsh_cmd list --all | grep "$vm" | awk '{print $3}')
         local STATUS_COLOR="${GREEN}"
 
         if [[ "$STATE" == "running" ]]; then
@@ -714,8 +938,8 @@ cmd_status() {
         fi
 
         # Show which bridges are attached
-        if sudo virsh domiflist "$vm" &>/dev/null; then
-            local vm_bridges=$(sudo virsh domiflist "$vm" 2>/dev/null | tail -n +3 | awk '{print $3}' | grep -v "^$" | tr '\n' ', ' | sed 's/,$//')
+        if virsh_cmd domiflist "$vm" &>/dev/null; then
+            local vm_bridges=$(virsh_cmd domiflist "$vm" | tail -n +3 | awk '{print $3}' | grep -v "^$" | tr '\n' ', ' | sed 's/,$//')
             if [[ -n "$vm_bridges" ]]; then
                 echo "  └─ Bridges: $vm_bridges"
             fi
@@ -746,9 +970,26 @@ cmd_status() {
 
     # From here on, show details about the running router
     local ROUTER_VM="$RUNNING_ROUTER"
-    local ROUTER_IP="192.168.100.1"  # Default management IP
 
-    # From here on, we have a running router
+    # Dynamically detect router IP
+    local ROUTER_IP=$(get_router_ip "$ROUTER_VM")
+
+    if [[ -z "$ROUTER_IP" ]]; then
+        log_warning "Could not detect IP address for router: $ROUTER_VM"
+        echo ""
+        echo "The router VM is running but not responding on the network."
+        echo "This may mean:"
+        echo "  - The router is still booting (wait a moment and try again)"
+        echo "  - The network configuration needs attention"
+        echo ""
+        echo "You can try:"
+        echo "  - Wait 10-20 seconds and run 'isle router status' again"
+        echo "  - Check if the router is on the ARP table: arp -n"
+        echo ""
+        return 1
+    fi
+
+    # From here on, we have a running router with an IP
     log_info "Querying router: ${ROUTER_VM} at ${ROUTER_IP}"
     echo ""
 
@@ -1024,12 +1265,23 @@ cmd_help() {
     echo -e "                           Options: -f (force, no prompt)"
     echo -e "                           Aliases: rm, remove"
     echo ""
-    echo -e "${GREEN}PRODUCTION COMMANDS:${NC}"
-    echo -e "  ${CYAN}provision${NC}               Provision production OpenWRT router"
-    echo -e "                           - Sets up USB/Ethernet passthrough"
-    echo -e "                           - Configures isles and vLANs"
-    echo -e "                           - Creates router VM"
+    echo -e "  ${CYAN}destroy${NC}                 Completely remove router and bridges (DEFAULT: full cleanup)"
+    echo -e "                           - Enhanced cleanup with safety warnings"
+    echo -e "                           - Checks for running containers"
+    echo -e "                           - Requires typing 'DELETE' to confirm"
+    echo -e "                           - Removes all isle-br-* and br-mgmt bridges by default"
+    echo -e "                           - Options: --vm-only (keep bridges), --force"
     echo -e "                           Requires: sudo"
+    echo -e "                           Run: sudo isle router destroy --help"
+    echo ""
+    echo -e "${GREEN}INITIALIZATION COMMANDS:${NC}"
+    echo -e "  ${CYAN}init${NC}                    Initialize secure OpenWRT router (recommended)"
+    echo -e "                           - Creates router VM"
+    echo -e "                           - Configures vLAN networking"
+    echo -e "                           - Sets up DHCP server"
+    echo -e "                           - Deploys discovery beacon"
+    echo -e "                           Requires: sudo"
+    echo -e "                           Run: sudo isle router init --help"
     echo ""
     echo -e "  ${CYAN}configure${NC}               Configure OpenWRT router"
     echo -e "                           - Sets up network interfaces"
@@ -1060,6 +1312,23 @@ cmd_help() {
     echo -e "                           - Independent security verification"
     echo -e "                           Options: -v (verbose), -q (quiet)"
     echo ""
+    echo -e "  ${CYAN}discover${NC}                Discover mDNS .local domains from router"
+    echo -e "                           - SSHes into router and runs avahi-browse"
+    echo -e "                           - Lists all discoverable .local domains"
+    echo -e "                           - Shows services and IP addresses"
+    echo -e "                           - Can show copy/paste command with --show-command"
+    echo -e "                           Options: --show-command, --raw"
+    echo -e "                           Aliases: discover-mdns"
+    echo ""
+    echo -e "  ${CYAN}domains${NC}                 Manage .vlan domain mappings"
+    echo -e "                           - Discovers .local domains and creates .vlan mappings"
+    echo -e "                           - Interactive selection of domains to add"
+    echo -e "                           - Auto-add all discovered domains with --auto"
+    echo -e "                           - List configured domains with --list"
+    echo -e "                           - Remove domain with --remove <domain>"
+    echo -e "                           Options: --auto, --list, --remove <domain>"
+    echo -e "                           Aliases: manage-domains"
+    echo ""
     echo -e "  ${CYAN}help${NC}                    Show this help message"
     echo ""
     echo -e "${GREEN}EXAMPLES:${NC}"
@@ -1076,17 +1345,17 @@ cmd_help() {
     echo -e "  ${YELLOW}# Delete a router completely${NC}"
     echo -e "  sudo isle router delete <router-name>"
     echo ""
-    echo -e "  ${YELLOW}# Check router status (shows all routers)${NC}"
+    echo -e "  ${YELLOW}# Check router status (shows all routers and their IPs)${NC}"
     echo -e "  isle router status"
     echo ""
-    echo -e "  ${YELLOW}# Check if router can be pinged${NC}"
-    echo -e "  ping 192.168.100.1"
+    echo -e "  ${YELLOW}# Initialize secure router${NC}"
+    echo -e "  sudo isle router init"
+    echo ""
+    echo -e "  ${YELLOW}# Initialize with custom settings${NC}"
+    echo -e "  sudo isle router init --isle-name my-isle --vlan-id 20"
     echo ""
     echo -e "  ${YELLOW}# Detect hardware for production setup${NC}"
     echo -e "  isle router detect"
-    echo ""
-    echo -e "  ${YELLOW}# Provision production router${NC}"
-    echo -e "  sudo isle router provision"
     echo ""
     echo -e "  ${YELLOW}# Verify network isolation security${NC}"
     echo -e "  isle router security"
@@ -1097,25 +1366,43 @@ cmd_help() {
     echo -e "  ${YELLOW}# Quick security check (quiet mode)${NC}"
     echo -e "  isle router security -q"
     echo ""
+    echo -e "  ${YELLOW}# Discover mDNS .local domains from router${NC}"
+    echo -e "  isle router discover"
+    echo ""
+    echo -e "  ${YELLOW}# Show SSH command to manually discover domains${NC}"
+    echo -e "  isle router discover --show-command"
+    echo ""
+    echo -e "  ${YELLOW}# Manage .vlan domain mappings (interactive)${NC}"
+    echo -e "  isle router domains"
+    echo ""
+    echo -e "  ${YELLOW}# Auto-add all discovered .local domains as .vlan${NC}"
+    echo -e "  isle router domains --auto"
+    echo ""
+    echo -e "  ${YELLOW}# List currently configured .vlan domains${NC}"
+    echo -e "  isle router domains --list"
+    echo ""
+    echo -e "  ${YELLOW}# Remove a .vlan domain${NC}"
+    echo -e "  isle router domains --remove sample.vlan"
+    echo ""
     echo -e "${GREEN}TROUBLESHOOTING:${NC}"
     echo ""
     echo -e "  ${YELLOW}If network interfaces don't respond:${NC}"
     echo -e "  ${CYAN}sudo isle router reconfigure${NC}"
     echo -e "     └─> Re-run auto-configuration on existing VM"
     echo ""
-    echo -e "${GREEN}PRODUCTION WORKFLOW:${NC}"
+    echo -e "${GREEN}GETTING STARTED WORKFLOW:${NC}"
     echo ""
-    echo -e "  1. ${CYAN}isle router detect${NC}"
-    echo -e "     └─> Find USB WiFi adapters and Ethernet ports"
+    echo -e "  1. ${CYAN}sudo isle router init${NC}"
+    echo -e "     └─> Create and configure router VM"
     echo ""
-    echo -e "  2. Edit ${CYAN}openwrt-router/config/port-mapping.conf${NC}"
-    echo -e "     └─> Assign ports to isles"
+    echo -e "  2. ${CYAN}isle router status${NC}"
+    echo -e "     └─> Verify router is running and configured"
     echo ""
-    echo -e "  3. ${CYAN}sudo isle router provision${NC}"
-    echo -e "     └─> Create production router VM"
+    echo -e "  3. ${CYAN}isle router discover${NC}"
+    echo -e "     └─> Discover .local domains from router"
     echo ""
-    echo -e "  4. ${CYAN}isle router configure${NC}"
-    echo -e "     └─> Configure router interfaces and firewall"
+    echo -e "  4. ${CYAN}isle router domains --auto${NC}"
+    echo -e "     └─> Auto-add discovered domains as .vlan mappings"
     echo ""
     echo -e "${GREEN}DOCUMENTATION:${NC}"
     echo -e "  Main docs:        $ROUTER_DIR/README.md"
@@ -1153,6 +1440,10 @@ case "$SUBCOMMAND" in
 
     delete|rm|remove)
         cmd_delete "$@"
+        ;;
+
+    destroy)
+        cmd_destroy "$@"
         ;;
 
     test)
@@ -1197,6 +1488,14 @@ case "$SUBCOMMAND" in
 
     security)
         cmd_security "$@"
+        ;;
+
+    discover-mdns|discover)
+        cmd_discover_mdns "$@"
+        ;;
+
+    domains|manage-domains)
+        cmd_domains "$@"
         ;;
 
     help|--help|-h)

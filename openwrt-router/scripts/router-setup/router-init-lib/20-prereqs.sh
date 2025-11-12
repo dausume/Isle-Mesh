@@ -30,7 +30,7 @@ _try_install() {
   case "$mgr" in
     apt)
       $SUDO apt-get update -y || return 1
-      $SUDO DEBIAN_FRONTEND=noninteractive apt-get install -y "$@" || return 1 ;;
+      $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y "$@" || return 1 ;;
     dnf|yum)
       $SUDO "$mgr" install -y "$@" || return 1 ;;
     pacman)
@@ -44,6 +44,9 @@ _try_install() {
 
 _start_libvirt_service() {
   local SUDO; SUDO=$(_sudo_prefix)
+  if [[ -n "$SUDO" ]]; then
+    log_info "📋 You may be prompted for your password to enable libvirt service"
+  fi
   if systemctl list-unit-files | grep -q '^libvirtd\.service'; then
     $SUDO systemctl enable --now libvirtd || true
   elif systemctl list-unit-files | grep -q '^libvirt\.service'; then
@@ -58,7 +61,7 @@ _start_libvirt_service() {
 check_prerequisites() {
   log_step "Step 1: Checking Prerequisites"
 
-  local REQUIRED_CMDS=(virsh qemu-img wget ip setfacl getfacl yad)
+  local REQUIRED_CMDS=(virsh qemu-img wget ip setfacl getfacl yad sshpass)
   local missing=()
 
   for cmd in "${REQUIRED_CMDS[@]}"; do
@@ -70,12 +73,13 @@ check_prerequisites() {
     local mgr; mgr="$(_detect_pkg_mgr)"
     if [[ "$mgr" == "unknown" ]]; then
       log_error "No supported package manager detected."
-      log_info "Install manually: qemu-kvm qemu-system-x86 qemu-utils libvirt-daemon-system libvirt-clients bridge-utils wget acl yad"
+      log_info "Install manually: qemu-kvm qemu-system-x86 qemu-utils libvirt-daemon-system libvirt-clients bridge-utils wget acl yad sshpass"
       exit 1
     fi
     log_info "Attempting auto-install via $mgr…"
+    log_info "📋 You may be prompted for your password to install required packages"
     if ! _try_install "$mgr" qemu-kvm qemu-system-x86 qemu-utils \
-         libvirt-daemon-system libvirt-clients bridge-utils wget acl yad; then
+         libvirt-daemon-system libvirt-clients bridge-utils wget acl yad sshpass; then
       log_error "Automatic installation failed."
       [[ "$mgr" =~ dnf|yum ]] && log_info "Tip: enable EPEL if 'yad' is missing: sudo dnf install -y epel-release && sudo dnf install -y yad"
       log_info "Please install packages manually, then re-run."

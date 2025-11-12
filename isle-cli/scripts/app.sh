@@ -20,6 +20,7 @@ MESH_PROXY="$SCRIPT_DIR/mesh-proxy.sh"
 EMBED_JINJA="$SCRIPT_DIR/embed-jinja.sh"
 MDNS="$SCRIPT_DIR/mdns.sh"
 SAMPLE="$SCRIPT_DIR/sample.sh"
+APP_INTEGRATION="$SCRIPT_DIR/app-integration.sh"
 
 # Color codes for output
 RED='\033[0;31m'
@@ -115,6 +116,14 @@ show_help() {
     echo -e "    list                              List available samples"
     echo -e ""
     echo -e "╔═══════════════════════════════════════════════════════════════╗"
+    echo -e "║                    APP-AGENT INTEGRATION                      ║"
+    echo -e "╚═══════════════════════════════════════════════════════════════╝"
+    echo -e ""
+    echo -e "  ${CYAN}isle app integrate${NC}                Prepare app for agent integration"
+    echo -e "  ${CYAN}isle app fix${NC}                      Fix deployed app to work with agent"
+    echo -e "  ${CYAN}isle app check${NC}                    Check app-agent integration status"
+    echo -e ""
+    echo -e "╔═══════════════════════════════════════════════════════════════╗"
     echo -e "║                    QUICK START EXAMPLES                       ║"
     echo -e "╚═══════════════════════════════════════════════════════════════╝"
     echo -e ""
@@ -183,6 +192,11 @@ case $COMMAND in
 
     sample)
         exec bash "$SAMPLE" "$@"
+        ;;
+
+    # App-Agent integration
+    integrate|fix|check)
+        exec bash "$APP_INTEGRATION" "$@"
         ;;
 
     help|-h|--help|"")

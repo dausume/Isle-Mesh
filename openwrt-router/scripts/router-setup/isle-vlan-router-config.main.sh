@@ -5,12 +5,12 @@ BUNDLED_MODE="${BUNDLED_MODE:-0}"
 
 if [[ "$BUNDLED_MODE" != "1" ]]; then
   SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-  for f in "$SCRIPT_DIR"/mdns-config-lib/[0-9][0-9]-*.sh; do source "$f"; done
+  for f in "$SCRIPT_DIR"/isle-vlan-router-config-lib/[0-9][0-9]-*.sh; do source "$f"; done
 fi
 
 main() {
-  banner "OpenWRT Router mDNS Passthrough Configuration (single isle: my-isle)"
   parse_args "$@"
+  banner "OpenWRT Router mDNS Passthrough Configuration (single isle: $ISLE_NAME)"
   check_prerequisites_or_prompt
   maybe_set_root_password
   update_packages

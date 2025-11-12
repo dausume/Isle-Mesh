@@ -2,7 +2,8 @@
     # {{ subdomain }}.{{ base_domain }} https server proxy with mTLS
     server {
         listen 443 ssl;
-        server_name {{ subdomain }}.{{ base_domain }};
+        # Dual-domain support: mDNS (.local) and mesh DNS (.vlan)
+        server_name {{ subdomain }}.{{ base_domain }} {% if base_domain.endswith('.local') %}{{ subdomain }}.{{ base_domain.replace('.local', '.vlan') }}{% endif %};
 
         # For the proxy level we still use the base {{ base_domain }} cert for communicating to all sub-domains as a front-door,
         # the 'actual' subdomain key/cert re-encrypt occurs via mTLS with the backend server, where the key

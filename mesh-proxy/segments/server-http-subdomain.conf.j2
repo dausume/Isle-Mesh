@@ -2,7 +2,8 @@
     # {{ subdomain }}.{{ base_domain }} http server proxy
     server {
         listen 80;
-        server_name {{ subdomain }}.{{ base_domain }};
+        # Dual-domain support: mDNS (.local) and mesh DNS (.vlan)
+        server_name {{ subdomain }}.{{ base_domain }} {% if base_domain.endswith('.local') %}{{ subdomain }}.{{ base_domain.replace('.local', '.vlan') }}{% endif %};
 
         location / {
             default_type text/plain;

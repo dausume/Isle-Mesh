@@ -57,7 +57,7 @@ parse_args() {
         case $1 in
             --isle-name)
                 ISLE_NAME="$2"
-                ISLE_UCI=$(echo "$ISLE_NAME" | tr '-' '')
+                ISLE_UCI=$(echo "$ISLE_NAME" | tr -d '-')
                 shift 2
                 ;;
             --vlan-id)

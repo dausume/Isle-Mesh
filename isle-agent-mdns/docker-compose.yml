@@ -1,0 +1,88 @@
+version: '3.8'
+
+# Isle Agent with mDNS - Unified nginx proxy + Avahi mDNS daemon
+# This container runs independently and advertises services over the vLAN only
+
+services:
+  isle-agent-mdns:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: isle-agent-mdns:latest
+    container_name: isle-agent-mdns
+    restart: unless-stopped
+
+    # Virtual MAC address for OpenWRT DHCP isolation
+    # Format: 02:00:00:00:VLAN:XX (locally administered)
+    mac_address: "02:00:00:00:0a:01"
+
+    # Required for D-Bus and Avahi to function
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+
+    ports:
+      - "80:80"
+      - "443:443"
+      # mDNS port (multicast DNS)
+      - "5353:5353/udp"
+
+    volumes:
+      # Master nginx config (merged from all app fragments)
+      - /etc/isle-mesh/agent/nginx.conf:/etc/nginx/nginx.conf:ro
+
+      # App config fragments (generated per mesh-app)
+      - /etc/isle-mesh/agent/configs:/etc/nginx/configs:ro
+
+      # SSL certificates (shared across all apps)
+      - /etc/isle-mesh/agent/ssl/certs:/etc/nginx/ssl/certs:ro
+      - /etc/isle-mesh/agent/ssl/keys:/etc/nginx/ssl/keys:ro
+
+      # Agent state and logs
+      - /etc/isle-mesh/agent/logs:/var/log/nginx
+
+      # Registry for auto-registering mDNS services
+      - /etc/isle-mesh/agent/registry.json:/etc/isle-mesh/agent/registry.json:ro
+
+      # Avahi service definitions (persistent)
+      - /etc/isle-mesh/agent/mdns/services:/etc/avahi/services
+
+      # D-Bus socket (required for Avahi)
+      - /var/run/dbus:/var/run/dbus
+
+    networks:
+      - isle-agent-net
+      isle-br-0:
+        # No IP assigned - will get DHCP from OpenWRT router
+        priority: 100
+
+    labels:
+      isle.component: "agent"
+      isle.role: "proxy-mdns"
+      isle.version: "1.0.0"
+      isle.mdns: "enabled"
+
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://127.0.0.1/health && pgrep avahi-daemon"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+networks:
+  # Internal docker network for app containers to reach agent
+  isle-agent-net:
+    driver: bridge
+    name: isle-agent-net
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+  # Macvlan network on isle-br-0 for OpenWRT router connectivity
+  # Agent appears on this bridge with its virtual MAC and gets DHCP from router
+  # mDNS traffic will ONLY propagate over this network (vLAN isolation)
+  isle-br-0:
+    driver: macvlan
+    driver_opts:
+      parent: isle-br-0
+    name: isle-br-0

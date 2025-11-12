@@ -24,11 +24,18 @@ reflect-ipv=yes
 EOF
 
 /etc/init.d/avahi-daemon enable
-/etc/init.d/avahi-daemon restart || true
+# Schedule avahi restart in background to allow SSH to exit cleanly
+( sleep 2 && /etc/init.d/avahi-daemon restart ) >/dev/null 2>&1 </dev/null &
+echo "Avahi restart scheduled"
 SH
 
   copy_to_openwrt "$tmp" "/tmp/mdns-config.sh"
   exec_ssh "chmod +x /tmp/mdns-config.sh && /tmp/mdns-config.sh" \
     || { warn "mDNS config failed (avahi likely missing)"; return 0; }
+
+  # Wait for avahi to restart
+  info "Waiting for Avahi to restart (5 seconds)..."
+  sleep 5
+
   ok "mDNS reflector configured"
 }

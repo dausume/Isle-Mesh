@@ -20,7 +20,7 @@ check_existing_vm() {
 
 create_vm_xml() {
   log_step "Step 4: Creating VM Configuration"
-  log_info "Configuring VM with NO network interfaces (dynamic assignment)..."
+  log_info "Configuring VM with br-mgmt (eth0) and isle-br-0 (eth1)..."
 
   local ROUTER_CONFIG_DIR="/etc/isle-mesh/router"
   mkdir -p "$ROUTER_CONFIG_DIR"

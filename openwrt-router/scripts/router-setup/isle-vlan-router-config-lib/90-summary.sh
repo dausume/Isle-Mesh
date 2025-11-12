@@ -14,7 +14,7 @@ Management:
   SSH:            ssh ${OPENWRT_USER}@${OPENWRT_IP}
 
 Single Isle:
-  Name:           my-isle  (UCI: ${MY_ISLE_UCI})
+  Name:           ${MY_ISLE_NAME}  (UCI: ${MY_ISLE_UCI})
   VLAN:           ${VLAN_ID}
   Interface:      ${MY_ISLE_IF_DEV}
   Address:        ${MY_ISLE_IP}/${MY_ISLE_NETMASK}

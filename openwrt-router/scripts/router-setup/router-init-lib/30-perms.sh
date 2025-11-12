@@ -5,6 +5,9 @@ if [[ -n "${_PERMS_SH_SOURCED:-}" ]]; then return 0; fi; _PERMS_SH_SOURCED=1
 setup_libvirt_permissions() {
   log_step "Step 2: Setting Up Libvirt Permissions"
 
+  # Ensure IMAGE_DIR exists before setting ACLs
+  mkdir -p "$IMAGE_DIR"
+
   local IMAGE_PATH="$IMAGE_DIR/openwrt-isle-router.qcow2"
 
   local LIBVIRT_USER="libvirt-qemu"

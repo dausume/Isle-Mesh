@@ -1,0 +1,30 @@
+events { worker_connections 1024; }
+
+http {
+
+    include mime.types;
+
+    # Set what the logs look like per request that comes through, comment or uncomment this
+    # if you are having problems with the proxy and need help figuring out what requests coming
+    # in look like, you will need to figure out what nginx variables correspond to headers and
+    # other protocol info coming in through the proxy if you want to see it here.
+    log_format combined_with_time '$remote_addr - $remote_user [$time_local] "$request"'
+                                  '$status $body_bytes_sent "$http_referer"'
+                                  '"$http_user_agent" "$http_x_forwarded_for"';
+
+    # Forwards all logs to go to the console so you can see them in the docker compose or container console.
+    access_log /dev/stdout combined_with_time;
+
+    # Forwards all proxy errors to the terminal/console.
+    error_log /dev/stderr debug;
+
+{% block upstreams %}
+{% endblock %}
+
+{% block security_headers %}
+{% endblock %}
+
+{% block servers %}
+{% endblock %}
+
+}
