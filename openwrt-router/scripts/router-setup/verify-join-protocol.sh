@@ -22,12 +22,23 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../lib/common-log.sh"
 source "$SCRIPT_DIR/../lib/common-utils.sh"
 
+# Source SSH key library for dedicated router key
+if [ -f "$SCRIPT_DIR/router-init-lib/15-ssh-key.sh" ]; then
+    source "$SCRIPT_DIR/router-init-lib/15-ssh-key.sh"
+fi
+
 # Configuration
 ROUTER_IP="${ROUTER_IP:-192.168.1.1}"
 VLAN_ID="${VLAN_ID:-10}"
 ROUTER_USER="${ROUTER_USER:-root}"
-SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5"
 TEST_HOSTNAME="${TEST_HOSTNAME:-}"
+
+# Use dedicated SSH key if available, otherwise fall back to default
+if [ -n "${ISLE_SSH_OPTS:-}" ]; then
+    SSH_OPTS="$ISLE_SSH_OPTS -o ConnectTimeout=5"
+else
+    SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5"
+fi
 
 # Test results
 TESTS_PASSED=0
@@ -111,7 +122,7 @@ test_router_connectivity() {
         return 1
     fi
 
-    if ssh $SSH_OPTS "${ROUTER_USER}@${ROUTER_IP}" "exit" 2>/dev/null; then
+    if sudo ssh $SSH_OPTS "${ROUTER_USER}@${ROUTER_IP}" "exit" 2>/dev/null; then
         test_pass "SSH access to router"
     else
         test_fail "SSH access" "Cannot connect to router via SSH"
@@ -126,7 +137,7 @@ test_join_protocol_service() {
     log_step "Test 2: Join Protocol Service Status"
 
     local service_status
-    service_status=$(ssh $SSH_OPTS "${ROUTER_USER}@${ROUTER_IP}" \
+    service_status=$(sudo ssh $SSH_OPTS "${ROUTER_USER}@${ROUTER_IP}" \
         "/etc/init.d/isle-join-protocol status 2>/dev/null" || echo "not found")
 
     if echo "$service_status" | grep -q "running"; then
@@ -139,7 +150,7 @@ test_join_protocol_service() {
 
     # Check if daemon process is running
     local daemon_pid
-    daemon_pid=$(ssh $SSH_OPTS "${ROUTER_USER}@${ROUTER_IP}" \
+    daemon_pid=$(sudo ssh $SSH_OPTS "${ROUTER_USER}@${ROUTER_IP}" \
         "cat /var/run/isle-join-protocol.pid 2>/dev/null" || echo "")
 
     if [[ -n "$daemon_pid" ]]; then
@@ -157,7 +168,7 @@ test_router_avahi() {
     log_step "Test 3: Router Avahi/mDNS Support"
 
     local avahi_check
-    avahi_check=$(ssh $SSH_OPTS "${ROUTER_USER}@${ROUTER_IP}" \
+    avahi_check=$(sudo ssh $SSH_OPTS "${ROUTER_USER}@${ROUTER_IP}" \
         "which avahi-browse 2>/dev/null" || echo "")
 
     if [[ -n "$avahi_check" ]]; then
@@ -169,7 +180,7 @@ test_router_avahi() {
 
     # Check if avahi-daemon is running
     local avahi_status
-    avahi_status=$(ssh $SSH_OPTS "${ROUTER_USER}@${ROUTER_IP}" \
+    avahi_status=$(sudo ssh $SSH_OPTS "${ROUTER_USER}@${ROUTER_IP}" \
         "/etc/init.d/avahi-daemon status 2>/dev/null" || echo "stopped")
 
     if echo "$avahi_status" | grep -q "running"; then
@@ -187,7 +198,7 @@ test_mdns_discovery() {
     log_step "Test 4: mDNS Discovery (.local domains)"
 
     local discovered_hosts
-    discovered_hosts=$(ssh $SSH_OPTS "${ROUTER_USER}@${ROUTER_IP}" \
+    discovered_hosts=$(sudo ssh $SSH_OPTS "${ROUTER_USER}@${ROUTER_IP}" \
         "timeout 10 avahi-browse -a -t -r 2>/dev/null | grep 'hostname = ' | grep -oP '\[\K[^\]]+' | sed 's/\.local$//' | sort -u" || echo "")
 
     if [[ -z "$discovered_hosts" ]]; then
@@ -220,7 +231,7 @@ test_dns_mapping() {
 
     # Check if dnsmasq config file exists
     local dns_conf
-    dns_conf=$(ssh $SSH_OPTS "${ROUTER_USER}@${ROUTER_IP}" \
+    dns_conf=$(sudo ssh $SSH_OPTS "${ROUTER_USER}@${ROUTER_IP}" \
         "cat /etc/dnsmasq.d/isle-vlan-domains.conf 2>/dev/null" || echo "")
 
     if [[ -z "$dns_conf" ]]; then
@@ -260,7 +271,7 @@ test_dns_resolution_router() {
 
     # Test .local resolution
     local local_ip
-    local_ip=$(ssh $SSH_OPTS "${ROUTER_USER}@${ROUTER_IP}" \
+    local_ip=$(sudo ssh $SSH_OPTS "${ROUTER_USER}@${ROUTER_IP}" \
         "nslookup ${TEST_HOSTNAME}.local localhost 2>/dev/null | grep 'Address:' | tail -1 | awk '{print \$2}'" || echo "")
 
     if [[ -n "$local_ip" ]] && [[ "$local_ip" =~ ^10\. ]]; then
@@ -271,7 +282,7 @@ test_dns_resolution_router() {
 
     # Test .vlan resolution
     local vlan_ip
-    vlan_ip=$(ssh $SSH_OPTS "${ROUTER_USER}@${ROUTER_IP}" \
+    vlan_ip=$(sudo ssh $SSH_OPTS "${ROUTER_USER}@${ROUTER_IP}" \
         "nslookup ${TEST_HOSTNAME}.vlan localhost 2>/dev/null | grep 'Address:' | tail -1 | awk '{print \$2}'" || echo "")
 
     if [[ -n "$vlan_ip" ]] && [[ "$vlan_ip" =~ ^10\. ]]; then
@@ -301,7 +312,7 @@ test_dhcp() {
 
     # Check DHCP leases
     local dhcp_leases
-    dhcp_leases=$(ssh $SSH_OPTS "${ROUTER_USER}@${ROUTER_IP}" \
+    dhcp_leases=$(sudo ssh $SSH_OPTS "${ROUTER_USER}@${ROUTER_IP}" \
         "cat /var/dhcp.leases 2>/dev/null || cat /tmp/dhcp.leases 2>/dev/null" || echo "")
 
     if [[ -z "$dhcp_leases" ]]; then
@@ -361,7 +372,7 @@ test_join_protocol_logs() {
     log_step "Test 9: Join Protocol Logs"
 
     local recent_logs
-    recent_logs=$(ssh $SSH_OPTS "${ROUTER_USER}@${ROUTER_IP}" \
+    recent_logs=$(sudo ssh $SSH_OPTS "${ROUTER_USER}@${ROUTER_IP}" \
         "logread | grep isle-join-protocol | tail -10" || echo "")
 
     if [[ -z "$recent_logs" ]]; then

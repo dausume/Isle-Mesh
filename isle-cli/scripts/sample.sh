@@ -13,13 +13,16 @@ ACTION=${1:-help}
 
 case $SAMPLE_NAME in
     localhost-mdns)
-        # Delegate to localhost-mdns script
-        LOCALHOST_MDNS_SCRIPT="$SCRIPT_DIR/localhost-mdns.sh"
-        if [ ! -f "$LOCALHOST_MDNS_SCRIPT" ]; then
-            echo "Error: localhost-mdns script not found"
+        echo "⚠️  WARNING: 'isle app sample localhost-mdns' is deprecated"
+        echo "   Use 'isle mdns sample' instead"
+        echo ""
+        # Delegate to mdns-sample script
+        MDNS_SAMPLE_SCRIPT="$SCRIPT_DIR/mdns-sample.sh"
+        if [ ! -f "$MDNS_SAMPLE_SCRIPT" ]; then
+            echo "Error: mdns-sample script not found"
             exit 1
         fi
-        bash "$LOCALHOST_MDNS_SCRIPT" "$ACTION" "$@"
+        bash "$MDNS_SAMPLE_SCRIPT" "$ACTION" "$@"
         ;;
     list)
         echo "Available sample environments:"
@@ -49,7 +52,7 @@ case $SAMPLE_NAME in
         echo "  isle sample localhost-mdns down   # Stop the demo"
         echo ""
         echo "For real Isle Mesh infrastructure setup, use:"
-        echo "  isle mdns        - Configure real mDNS system"
-        echo "  isle embed-jinja - Use framework automation"
+        echo "  isle mdns system install - Configure real mDNS system"
+        echo "  isle app init            - Initialize new applications"
         ;;
 esac

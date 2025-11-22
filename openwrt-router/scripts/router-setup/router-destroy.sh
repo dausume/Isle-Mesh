@@ -144,13 +144,6 @@ confirm_destruction() {
         exit 0
     fi
 
-    if [[ "$CLEANUP_MODE" == "full" ]]; then
-        echo -e "  ${RED}✗${NC} Network Bridges:"
-        echo -e "    - br-mgmt (192.168.1.x management network)"
-        echo -e "    - isle-br-0 (local isle-agent connectivity)"
-        echo -e ""
-    fi
-
     echo -e "${RED}THIS ACTION CANNOT BE UNDONE!${NC}"
     echo -e ""
     echo -e "${YELLOW}What will be lost:${NC}"
@@ -158,15 +151,16 @@ confirm_destruction() {
     echo -e "  • Any customizations or manual changes"
     echo -e "  • Active connections and DHCP leases"
     echo -e "  • Router logs and statistics"
-    echo -e ""
 
     if [[ "$CLEANUP_MODE" == "full" ]]; then
-        echo -e "${YELLOW}Additional cleanup (--full mode):${NC}"
-        echo -e "  • Host network bridges will be removed"
+        echo -e "  • Network bridges: br-mgmt, isle-br-* (all isle bridges)"
         echo -e "  • Any containers using these bridges will lose connectivity"
-        echo -e "  • You'll need to run 'isle router init' to set up again"
         echo -e ""
     else
+        echo -e ""
+    fi
+
+    if [[ "$CLEANUP_MODE" == "vm-only" ]]; then
         echo -e "${BLUE}Cleanup mode: VM only${NC}"
         echo -e "  • Bridges (br-mgmt, isle-br-0) will be preserved"
         echo -e "  • You can run 'isle router init' to recreate the VM"
@@ -253,17 +247,26 @@ remove_bridge() {
 cleanup_bridges() {
     log_info "Cleaning up network bridges..."
 
+    # Track which bridges were actually removed
+    REMOVED_BRIDGES=()
+
     # Remove management bridge
-    remove_bridge "br-mgmt"
+    if ip link show "br-mgmt" &> /dev/null; then
+        remove_bridge "br-mgmt" && REMOVED_BRIDGES+=("br-mgmt")
+    fi
 
     # Remove all isle-br-* bridges (handles isle-br-0, isle-br-1, etc.)
     for bridge in $(ip link show type bridge 2>/dev/null | grep -oP 'isle-br-\d+' || true); do
         if [[ -n "$bridge" ]]; then
-            remove_bridge "$bridge"
+            remove_bridge "$bridge" && REMOVED_BRIDGES+=("$bridge")
         fi
     done
 
-    log_success "Bridges cleaned up"
+    if [[ ${#REMOVED_BRIDGES[@]} -gt 0 ]]; then
+        log_success "Bridges cleaned up: ${REMOVED_BRIDGES[*]}"
+    else
+        log_info "No bridges found to remove"
+    fi
 }
 
 # Check for running isle-agent or other containers using bridges
@@ -311,9 +314,16 @@ show_summary() {
     echo -e ""
 
     if [[ "$CLEANUP_MODE" == "full" ]]; then
-        echo -e "  ${GREEN}✓${NC} Bridge 'br-mgmt' removed"
-        echo -e "  ${GREEN}✓${NC} Bridge 'isle-br-0' removed"
-        echo -e ""
+        if [[ ${#REMOVED_BRIDGES[@]} -gt 0 ]]; then
+            echo -e "${BLUE}Bridges removed:${NC}"
+            for bridge in "${REMOVED_BRIDGES[@]}"; do
+                echo -e "  ${GREEN}✓${NC} Bridge '$bridge' removed"
+            done
+            echo -e ""
+        else
+            echo -e "${YELLOW}No bridges were found to remove${NC}"
+            echo -e ""
+        fi
         echo -e "${BLUE}System is now clean${NC}"
         echo -e "  To set up a new router: ${GREEN}sudo isle router init${NC}"
         echo -e ""

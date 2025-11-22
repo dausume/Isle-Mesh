@@ -1,0 +1,65 @@
+{% extends "../localhost-mdns/nginx/proxy.conf.j2" %}
+
+{# Isle version extends localhost-mdns with router integration #}
+{# This template includes DHCP reservations and router networking #}
+
+{# Additional upstream configuration for isle-specific services #}
+{% block extra_upstreams %}
+    {% if router_enabled %}
+    # Router management upstream
+    upstream router {
+        server {{ router_ip }}:{{ router_port }};
+    }
+    {% endif %}
+
+    {% if isle_agent_mdns_enabled %}
+    # Isle agent mDNS receiver upstream
+    upstream isle_agent_mdns {
+        server isle-agent-mdns:8888;
+    }
+    {% endif %}
+{% endblock %}
+
+{# Additional server blocks for isle-specific endpoints #}
+{% block extra_servers %}
+    {% if router_enabled %}
+    # Router management interface proxy
+    server {
+        listen 443 ssl;
+        server_name router.{{ base_domain }};
+
+        ssl_certificate /ssl/certs/{{ base_domain_cert }}.crt;
+        ssl_certificate_key /ssl/keys/{{ base_domain_cert }}.key;
+
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_ciphers HIGH:!aNULL:!MD5;
+
+        location / {
+            proxy_pass http://router;
+            proxy_set_header Host $host;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        }
+    }
+    {% endif %}
+
+    {% if isle_agent_mdns_enabled %}
+    # Isle agent mDNS API (internal only)
+    # This is NOT exposed externally, only for internal container communication
+    server {
+        listen 127.0.0.1:8888;
+        server_name localhost;
+
+        location / {
+            proxy_pass http://isle_agent_mdns;
+            proxy_set_header Host $host;
+        }
+    }
+    {% endif %}
+{% endblock %}
+
+{# Note: This template builds on localhost-mdns scaffolding #}
+{# Isle-specific features: #}
+{#  - DHCP integration via isle-agent-mdns #}
+{#  - Router management proxy #}
+{#  - vLAN networking support #}
+{#  - Enhanced security for network isolation #}

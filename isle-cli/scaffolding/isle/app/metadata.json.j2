@@ -1,0 +1,58 @@
+{
+  "app_name": "{{ app_name }}",
+  "type": "isle",
+  "scaffolding_type": "isle",
+  "base_domain": "{{ base_domain }}",
+  "created_at": "{{ created_at }}",
+  "version": "1.0.0",
+  "networking": {
+    "mode": "vlan",
+    "uses_mdns": true,
+    "uses_dhcp": true,
+    "requires_router": true,
+    "vlan_id": {{ vlan_id | default(10) }},
+    "dhcp": {
+      "enabled": true,
+      "range_start": "{{ dhcp_range_start | default('10.' ~ vlan_id ~ '.0.100') }}",
+      "range_end": "{{ dhcp_range_end | default('10.' ~ vlan_id ~ '.0.200') }}",
+      "reservations": [
+        {% for service in services %}
+        {
+          "name": "{{ service.name }}",
+          "mac": "{{ service.mac | default('auto') }}",
+          "ip": "{{ service.dhcp_ip | default('auto') }}"
+        }{% if not loop.last %},{% endif %}
+        {% endfor %}
+      ]
+    },
+    "router": {
+      "ip": "{{ router_ip | default('10.' ~ vlan_id ~ '.0.1') }}",
+      "management_ip": "{{ router_mgmt_ip | default('192.168.1.1') }}"
+    }
+  },
+  "services": [
+    {% for service in services %}
+    {
+      "name": "{{ service.name }}",
+      "subdomain": "{{ service.name }}.{{ base_domain }}",
+      "internal_port": {{ service.internal_port }},
+      "external_port": {{ service.external_port }},
+      "uses_mtls": {{ service.use_mtls|lower }},
+      "network": {
+        "dhcp_enabled": true,
+        "static_ip": "{{ service.static_ip | default('') }}",
+        "vlan": {{ vlan_id | default(10) }}
+      }
+    }{% if not loop.last %},{% endif %}
+    {% endfor %}
+  ],
+  "ssl": {
+    "base_cert": "{{ base_domain_cert }}.crt",
+    "base_key": "{{ base_domain_cert }}.key"
+  },
+  "isle_agent_mdns": {
+    "enabled": true,
+    "receives_mdns_from_router": true
+  },
+  "description": "{{ description | default('Isle vLAN application with DHCP') }}"
+}

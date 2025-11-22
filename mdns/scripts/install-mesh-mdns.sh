@@ -2,11 +2,34 @@
 # install-mesh-mdns.sh
 set -e
 
-echo "🚀 Starting full IsleMesh mDNS setup..."
-# Specify the file path to the custom environment configuration file for defining the mesh network settings.
-CUSTOM_ENV_FILE="$1"
-# Directory where IsleMesh open source project code is located and can be used for setup.
-ISLEMESH_DIR="${2:-/etc/isle-mesh}"
+# Parse arguments
+ISOLATED_MODE=false
+CUSTOM_ENV_FILE=""
+ISLEMESH_DIR="${ISLEMESH_DIR:-/etc/isle-mesh}"
+
+for arg in "$@"; do
+    case $arg in
+        -i|--isolated)
+            ISOLATED_MODE=true
+            shift
+            ;;
+        *)
+            if [ -z "$CUSTOM_ENV_FILE" ]; then
+                CUSTOM_ENV_FILE="$arg"
+            elif [ -z "$ISLEMESH_DIR" ] || [ "$ISLEMESH_DIR" = "/etc/isle-mesh" ]; then
+                ISLEMESH_DIR="$arg"
+            fi
+            shift
+            ;;
+    esac
+done
+
+if [ "$ISOLATED_MODE" = true ]; then
+    echo "🚀 Starting localhost-mdns setup (ISOLATED MODE - no router integration)..."
+else
+    echo "🚀 Starting full IsleMesh mDNS setup (with router integration)..."
+fi
+
 # Directory where setup scripts are located in the IsleMesh project code.
 SCRIPTS_SOURCE_DIR="$ISLEMESH_DIR/mdns/scripts"
 echo "ISLEMESH_DIR=$ISLEMESH_DIR"

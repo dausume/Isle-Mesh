@@ -1,154 +1,106 @@
-# Quick Start Guide: Isle Agent with mDNS
+# Quick Start Guide
 
-Get the Isle Agent with mDNS up and running in 5 minutes.
-
-## Prerequisites
-
-- Docker and docker-compose installed
-- `isle-br-0` bridge interface exists
-- OpenWRT router configured and running
-- Basic Isle Agent setup completed
-
-## Step 1: Create Required Directories
+## TL;DR
 
 ```bash
-sudo mkdir -p /etc/isle-mesh/agent/mdns/services
-sudo chmod -R 755 /etc/isle-mesh/agent/mdns
-```
-
-## Step 2: Build and Start
-
-```bash
+# Build and run
 cd /home/dustin/Desktop/IsleMesh/isle-agent-mdns
-
-# Build the image
-docker-compose build
-
-# Start the container
 docker-compose up -d
 
-# Verify it's running
-docker logs isle-agent-mdns
+# Test it works
+curl http://localhost:8888/health
+
+# Manually send test mDNS data (simulating localhost-mdns)
+curl -X POST http://localhost:8888/mdns \
+  -H "Content-Type: application/json" \
+  -d '{"name": "test", "addresses": ["10.0.10.1"], "port": 80}'
+
+# View received services
+curl http://localhost:8888/services | jq
 ```
 
-You should see output indicating:
-- D-Bus daemon started
-- Avahi daemon started
-- Nginx started
+## What This Does
 
-## Step 3: Register Your First Service
+This service:
+1. **Receives** mDNS data forwarded from `localhost-mdns` on the host (via HTTP POST)
+2. Stores received services in memory
+3. Exposes them as JSON at `http://localhost:8888/services`
+4. Can trigger DHCP setup based on received mDNS (future)
 
-```bash
-# Register a test service
-docker exec isle-agent-mdns register-service testapp testapp.local 443 https
+## The Problem It Solves
 
-# Verify it was registered
-docker exec isle-agent-mdns ls /etc/avahi/services/
+- ✅ mDNS works on **localhost** (via localhost-mdns)
+- ✅ mDNS works on **OpenWRT router**
+- ❌ mDNS **does NOT work in containers**
+
+**Solution:** localhost-mdns on host detects mDNS and forwards it to this container via HTTP POST.
+
+## Architecture
+
+```
+OpenWRT Router → broadcasts mDNS
+         ↓
+localhost-mdns (on host) → detects mDNS
+         ↓ HTTP POST to http://localhost:8888/mdns
+isle-agent-mdns (container) → receives and stores
+         ↓
+Triggers DHCP setup (future)
 ```
 
-## Step 4: Test mDNS Broadcasting
+## For localhost-mdns to Forward Data
+
+localhost-mdns needs to POST discovered services here:
 
 ```bash
-# From inside the container
-docker exec isle-agent-mdns avahi-browse -a -t
+# When service is discovered
+curl -X POST http://localhost:8888/mdns \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "router._http._tcp.local.",
+    "addresses": ["10.0.10.1"],
+    "port": 80
+  }'
 
-# You should see your testapp service listed
+# When service is removed
+curl -X DELETE http://localhost:8888/services/router._http._tcp.local./remove
 ```
 
-## Step 5: Test from Another Device on vLAN
-
-From any device connected to the same vLAN:
+## Common Commands
 
 ```bash
-# Linux/macOS
-avahi-browse -a
+# Start
+docker-compose up -d
 
-# macOS with dns-sd
-dns-sd -B _https._tcp
+# Stop
+docker-compose down
 
-# You should see "testapp" service advertised
+# View logs
+docker logs -f isle-agent-mdns
+
+# Restart
+docker-compose restart
+
+# Rebuild
+docker-compose build --no-cache
 ```
 
-## Step 6: Sync All Apps from Registry
-
-If you already have apps registered in the Isle Agent:
+## Testing
 
 ```bash
-# Make sync script executable
-chmod +x scripts/sync-services.sh
+# Send test data
+curl -X POST http://localhost:8888/mdns \
+  -H "Content-Type: application/json" \
+  -d '{"name": "test", "addresses": ["10.0.10.1"]}'
 
-# Run sync
-./scripts/sync-services.sh
+# Check if received
+curl http://localhost:8888/services | jq
 
-# Verify all services are registered
-docker exec isle-agent-mdns ls /etc/avahi/services/
-```
-
-## Verification Checklist
-
-- [ ] Container is running: `docker ps | grep isle-agent-mdns`
-- [ ] D-Bus is running: `docker exec isle-agent-mdns pgrep dbus-daemon`
-- [ ] Avahi is running: `docker exec isle-agent-mdns pgrep avahi-daemon`
-- [ ] Nginx is running: `docker exec isle-agent-mdns pgrep nginx`
-- [ ] Services are registered: `docker exec isle-agent-mdns ls /etc/avahi/services/`
-- [ ] mDNS is broadcasting: `docker exec isle-agent-mdns avahi-browse -a -t`
-- [ ] Services visible on vLAN: Test from another device
-
-## Common Issues
-
-### Container won't start
-
-```bash
-# Check if ports are already in use
-sudo netstat -tulpn | grep -E ':(80|443|5353)'
-
-# Check docker logs
-docker logs isle-agent-mdns
-```
-
-### Avahi daemon not running
-
-```bash
-# Restart the services
-docker exec isle-agent-mdns supervisorctl restart dbus avahi
-
-# Check status
-docker exec isle-agent-mdns supervisorctl status
-```
-
-### Services not visible on vLAN
-
-```bash
-# Verify macvlan network
-docker network inspect isle-br-0
-
-# Check bridge exists
-ip link show isle-br-0
-
-# Enable multicast on bridge
-sudo ip link set isle-br-0 multicast on
+# Remove test data
+curl -X DELETE http://localhost:8888/services/test/remove
 ```
 
 ## Next Steps
 
-1. **Auto-sync on app changes**: Integrate `sync-services.sh` into your app deployment workflow
-2. **Monitor services**: Set up monitoring of mDNS advertisements
-3. **Configure subdomains**: Register API and other subdomains for each app
-4. **Enable IPv6**: Update avahi-daemon.conf if needed
-
-## Cleanup/Uninstall
-
-```bash
-# Stop and remove container
-docker-compose down
-
-# Remove the image
-docker rmi isle-agent-mdns:latest
-
-# Optional: Remove service files
-sudo rm -rf /etc/isle-mesh/agent/mdns
-```
-
-## Ready to Use!
-
-Your Isle Agent is now broadcasting services over mDNS on the vLAN only. Other devices on the vLAN can discover your services at `<app-name>.local`.
+1. Modify `localhost-mdns` to forward mDNS data to this container
+2. Implement DHCP setup based on received mDNS
+3. See [README.md](README.md) for full documentation

@@ -48,6 +48,10 @@ EOF
   check_root
   check_prerequisites
   check_existing_vm
+
+  # Setup dedicated SSH key for router communication
+  setup_router_ssh_key
+
   setup_libvirt_permissions
   download_image
 
@@ -63,6 +67,10 @@ EOF
 
   download_openwrt_packages
   copy_packages_to_router
+
+  # Install SSH key before package installation
+  install_ssh_key_to_router
+
   install_and_configure_packages
   show_next_steps
   log_success "Initialization complete!"

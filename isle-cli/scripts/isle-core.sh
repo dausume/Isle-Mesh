@@ -8,6 +8,89 @@ set -e
 # Config file location
 CONFIG_FILE="${HOME}/.isle-config.yml"
 
+# Colors for output
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+RED='\033[0;31m'
+NC='\033[0m' # No Color
+
+# Check if mDNS is installed, offer to install if not
+# Returns: 0 if mDNS is installed/ready, 1 if not available
+ensure_mdns_installed() {
+  local context="$1"  # What operation is requesting mDNS (for better messaging)
+
+  # Check if mDNS service is installed
+  if systemctl list-unit-files 2>/dev/null | grep -q "mesh-mdns.service"; then
+    # Service exists, check if it's running
+    if ! systemctl is-active --quiet mesh-mdns.service 2>/dev/null; then
+      echo -e "${YELLOW}⚠️  mDNS service is installed but not running${NC}"
+      echo -e "${BLUE}Starting mDNS service...${NC}"
+      if sudo systemctl start mesh-mdns.service 2>/dev/null; then
+        echo -e "${GREEN}✓ mDNS service started${NC}"
+      else
+        echo -e "${RED}✗ Failed to start mDNS service${NC}"
+        return 1
+      fi
+    fi
+    return 0
+  fi
+
+  # mDNS not installed - offer to install
+  echo ""
+  echo -e "${YELLOW}╔═══════════════════════════════════════════════════════════════╗${NC}"
+  echo -e "${YELLOW}║           mDNS Service Not Installed                          ║${NC}"
+  echo -e "${YELLOW}╚═══════════════════════════════════════════════════════════════╝${NC}"
+  echo ""
+  echo -e "${BLUE}The localhost-mdns service is required to ${context}.${NC}"
+  echo ""
+  echo "This service:"
+  echo "  • Broadcasts .local domain names on your network"
+  echo "  • Enables automatic service discovery"
+  echo "  • Required for mesh networking functionality"
+  echo ""
+  echo -e "${YELLOW}Would you like to install localhost-mdns now? (y/N)${NC}"
+
+  read -r response
+
+  if [[ "$response" =~ ^[Yy]$ ]]; then
+    echo ""
+    echo -e "${BLUE}Installing localhost-mdns...${NC}"
+    echo ""
+
+    # Get script directory
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+    # Run the mdns system install command
+    if bash "$SCRIPT_DIR/mdns.sh" system install; then
+      echo ""
+      echo -e "${GREEN}✓ localhost-mdns installed successfully${NC}"
+      echo ""
+      echo -e "${BLUE}Continuing with ${context}...${NC}"
+      echo ""
+      return 0
+    else
+      echo ""
+      echo -e "${RED}✗ Failed to install localhost-mdns${NC}"
+      echo ""
+      echo -e "${YELLOW}You can install it manually later with:${NC}"
+      echo "  isle mdns system install"
+      echo ""
+      return 1
+    fi
+  else
+    echo ""
+    echo -e "${YELLOW}Skipping mDNS installation.${NC}"
+    echo ""
+    echo "You can install it later with:"
+    echo "  isle mdns system install"
+    echo ""
+    echo "Domain registration will be skipped for now."
+    echo ""
+    return 1
+  fi
+}
+
 # Get current project directory
 get_current_project() {
   if [ ! -f "$CONFIG_FILE" ]; then
@@ -268,6 +351,25 @@ EOF
   # Set as current project
   set_current_project "$output_dir"
   echo "✓ Set as current project"
+
+  # Auto-register domains with mDNS
+  echo ""
+  echo "Registering domains with mDNS..."
+
+  # Ensure mDNS is installed and running
+  if ensure_mdns_installed "register your app domains"; then
+    # Use detect-domains to automatically find and register domains
+    if [ -f "$output_dir/isle-mesh.yml" ]; then
+      if bash "$SCRIPT_DIR/mdns.sh" domain detect "$output_dir/isle-mesh.yml" "$output_dir/docker-compose.mesh-app.yml" append; then
+        echo "Reloading mDNS broadcast service..."
+        if bash "$SCRIPT_DIR/mdns.sh" system reload; then
+          echo -e "${GREEN}✓ Domains registered and broadcasting on the network${NC}"
+        fi
+      fi
+    else
+      echo -e "${YELLOW}⚠️  isle-mesh.yml not found - skipping domain registration${NC}"
+    fi
+  fi
 }
 
 # isle up - Start mesh-app services
@@ -315,6 +417,33 @@ cmd_up() {
   else
     echo "Error: No docker-compose file found in $project_dir"
     exit 1
+  fi
+
+  # Auto-register domains with mDNS
+  echo ""
+  echo "Registering domains with mDNS..."
+
+  # Ensure mDNS is installed and running
+  if ensure_mdns_installed "register your app domains"; then
+    # Use detect-domains to automatically find and register domains
+    MESH_CONFIG="$project_dir/isle-mesh.yml"
+    COMPOSE_FILE="$project_dir/docker-compose.mesh-app.yml"
+
+    # Fall back to docker-compose.yml if mesh-app version doesn't exist
+    if [ ! -f "$COMPOSE_FILE" ] && [ -f "$project_dir/docker-compose.yml" ]; then
+      COMPOSE_FILE="$project_dir/docker-compose.yml"
+    fi
+
+    if [ -f "$MESH_CONFIG" ]; then
+      if bash "$(dirname "${BASH_SOURCE[0]}")/mdns.sh" domain detect "$MESH_CONFIG" "$COMPOSE_FILE" append; then
+        echo "Reloading mDNS broadcast service..."
+        if bash "$(dirname "${BASH_SOURCE[0]}")/mdns.sh" system reload; then
+          echo -e "${GREEN}✓ Domains registered and broadcasting on the network${NC}"
+        fi
+      fi
+    else
+      echo -e "${YELLOW}⚠️  isle-mesh.yml not found - skipping domain auto-detection${NC}"
+    fi
   fi
 }
 

@@ -19,7 +19,7 @@ Configures the OpenWRT router's internal settings including network interfaces, 
 ---
 
 ### 3. `setup-router-bridges.sh`
-Creates host-side network bridges: br-mgmt (management access to OpenWRT at 192.168.1.254), br-isles (vLAN trunk for isle interconnection), and optional individual isle bridges. Configures kernel parameters for IP forwarding and bridge netfilter, then persists configuration via netplan or systemd-networkd.
+Creates host-side network bridges: br-mgmt (management access to OpenWRT at 192.168.1.254), isle-br-0 (vLAN trunk for isle interconnection), and optional individual isle bridges. Configures kernel parameters for IP forwarding and bridge netfilter, then persists configuration via netplan or systemd-networkd.
 
 **Flow:** This connects the host machine to the isolated router, creating the network pathways that will allow containers on the host to communicate through the router's vLAN infrastructure.
 

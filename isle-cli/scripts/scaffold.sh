@@ -12,6 +12,13 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 SSL_DIR="$PROJECT_ROOT/ssl"
 MESH_PROXY_DIR="$PROJECT_ROOT/mesh-proxy"
 
+# Colors for output
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+RED='\033[0;31m'
+NC='\033[0m' # No Color
+
 # Default configuration values
 COMPOSE_FILE=""
 OUTPUT_DIR="."
@@ -658,15 +665,85 @@ EOF
   echo "✓ isle-mesh.yml created: $mesh_file"
 }
 
+# Check if mDNS is installed, offer to install if not
+# Returns: 0 if mDNS is installed/ready, 1 if not available
+ensure_mdns_installed() {
+  local context="$1"
+
+  # Check if mDNS service is installed
+  if systemctl list-unit-files 2>/dev/null | grep -q "mesh-mdns.service"; then
+    # Service exists, check if it's running
+    if ! systemctl is-active --quiet mesh-mdns.service 2>/dev/null; then
+      echo -e "${YELLOW}⚠️  mDNS service is installed but not running${NC}"
+      echo -e "${BLUE}Starting mDNS service...${NC}"
+      if sudo systemctl start mesh-mdns.service 2>/dev/null; then
+        echo -e "${GREEN}✓ mDNS service started${NC}"
+      else
+        echo -e "${RED}✗ Failed to start mDNS service${NC}"
+        return 1
+      fi
+    fi
+    return 0
+  fi
+
+  # mDNS not installed - offer to install
+  echo ""
+  echo -e "${YELLOW}╔═══════════════════════════════════════════════════════════════╗${NC}"
+  echo -e "${YELLOW}║           mDNS Service Not Installed                          ║${NC}"
+  echo -e "${YELLOW}╚═══════════════════════════════════════════════════════════════╝${NC}"
+  echo ""
+  echo -e "${BLUE}The localhost-mdns service is required to ${context}.${NC}"
+  echo ""
+  echo "This service:"
+  echo "  • Broadcasts .local domain names on your network"
+  echo "  • Enables automatic service discovery"
+  echo "  • Required for mesh networking functionality"
+  echo ""
+  echo -e "${YELLOW}Would you like to install localhost-mdns now? (y/N)${NC}"
+
+  read -r response
+
+  if [[ "$response" =~ ^[Yy]$ ]]; then
+    echo ""
+    echo -e "${BLUE}Installing localhost-mdns...${NC}"
+    echo ""
+
+    # Run the mdns install command
+    if bash "$SCRIPT_DIR/mdns.sh" install; then
+      echo ""
+      echo -e "${GREEN}✓ localhost-mdns installed successfully${NC}"
+      echo ""
+      echo -e "${BLUE}Continuing with ${context}...${NC}"
+      echo ""
+      return 0
+    else
+      echo ""
+      echo -e "${RED}✗ Failed to install localhost-mdns${NC}"
+      echo ""
+      echo -e "${YELLOW}You can install it manually later with:${NC}"
+      echo "  isle mdns install"
+      echo ""
+      return 1
+    fi
+  else
+    echo ""
+    echo -e "${YELLOW}Skipping mDNS installation.${NC}"
+    echo ""
+    echo "You can install it later with:"
+    echo "  isle mdns install"
+    echo ""
+    echo "Domain registration will be skipped for now."
+    echo ""
+    return 1
+  fi
+}
+
 # Register domains with mDNS system if installed
 register_domains() {
   echo "[10/10] Registering domains with mDNS..."
 
-  # Check if mDNS service is installed and running (primary indicator)
-  if ! systemctl list-unit-files 2>/dev/null | grep -q "mesh-mdns.service"; then
-    echo "⚠ mDNS not installed - skipping domain registration"
-    echo "  Install mDNS with: isle mdns install"
-    echo "  Then register domains with: isle mdns detect-domains"
+  # Ensure mDNS is installed and running
+  if ! ensure_mdns_installed "register your app domains"; then
     return 0
   fi
 
@@ -674,7 +751,7 @@ register_domains() {
   local detect_script="$PROJECT_ROOT/mdns/scripts/mesh-mdns-domains-detect.sh"
 
   if [ ! -f "$detect_script" ]; then
-    echo "⚠ Domain detection script not found - skipping"
+    echo -e "${YELLOW}⚠ Domain detection script not found - skipping${NC}"
     return 0
   fi
 
@@ -686,17 +763,18 @@ register_domains() {
 
   # Run domain detection in append mode (don't replace existing domains)
   if bash "$detect_script" "$mesh_config" "$mesh_compose" "append" 2>&1 | sed 's/^/    /'; then
-    echo "✓ Domains registered with mDNS"
+    echo -e "${GREEN}✓ Domains registered with mDNS${NC}"
 
-    # Check if mDNS service is running and offer to reload
-    if systemctl is-active --quiet mesh-mdns.service 2>/dev/null; then
-      echo ""
-      echo "  mDNS service is running. Reload to broadcast new domains?"
-      echo "  Run: sudo systemctl restart mesh-mdns.service"
-      echo "  Or: isle mdns reload"
+    # Automatically reload mDNS service
+    echo "  Reloading mDNS broadcast service..."
+    if sudo systemctl restart mesh-mdns.service 2>/dev/null; then
+      echo -e "${GREEN}✓ mDNS service reloaded - domains are now broadcasting${NC}"
+    else
+      echo -e "${YELLOW}⚠ Failed to reload mDNS service${NC}"
+      echo "  Run manually: isle mdns reload"
     fi
   else
-    echo "⚠ Failed to register domains (this may require sudo)"
+    echo -e "${YELLOW}⚠ Failed to register domains${NC}"
   fi
 }
 

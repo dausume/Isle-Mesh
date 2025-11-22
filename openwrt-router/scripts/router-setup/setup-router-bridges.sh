@@ -57,7 +57,7 @@ Options:
 
 This script creates:
   - br-mgmt: Management bridge for OpenWRT access
-  - br-isles: vLAN trunk bridge for isle interconnection
+  - isle-br-0: vLAN trunk bridge for isle interconnection
   - Individual isle bridges (optional, for direct host connection)
 
 EOF
@@ -154,15 +154,15 @@ setup_mgmt_bridge() {
 setup_isles_bridge() {
     log_info "Setting up isles trunk bridge..."
 
-    create_bridge "br-isles" "vLAN trunk for all isles"
+    create_bridge "isle-br-0" "vLAN trunk for all isles"
 
     # Enable vLAN filtering on the bridge
-    if ip link show br-isles &> /dev/null; then
-        log_info "Enabling vLAN filtering on br-isles"
-        ip link set br-isles type bridge vlan_filtering 1 || log_warning "vLAN filtering may not be supported"
+    if ip link show isle-br-0 &> /dev/null; then
+        log_info "Enabling vLAN filtering on isle-br-0"
+        ip link set isle-br-0 type bridge vlan_filtering 1 || log_warning "vLAN filtering may not be supported"
 
         # Set bridge to be ageing-time appropriate for mesh networking
-        ip link set br-isles type bridge ageing_time 30000  # 5 minutes
+        ip link set isle-br-0 type bridge ageing_time 30000  # 5 minutes
 
         log_success "Isles trunk bridge configured"
     fi
@@ -250,7 +250,7 @@ network:
       dhcp4: no
       addresses:
         - 192.168.1.254/24
-    br-isles:
+    isle-br-0:
       dhcp4: no
       parameters:
         stp: false
@@ -280,9 +280,9 @@ Name=br-mgmt
 Address=192.168.1.254/24
 EOF
 
-        cat > "$SYSTEMD_DIR/br-isles.netdev" << 'EOF'
+        cat > "$SYSTEMD_DIR/isle-br-0.netdev" << 'EOF'
 [NetDev]
-Name=br-isles
+Name=isle-br-0
 Kind=bridge
 
 [Bridge]
@@ -290,9 +290,9 @@ STP=no
 VLANFiltering=yes
 EOF
 
-        cat > "$SYSTEMD_DIR/br-isles.network" << 'EOF'
+        cat > "$SYSTEMD_DIR/isle-br-0.network" << 'EOF'
 [Match]
-Name=br-isles
+Name=isle-br-0
 
 [Network]
 LinkLocalAddressing=no
@@ -337,8 +337,8 @@ EOF
     fi
 
     # Show isles bridge
-    if ip link show br-isles &> /dev/null; then
-        echo "  br-isles     : vLAN trunk (No IP)"
+    if ip link show isle-br-0 &> /dev/null; then
+        echo "  isle-br-0    : vLAN trunk (No IP)"
     fi
 
     # Show isle-specific bridges

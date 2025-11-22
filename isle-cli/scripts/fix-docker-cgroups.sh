@@ -56,23 +56,28 @@ check_docker_issue() {
     # Try to run a simple container
     log_info "Testing Docker container creation..."
 
-    if docker run --rm alpine echo "test" &> /tmp/docker-test.log 2>&1; then
+    # Capture output to a variable instead of a file to avoid permission issues
+    local docker_output
+    docker_output=$(docker run --rm alpine echo "test" 2>&1)
+    local docker_exit_code=$?
+
+    if [[ $docker_exit_code -eq 0 ]]; then
         log_success "Docker is working correctly - no fix needed"
         return 1  # Return 1 to indicate no fix needed
     fi
 
     # Check if the error is the systemd D-Bus issue
-    if grep -q "org.freedesktop.systemd1 was not provided by any .service files" /tmp/docker-test.log; then
+    if echo "$docker_output" | grep -q "org.freedesktop.systemd1 was not provided by any .service files"; then
         log_error "Detected systemd D-Bus communication issue"
         log_info "This commonly occurs in sandboxed environments (VS Code snap, etc.)"
         echo ""
-        cat /tmp/docker-test.log
+        echo "$docker_output"
         echo ""
         return 0  # Return 0 to indicate fix is needed
     else
         log_error "Docker has an issue, but it's not the systemd D-Bus problem"
         echo ""
-        cat /tmp/docker-test.log
+        echo "$docker_output"
         echo ""
         log_info "This script only fixes the systemd D-Bus issue"
         log_info "Please investigate the error above"
@@ -168,7 +173,12 @@ verify_fix() {
 
     log_info "Testing Docker container creation..."
 
-    if docker run --rm alpine echo "Docker is working!" &> /tmp/docker-verify.log 2>&1; then
+    # Capture output to a variable instead of a file to avoid permission issues
+    local docker_output
+    docker_output=$(docker run --rm alpine echo "Docker is working!" 2>&1)
+    local docker_exit_code=$?
+
+    if [[ $docker_exit_code -eq 0 ]]; then
         log_success "Docker is now working correctly!"
         echo ""
         log_info "The cgroupfs driver has been successfully configured"
@@ -176,7 +186,7 @@ verify_fix() {
     else
         log_error "Docker still has issues after the fix"
         echo ""
-        cat /tmp/docker-verify.log
+        echo "$docker_output"
         echo ""
         log_info "You may need to fully restart the Docker daemon or reboot your system"
         return 1

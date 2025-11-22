@@ -40,6 +40,11 @@ else
     exit 2
 fi
 
+# Source SSH key library for dedicated router key
+if [ -f "$SCRIPT_DIR/router-init-lib/15-ssh-key.sh" ]; then
+    source "$SCRIPT_DIR/router-init-lib/15-ssh-key.sh"
+fi
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -254,7 +259,12 @@ check_mac_isolation() {
     if command -v ssh &> /dev/null; then
         local router_ip="192.168.100.1"
         if timeout 2 bash -c "echo > /dev/tcp/$router_ip/22" 2>/dev/null; then
-            local arp_table=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=2 root@"$router_ip" "cat /proc/net/arp" 2>/dev/null || true)
+            # Use dedicated SSH key if available
+            local ssh_cmd="ssh -o StrictHostKeyChecking=no -o ConnectTimeout=2"
+            if [ -n "${ISLE_SSH_OPTS:-}" ]; then
+                ssh_cmd="sudo ssh $ISLE_SSH_OPTS -o ConnectTimeout=2"
+            fi
+            local arp_table=$($ssh_cmd root@"$router_ip" "cat /proc/net/arp" 2>/dev/null || true)
             if echo "$arp_table" | grep -qi "$REAL_MAC"; then
                 log_fail "Real host MAC $REAL_MAC visible in OpenWRT router ARP table"
                 failed=true
@@ -369,12 +379,17 @@ check_dns_isolation() {
     if command -v ssh &> /dev/null; then
         local router_ip="192.168.100.1"
         if timeout 2 bash -c "echo > /dev/tcp/$router_ip/22" 2>/dev/null; then
+            # Use dedicated SSH key if available
+            local ssh_cmd="ssh -o StrictHostKeyChecking=no -o ConnectTimeout=2"
+            if [ -n "${ISLE_SSH_OPTS:-}" ]; then
+                ssh_cmd="sudo ssh $ISLE_SSH_OPTS -o ConnectTimeout=2"
+            fi
             for dns in $dns_servers; do
                 # Skip localhost
                 [[ "$dns" =~ ^127\. ]] && continue
 
                 # Check if real DNS server is configured on router
-                local router_dns=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=2 root@"$router_ip" "uci get dhcp.@dnsmasq[0].server 2>/dev/null || cat /tmp/resolv.conf.auto 2>/dev/null" 2>/dev/null || true)
+                local router_dns=$($ssh_cmd root@"$router_ip" "uci get dhcp.@dnsmasq[0].server 2>/dev/null || cat /tmp/resolv.conf.auto 2>/dev/null" 2>/dev/null || true)
                 if echo "$router_dns" | grep -q "$dns"; then
                     log_fail "Real DNS server $dns is configured on isolated OpenWRT router"
                     failed=true

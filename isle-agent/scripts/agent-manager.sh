@@ -38,23 +38,70 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $*" >&2
 }
 
+# Check if user has proper permissions for /etc/isle-mesh
+check_permissions() {
+    # Check if user is in isle-mesh group
+    if ! id -nG | grep -qw "isle-mesh"; then
+        log_error "User is not in the isle-mesh group"
+        echo ""
+        echo "  Please run the following command to set up permissions:"
+        echo ""
+        echo "    sudo isle permissions agent"
+        echo ""
+        echo "  Then log out and log back in (or run: newgrp isle-mesh)"
+        echo ""
+        return 1
+    fi
+
+    # Check if /etc/isle-mesh directory exists with proper permissions
+    if [[ ! -d "/etc/isle-mesh" ]]; then
+        log_error "/etc/isle-mesh directory does not exist"
+        echo ""
+        echo "  Please run the following command to set up permissions:"
+        echo ""
+        echo "    sudo isle permissions agent"
+        echo ""
+        return 1
+    fi
+
+    # Check if we can write to /etc/isle-mesh
+    if [[ ! -w "/etc/isle-mesh" ]]; then
+        log_error "Cannot write to /etc/isle-mesh (permission denied)"
+        echo ""
+        echo "  Please run the following command to fix permissions:"
+        echo ""
+        echo "    sudo isle permissions agent"
+        echo ""
+        echo "  Then log out and log back in (or run: newgrp isle-mesh)"
+        echo ""
+        return 1
+    fi
+
+    return 0
+}
+
 # Initialize agent directory structure
 init_agent_dir() {
     log_info "Initializing isle-agent directory structure..."
 
+    # Check permissions first
+    if ! check_permissions; then
+        return 1
+    fi
+
     # Create directory structure in /etc/isle-mesh/agent
-    sudo mkdir -p "${ISLE_AGENT_DIR}"/{configs,ssl/{certs,keys},logs,mdns/services}
+    mkdir -p "${ISLE_AGENT_DIR}"/{configs,ssl/{certs,keys},logs,mdns/services}
 
     # Copy docker-compose.yml if it doesn't exist
     if [[ ! -f "${COMPOSE_FILE}" ]]; then
         log_info "Installing agent docker-compose.yml..."
-        sudo cp "$(dirname "$0")/../docker-compose.yml" "${COMPOSE_FILE}"
+        cp "$(dirname "$0")/../docker-compose.yml" "${COMPOSE_FILE}"
     fi
 
     # Initialize empty registry if doesn't exist
     if [[ ! -f "${REGISTRY_FILE}" ]]; then
         log_info "Creating domain registry..."
-        echo '{"domains": {}, "subdomains": {}, "apps": {}}' | sudo tee "${REGISTRY_FILE}" > /dev/null
+        echo '{"domains": {}, "subdomains": {}, "apps": {}}' > "${REGISTRY_FILE}"
     fi
 
     # Create base nginx config if doesn't exist
@@ -63,15 +110,12 @@ init_agent_dir() {
         create_base_nginx_config
     fi
 
-    # Set permissions
-    sudo chown -R "$(whoami):$(whoami)" "${ISLE_AGENT_DIR}" 2>/dev/null || true
-
     log_success "Agent directory initialized at ${ISLE_AGENT_DIR}"
 }
 
 # Create base nginx configuration
 create_base_nginx_config() {
-    cat <<'EOF' | sudo tee "${NGINX_CONF}" > /dev/null
+    cat <<'EOF' > "${NGINX_CONF}"
 # Isle Agent - Base nginx configuration
 # This file is auto-generated and includes all mesh-app fragments
 
@@ -131,59 +175,50 @@ http {
 EOF
 }
 
-# Setup isle-br-0 bridge for OpenWRT connectivity
+# Detect isle-br-X bridges for OpenWRT connectivity
 setup_isle_bridge() {
-    local bridge_name="isle-br-0"
+    log_info "Checking for isle-br-X bridges..."
 
-    log_info "Checking ${bridge_name} bridge for OpenWRT connectivity..."
+    # Find all isle-br-* bridges
+    local bridges
+    bridges=$(ip link show | grep -oP 'isle-br-\d+' | sort -u || true)
 
-    # Check if bridge already exists
-    if ip link show "${bridge_name}" &>/dev/null; then
-        log_success "${bridge_name} bridge already exists"
-    else
-        log_warn "${bridge_name} bridge does not exist"
+    if [[ -z "$bridges" ]]; then
+        log_error "No isle-br-X bridges found"
         echo ""
-        echo "  The bridge needs to be created before starting the agent."
-        echo "  Run this command to create it:"
+        echo "  The agent needs at least one isle-br-X bridge to connect to OpenWRT."
+        echo "  Bridges should be created by the router setup, not by the agent."
         echo ""
-        echo "    sudo ip link add name ${bridge_name} type bridge && sudo ip link set ${bridge_name} up"
+        echo "  To create a router with bridges, run:"
+        echo "    isle router create"
         echo ""
-        echo "  Attempting to create bridge automatically..."
-
-        # Try to create bridge (will fail gracefully if no sudo access)
-        if ip link add name "${bridge_name}" type bridge 2>/dev/null && \
-           ip link set "${bridge_name}" up 2>/dev/null; then
-            log_success "${bridge_name} bridge created without sudo"
-        elif command -v sudo &>/dev/null && sudo -n true 2>/dev/null; then
-            # Passwordless sudo is available
-            sudo ip link add name "${bridge_name}" type bridge
-            sudo ip link set "${bridge_name}" up
-            sudo ip link set "${bridge_name}" mtu 1500
-            log_success "${bridge_name} bridge created with sudo"
-        else
-            log_error "Cannot create ${bridge_name} bridge (need root permissions)"
-            echo ""
-            echo "  Please run the command above manually, then restart the agent."
-            return 1
-        fi
+        return 1
     fi
 
-    # Check if OpenWRT router is connected to this bridge
-    local connected_interfaces
-    connected_interfaces=$(brctl show "${bridge_name}" 2>/dev/null | tail -n +2 | awk '{print $NF}' | grep -v "^${bridge_name}$" || true)
+    # Report found bridges
+    log_success "Found isle bridges:"
+    for bridge in $bridges; do
+        local bridge_state
+        bridge_state=$(ip link show "$bridge" | grep -oP '(?<=state )\w+' || echo "UNKNOWN")
+        echo "  - ${bridge}: ${bridge_state}"
 
-    if [[ -n "${connected_interfaces}" ]]; then
-        log_success "OpenWRT router detected on ${bridge_name}"
-        echo "  Connected interfaces: ${connected_interfaces}"
+        # Check if OpenWRT router is connected to this bridge
+        local connected_interfaces
+        connected_interfaces=$(brctl show "$bridge" 2>/dev/null | tail -n +2 | awk '{print $NF}' | grep -v "^${bridge}$" | tr '\n' ' ' || true)
+
+        if [[ -n "${connected_interfaces}" ]]; then
+            echo "    Connected interfaces: ${connected_interfaces}"
+        fi
+    done
+
+    # Check specifically for isle-br-0 (primary bridge used by agent)
+    if echo "$bridges" | grep -q "isle-br-0"; then
+        log_success "Primary bridge isle-br-0 detected"
     else
-        log_warn "OpenWRT router not yet connected to ${bridge_name}"
+        log_warn "Primary bridge isle-br-0 not found"
         echo ""
-        echo "  The agent will start, but won't be reachable until OpenWRT is connected."
-        echo "  To connect OpenWRT VM to this bridge, run:"
-        echo ""
-        echo "    virsh attach-interface openwrt-isle-router bridge ${bridge_name} --model virtio --config --live"
-        echo ""
-        echo "  Or if OpenWRT is already running with eth1, ensure it's on this bridge."
+        echo "  The agent will attempt to use the first available isle-br-X bridge,"
+        echo "  but isle-br-0 is recommended as the primary bridge."
     fi
 }
 
@@ -377,7 +412,7 @@ cleanup_network_cache() {
     # Step 6: Remove temporary Compose files
     log_info "[6/7] Removing temporary Compose files..."
     if [[ -f "${ISLE_AGENT_DIR}/docker-compose.mdns.yml" ]]; then
-        sudo rm -f "${ISLE_AGENT_DIR}/docker-compose.mdns.yml" 2>/dev/null || rm -f "${ISLE_AGENT_DIR}/docker-compose.mdns.yml" 2>/dev/null || true
+        rm -f "${ISLE_AGENT_DIR}/docker-compose.mdns.yml" 2>/dev/null || true
         echo "  Removed mDNS compose file"
         cleaned=true
     else
@@ -388,7 +423,7 @@ cleanup_network_cache() {
     # Step 7: Clear agent mode cache
     log_info "[7/7] Clearing agent mode cache..."
     if [[ -f "${ISLE_AGENT_DIR}/agent.mode" ]]; then
-        sudo rm -f "${ISLE_AGENT_DIR}/agent.mode" 2>/dev/null || rm -f "${ISLE_AGENT_DIR}/agent.mode" 2>/dev/null || true
+        rm -f "${ISLE_AGENT_DIR}/agent.mode" 2>/dev/null || true
         echo "  Cleared agent mode file"
         cleaned=true
     else
@@ -487,7 +522,7 @@ get_agent_mode() {
 set_agent_mode() {
     local mode="$1"
     local mode_file="${ISLE_AGENT_DIR}/agent.mode"
-    echo "$mode" | sudo tee "$mode_file" > /dev/null
+    echo "$mode" > "$mode_file"
 }
 
 # Build the isle-agent-mdns image if needed
@@ -539,7 +574,6 @@ services:
     ports:
       - "80:80"
       - "443:443"
-      - "5353:5353/udp"
     volumes:
       - /etc/isle-mesh/agent/nginx.conf:/etc/nginx/nginx.conf:ro
       - /etc/isle-mesh/agent/configs:/etc/nginx/configs:ro
@@ -570,7 +604,7 @@ networks:
     name: isle-agent-net
     ipam:
       config:
-        - subnet: 172.20.0.0/16
+        - subnet: 172.21.0.0/16
   isle-br-0:
     driver: macvlan
     driver_opts:

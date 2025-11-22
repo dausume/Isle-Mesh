@@ -1,34 +1,25 @@
-FROM nginx:alpine
+# Isle Agent mDNS Receiver Dockerfile
+# Based on mesh-prototypes/localhost-mdns/backend/Dockerfile.lh-mdns.backend
+# This container receives mDNS data forwarded from localhost-mdns on the host
+FROM python:3.11-slim
 
-# Install Avahi mDNS daemon and required dependencies
-RUN apk add --no-cache \
-    avahi \
-    avahi-tools \
-    dbus \
-    supervisor
+# Copy application code
+COPY app.py /app/app.py
 
-# Create directories for Avahi services
-RUN mkdir -p /etc/avahi/services
+# Copy entrypoint script
+COPY entrypoint.sh /entrypoint.sh
 
-# Copy Avahi configuration
-COPY avahi/avahi-daemon.conf /etc/avahi/avahi-daemon.conf
+# Ensure it is executable
+RUN chmod +x /entrypoint.sh
 
-# Copy service management scripts
-COPY scripts/register-service.sh /usr/local/bin/register-service
-COPY scripts/unregister-service.sh /usr/local/bin/unregister-service
-COPY scripts/entrypoint.sh /entrypoint.sh
+# Install Python dependencies (only falcon, no mDNS libs needed)
+RUN pip install --no-cache-dir falcon
 
-RUN chmod +x /usr/local/bin/register-service \
-             /usr/local/bin/unregister-service \
-             /entrypoint.sh
+# Set working directory
+WORKDIR /app
 
-# Create supervisor configuration for running both nginx and avahi
-RUN mkdir -p /etc/supervisor/conf.d
-COPY avahi/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+# Expose port for API (localhost-mdns will POST to this)
+EXPOSE 8888
 
-# Expose ports
-EXPOSE 80 443 5353/udp
-
-# Use supervisor to manage both nginx and avahi-daemon
+# Use custom entrypoint script
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

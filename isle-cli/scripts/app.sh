@@ -106,14 +106,17 @@ show_help() {
     echo -e "    clean                             Clean and reset"
     echo -e ""
     echo -e "System:"
-    echo -e "  ${CYAN}isle app mdns [action]${NC}             Manage Isle Mesh mDNS system"
+    echo -e "  ${CYAN}isle mdns system [action]${NC}          Manage Isle Mesh mDNS system"
     echo -e "    install/up                        Install mDNS on host system"
     echo -e "    uninstall/down                    Uninstall mDNS from host"
     echo -e "    status                            Check installation status"
     echo -e ""
-    echo -e "  ${CYAN}isle app sample <name> [action]${NC}    Manage sample/demo environments"
-    echo -e "    localhost-mdns                    Hand-crafted localhost mDNS demo"
-    echo -e "    list                              List available samples"
+    echo -e "  ${CYAN}isle mdns domain [action]${NC}          Manage broadcast domains"
+    echo -e "    add/remove/list                   Configure domain broadcasting"
+    echo -e "    detect                            Auto-detect from config files"
+    echo -e ""
+    echo -e "  ${CYAN}isle mdns sample [action]${NC}          Manage sample/demo environment"
+    echo -e "    up/down/logs                      Demo environment management"
     echo -e ""
     echo -e "╔═══════════════════════════════════════════════════════════════╗"
     echo -e "║                    APP-AGENT INTEGRATION                      ║"
@@ -146,7 +149,7 @@ show_help() {
     echo -e "${YELLOW}4. Advanced usage:${NC}"
     echo -e "   isle app scaffold app.yml -o ./mesh-output"
     echo -e "   isle app ssl generate-mesh config/ssl.env.conf"
-    echo -e "   isle app mdns install"
+    echo -e "   isle mdns system install"
     echo -e "   isle app discover test"
     echo -e ""
 }
@@ -187,7 +190,11 @@ case $COMMAND in
         ;;
 
     mdns)
-        exec bash "$MDNS" "$@"
+        echo "⚠️  WARNING: 'isle app mdns' is deprecated"
+        echo "   Use 'isle mdns system' or 'isle mdns domain' instead"
+        echo ""
+        # Default to system scope for backward compatibility
+        exec bash "$MDNS" system "$@"
         ;;
 
     sample)

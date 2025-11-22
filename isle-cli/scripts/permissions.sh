@@ -32,7 +32,7 @@ PROJECT_ROOT="$(cd "$ISLE_CLI_ROOT/.." && pwd)"
 ROUTER_DIR="$PROJECT_ROOT/openwrt-router"
 
 # Parse subcommand
-SUBCOMMAND="$1"
+SUBCOMMAND="${1:-help}"
 shift || true
 
 # Logging functions
@@ -59,6 +59,91 @@ check_sudo() {
         log_info "Run with: sudo isle permissions $SUBCOMMAND"
         exit 1
     fi
+}
+
+# Fix agent permissions
+cmd_agent() {
+    check_sudo
+
+    echo -e "${CYAN}╔═══════════════════════════════════════════════════════════════╗"
+    echo -e "║          Fixing Isle-Mesh Agent Permissions                   ║"
+    echo -e "╚═══════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+
+    # Create isle-mesh group if it doesn't exist
+    if ! getent group isle-mesh > /dev/null 2>&1; then
+        log_info "Creating isle-mesh group..."
+        groupadd isle-mesh
+        log_success "isle-mesh group created"
+    else
+        log_success "isle-mesh group exists"
+    fi
+
+    # Get the original user who ran sudo
+    local ORIGINAL_USER="${SUDO_USER:-$USER}"
+
+    # Check if user is in isle-mesh group
+    if [[ "$ORIGINAL_USER" != "root" ]]; then
+        if ! id -nG "$ORIGINAL_USER" | grep -qw "isle-mesh"; then
+            log_warning "User '$ORIGINAL_USER' is not in the isle-mesh group"
+            log_info "Adding user to isle-mesh group..."
+            usermod -aG isle-mesh "$ORIGINAL_USER"
+            log_success "User added to isle-mesh group"
+            echo ""
+            log_warning "Group changes require a new login session to take effect"
+            log_info "Run: newgrp isle-mesh (or log out and log back in)"
+            echo ""
+        else
+            log_success "User '$ORIGINAL_USER' is already in isle-mesh group"
+        fi
+    fi
+
+    # Create /etc/isle-mesh directory if it doesn't exist
+    if [[ ! -d "/etc/isle-mesh" ]]; then
+        log_info "Creating /etc/isle-mesh directory..."
+        mkdir -p /etc/isle-mesh/agent/{configs,ssl/{certs,keys},logs,mdns/services}
+        log_success "Directory structure created"
+    fi
+
+    # Fix permissions on /etc/isle-mesh
+    log_info "Fixing permissions on /etc/isle-mesh..."
+    echo ""
+
+    # Set group ownership to isle-mesh
+    chgrp -R isle-mesh /etc/isle-mesh 2>/dev/null || {
+        log_warning "Could not set group ownership on /etc/isle-mesh"
+    }
+
+    # Set directory permissions with setgid bit
+    # 2775 = setgid + rwxrwxr-x
+    find /etc/isle-mesh -type d -exec chmod 2775 {} \; 2>/dev/null || {
+        log_warning "Could not set directory permissions on /etc/isle-mesh"
+    }
+
+    # Set file permissions
+    # 664 = rw-rw-r--
+    find /etc/isle-mesh -type f -exec chmod 664 {} \; 2>/dev/null || {
+        log_warning "Could not set file permissions on /etc/isle-mesh"
+    }
+
+    log_success "Fixed: /etc/isle-mesh"
+
+    echo ""
+    log_success "Agent permissions fixed successfully!"
+    echo ""
+    echo -e "${BLUE}Summary:${NC}"
+    echo "  Group:       isle-mesh"
+    echo "  Directories: rwxrwxr-x (2775) with setgid bit"
+    echo "  Files:       rw-rw-r-- (664)"
+    echo ""
+    echo -e "${BLUE}What this means:${NC}"
+    echo "  • Your user can manage agent files without sudo"
+    echo "  • Docker containers can access configuration files"
+    echo "  • New files automatically inherit the isle-mesh group"
+    echo ""
+    echo -e "${BLUE}Next step:${NC}"
+    echo -e "  Start the agent: ${CYAN}isle agent start${NC}"
+    echo ""
 }
 
 # Fix core permissions
@@ -248,6 +333,14 @@ cmd_help() {
     echo -e "  isle permissions <subcommand>"
     echo ""
     echo -e "${GREEN}SUBCOMMANDS:${NC}"
+    echo -e "  ${CYAN}agent${NC}               Fix agent permissions for /etc/isle-mesh"
+    echo -e "                       - Creates isle-mesh group"
+    echo -e "                       - Adds user to isle-mesh group"
+    echo -e "                       - Sets directory permissions to 2775 (rwxrwxr-x)"
+    echo -e "                       - Sets file permissions to 664 (rw-rw-r--)"
+    echo -e "                       - Enables setgid bit for automatic group inheritance"
+    echo -e "                       Requires: sudo"
+    echo ""
     echo -e "  ${CYAN}core${NC}                Fix core permissions for router directories"
     echo -e "                       - Sets group to libvirt"
     echo -e "                       - Sets directory permissions to 2775 (rwxrwxr-x)"
@@ -264,13 +357,21 @@ cmd_help() {
     echo ""
     echo -e "${GREEN}EXAMPLES:${NC}"
     echo ""
-    echo -e "  ${YELLOW}# Fix permissions (run this if you get 'Permission denied' errors)${NC}"
+    echo -e "  ${YELLOW}# Fix agent permissions (run before using isle agent)${NC}"
+    echo -e "  sudo isle permissions agent"
+    echo ""
+    echo -e "  ${YELLOW}# Fix router permissions (run after installing router)${NC}"
     echo -e "  sudo isle permissions core"
     echo ""
     echo -e "  ${YELLOW}# Verify everything is set up correctly${NC}"
     echo -e "  isle permissions verify"
     echo ""
     echo -e "${GREEN}WHEN TO USE:${NC}"
+    echo ""
+    echo -e "  Run ${CYAN}sudo isle permissions agent${NC} when:"
+    echo -e "    • Before starting the agent for the first time"
+    echo -e "    • You get 'Permission denied' errors with /etc/isle-mesh"
+    echo -e "    • Agent files are owned by root and you can't modify them"
     echo ""
     echo -e "  Run ${CYAN}sudo isle permissions core${NC} when:"
     echo -e "    • You get 'Permission denied' or 'Failed to open file' errors"
@@ -294,6 +395,10 @@ cmd_help() {
 
 # Main command router
 case "$SUBCOMMAND" in
+    agent)
+        cmd_agent "$@"
+        ;;
+
     core)
         cmd_core "$@"
         ;;
@@ -312,6 +417,7 @@ case "$SUBCOMMAND" in
         echo "Usage: isle permissions <subcommand>"
         echo ""
         echo "Available subcommands:"
+        echo "  agent    - Fix agent permissions"
         echo "  core     - Fix core permissions"
         echo "  verify   - Verify permissions"
         echo "  help     - Show help"

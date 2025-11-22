@@ -21,12 +21,23 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../lib/common-log.sh"
 source "$SCRIPT_DIR/../lib/common-utils.sh"
 
+# Source SSH key library for dedicated router key
+if [ -f "$SCRIPT_DIR/router-init-lib/15-ssh-key.sh" ]; then
+    source "$SCRIPT_DIR/router-init-lib/15-ssh-key.sh"
+fi
+
 # Configuration
 ISLE_NAME="${ISLE_NAME:-my-isle}"
 VLAN_ID="${VLAN_ID:-10}"
 ROUTER_IP="${ROUTER_IP:-192.168.1.1}"
 ROUTER_USER="${ROUTER_USER:-root}"
-SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+
+# Use dedicated SSH key if available, otherwise fall back to default
+if [ -n "${ISLE_SSH_OPTS:-}" ]; then
+    SSH_OPTS="$ISLE_SSH_OPTS"
+else
+    SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+fi
 
 # Parse arguments
 parse_args() {
@@ -272,15 +283,15 @@ deploy_to_router() {
     # Copy files to router
     log_info "Copying files to router..."
 
-    scp $SSH_OPTS "$tmpdir/isle-join-protocol.init" \
+    sudo scp $SSH_OPTS "$tmpdir/isle-join-protocol.init" \
         "${ROUTER_USER}@${ROUTER_IP}:/etc/init.d/isle-join-protocol" &>/dev/null
 
-    scp $SSH_OPTS "$tmpdir/isle-join-protocol.sh" \
+    sudo scp $SSH_OPTS "$tmpdir/isle-join-protocol.sh" \
         "${ROUTER_USER}@${ROUTER_IP}:/usr/bin/isle-join-protocol" &>/dev/null
 
     # Set permissions and enable
     log_info "Configuring service on router..."
-    ssh $SSH_OPTS "${ROUTER_USER}@${ROUTER_IP}" << REMOTE_EOF
+    sudo ssh $SSH_OPTS "${ROUTER_USER}@${ROUTER_IP}" << REMOTE_EOF
 chmod +x /etc/init.d/isle-join-protocol
 chmod +x /usr/bin/isle-join-protocol
 
@@ -306,7 +317,7 @@ verify_service() {
     log_step "Verifying Join Protocol Service"
 
     local status
-    status=$(ssh $SSH_OPTS "${ROUTER_USER}@${ROUTER_IP}" \
+    status=$(sudo ssh $SSH_OPTS "${ROUTER_USER}@${ROUTER_IP}" \
         "/etc/init.d/isle-join-protocol status" 2>/dev/null || echo "stopped")
 
     if echo "$status" | grep -q "running"; then

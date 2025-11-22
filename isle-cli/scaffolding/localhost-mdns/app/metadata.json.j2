@@ -1,0 +1,30 @@
+{
+  "app_name": "{{ app_name }}",
+  "type": "localhost-mdns",
+  "scaffolding_type": "localhost-mdns",
+  "base_domain": "{{ base_domain }}",
+  "created_at": "{{ created_at }}",
+  "version": "1.0.0",
+  "networking": {
+    "mode": "localhost-only",
+    "uses_mdns": true,
+    "uses_dhcp": false,
+    "requires_router": false
+  },
+  "services": [
+    {% for service in services %}
+    {
+      "name": "{{ service.name }}",
+      "subdomain": "{{ service.name }}.{{ base_domain }}",
+      "internal_port": {{ service.internal_port }},
+      "external_port": {{ service.external_port }},
+      "uses_mtls": {{ service.use_mtls|lower }}
+    }{% if not loop.last %},{% endif %}
+    {% endfor %}
+  ],
+  "ssl": {
+    "base_cert": "{{ base_domain_cert }}.crt",
+    "base_key": "{{ base_domain_cert }}.key"
+  },
+  "description": "{{ description | default('Localhost mDNS application') }}"
+}

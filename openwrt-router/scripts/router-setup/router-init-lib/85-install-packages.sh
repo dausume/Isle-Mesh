@@ -10,19 +10,20 @@ install_and_configure_packages() {
   local router_user="${ROUTER_USER:-root}"
   local router_dest="${ROUTER_PACKAGE_DIR:-/tmp/packages}"
 
+  # Use dedicated SSH key (from 15-ssh-key.sh)
+  local ssh_opts="$ISLE_SSH_OPTS -o ConnectTimeout=5"
+
   log_info "Router IP: $router_ip"
 
   # Check SSH connection
-  if ! ssh -o ConnectTimeout=2 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-          "${router_user}@${router_ip}" "exit" 2>/dev/null; then
+  if ! sudo ssh $ssh_opts "${router_user}@${router_ip}" "exit" 2>/dev/null; then
     log_error "Cannot connect to router via SSH"
     exit 1
   fi
 
   # Install packages
   log_info "Installing packages from ${router_dest}..."
-  if ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-         "${router_user}@${router_ip}" \
+  if sudo ssh $ssh_opts "${router_user}@${router_ip}" \
          "opkg install ${router_dest}/*.ipk" 2>/dev/null; then
     log_success "Packages installed successfully"
   else
@@ -33,8 +34,7 @@ install_and_configure_packages() {
   log_info "Configuring avahi-daemon..."
 
   # Enable and start avahi-daemon service
-  ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-      "${router_user}@${router_ip}" \
+  sudo ssh $ssh_opts "${router_user}@${router_ip}" \
       "uci set avahi.@avahi[0].enable_reflector='1' && \
        uci set avahi.@avahi[0].enable_dbus='yes' && \
        uci commit avahi && \
@@ -49,8 +49,7 @@ install_and_configure_packages() {
 
   # Enable dbus (required for avahi)
   log_info "Enabling dbus service..."
-  ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-      "${router_user}@${router_ip}" \
+  sudo ssh $ssh_opts "${router_user}@${router_ip}" \
       "/etc/init.d/dbus enable && /etc/init.d/dbus start" 2>/dev/null
 
   if [[ $? -eq 0 ]]; then
@@ -61,8 +60,7 @@ install_and_configure_packages() {
 
   # Verify services are running
   log_info "Verifying services..."
-  local avahi_status=$(ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-                          "${router_user}@${router_ip}" \
+  local avahi_status=$(sudo ssh $ssh_opts "${router_user}@${router_ip}" \
                           "/etc/init.d/avahi-daemon status" 2>/dev/null)
 
   if echo "$avahi_status" | grep -q "running"; then
@@ -73,8 +71,7 @@ install_and_configure_packages() {
 
   # Verify installed packages
   log_info "Verifying installed packages..."
-  local installed_pkgs=$(ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-                            "${router_user}@${router_ip}" \
+  local installed_pkgs=$(sudo ssh $ssh_opts "${router_user}@${router_ip}" \
                             "opkg list-installed | grep -E '(avahi|ip-full|tcpdump)' | wc -l" 2>/dev/null)
 
   log_info "Verified $installed_pkgs package(s) installed"

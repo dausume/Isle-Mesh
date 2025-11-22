@@ -181,9 +181,9 @@ cleanup_vm_and_bridges() {
     sudo virsh undefine "$vm_name" 2>/dev/null || log_warning "Failed to undefine VM"
 
     # Clean up bridges that were created for this VM
-    # Only remove bridges that look like they were created for routers (br-test-*, br-mgmt, br-isles)
+    # Only remove bridges that look like they were created for routers (br-test-*, br-mgmt, isle-br-*)
     for bridge in "${bridges[@]}"; do
-        if [[ "$bridge" =~ ^br-(test-|mgmt|isles) ]]; then
+        if [[ "$bridge" =~ ^(br-(test-|mgmt)|isle-br-) ]]; then
             if ip link show "$bridge" &>/dev/null; then
                 log_info "Removing bridge $bridge..."
                 sudo ip link set "$bridge" down 2>/dev/null || true
@@ -781,7 +781,7 @@ cmd_destroy() {
     check_router_dir
     check_sudo
 
-    local CLEANUP_MODE="vm-only"
+    local CLEANUP_MODE="full"
     local FORCE_FLAG=""
 
     # Parse arguments

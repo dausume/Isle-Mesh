@@ -48,6 +48,7 @@ show_help() {
     echo -e "  ${CYAN}isle agent restart${NC}             Restart the isle-agent container"
     echo -e "  ${CYAN}isle agent status${NC}              Show agent status and registered apps"
     echo -e "  ${CYAN}isle agent reload${NC}              Reload nginx config (zero-downtime)"
+    echo -e "  ${CYAN}isle agent destroy${NC}             Completely remove agent (--full removes configs)"
     echo -e ""
     echo -e "╔═══════════════════════════════════════════════════════════════╗"
     echo -e "║                    SETUP & VERIFICATION                       ║"
@@ -115,6 +116,9 @@ show_help() {
     echo -e "╔═══════════════════════════════════════════════════════════════╗"
     echo -e "║                    TYPICAL WORKFLOW                           ║"
     echo -e "╚═══════════════════════════════════════════════════════════════╝"
+    echo -e ""
+    echo -e "# 0. First-time setup: Configure permissions (one-time)"
+    echo -e "${CYAN}sudo isle permissions agent${NC}"
     echo -e ""
     echo -e "# 1. Start the agent (mDNS mode by default)"
     echo -e "${CYAN}isle agent start${NC}"
@@ -239,6 +243,11 @@ case $COMMAND in
     summary)
         check_agent_available
         exec "${CONFIG_MERGER}" summary "$@"
+        ;;
+
+    destroy)
+        check_agent_available
+        exec "${AGENT_MANAGER}" destroy "$@"
         ;;
 
     "")

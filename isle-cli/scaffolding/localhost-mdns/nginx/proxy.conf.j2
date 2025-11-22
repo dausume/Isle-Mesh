@@ -1,0 +1,121 @@
+events { worker_connections 1024; }
+
+http {
+
+    include mime.types;
+
+    # Logging configuration
+    log_format combined_with_time '$remote_addr - $remote_user [$time_local] "$request"'
+                                  '$status $body_bytes_sent "$http_referer"'
+                                  '"$http_user_agent" "$http_x_forwarded_for"';
+
+    access_log /dev/stdout combined_with_time;
+    error_log /dev/stderr debug;
+
+    # Upstreams - one per service
+    {% for service in services %}
+    upstream {{ service.name }} {
+        server {{ service.name }}:{{ service.internal_port }};
+    }
+    {% endfor %}
+
+    # CORS and CSP headers
+    add_header Access-Control-Allow-Origin "https://{{ base_domain }}";
+    add_header Access-Control-Allow-Origin "wss://{{ base_domain }}";
+
+    {% for service in services %}
+    add_header Access-Control-Allow-Origin "https://{{ service.name }}.{{ base_domain }}";
+    add_header Access-Control-Allow-Origin "wss://{{ service.name }}.{{ base_domain }}";
+    {% endfor %}
+
+    add_header Content-Security-Policy "default-src 'self' https://{{ base_domain }} wss://{{ base_domain }}{% for service in services %} https://{{ service.name }}.{{ base_domain }} wss://{{ service.name }}.{{ base_domain }}{% endfor %}; frame-src 'self' https://{{ base_domain }} wss://{{ base_domain }}{% for service in services %} https://{{ service.name }}.{{ base_domain }} wss://{{ service.name }}.{{ base_domain }}{% endfor %}; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self'; connect-src 'self' https://{{ base_domain }} wss://{{ base_domain }}{% for service in services %} https://{{ service.name }}.{{ base_domain }} wss://{{ service.name }}.{{ base_domain }}{% endfor %};" always;
+
+    # Base domain HTTP server
+    server {
+        listen 80;
+        server_name {{ base_domain }};
+
+        location / {
+            default_type text/plain;
+            return 200 "http://{{ base_domain }} reached successfully.\n";
+        }
+    }
+
+    # Base domain HTTPS server
+    server {
+        listen 443 ssl default_server;
+        server_name {{ base_domain }};
+
+        ssl_certificate /ssl/certs/{{ base_domain_cert }}.crt;
+        ssl_certificate_key /ssl/keys/{{ base_domain_cert }}.key;
+
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_prefer_server_ciphers on;
+        ssl_ciphers HIGH:!aNULL:!MD5;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Host $server_name;
+
+        location = /robots.txt {
+            root /etc/nginx/static/;
+            default_type text/plain;
+        }
+
+        location / {
+            default_type text/plain;
+            return 200 "https://{{ base_domain }} reached successfully.\n";
+        }
+    }
+
+    {% for service in services %}
+    # {{ service.name }}.{{ base_domain }} HTTP server
+    server {
+        listen 80;
+        server_name {{ service.name }}.{{ base_domain }};
+
+        location / {
+            default_type text/plain;
+            return 200 "http://{{ service.name }}.{{ base_domain }} reached successfully.\n";
+        }
+    }
+
+    # {{ service.name }}.{{ base_domain }} HTTPS server
+    server {
+        listen 443 ssl;
+        server_name {{ service.name }}.{{ base_domain }};
+
+        ssl_certificate /ssl/certs/{{ base_domain_cert }}.crt;
+        ssl_certificate_key /ssl/keys/{{ base_domain_cert }}.key;
+
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_ciphers HIGH:!aNULL:!MD5;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Host $server_name;
+
+        location / {
+            {% if service.use_mtls %}
+            # mTLS configuration for backend
+            proxy_pass https://{{ service.name }};
+
+            proxy_ssl_certificate     /ssl/certs/{{ base_domain_cert }}.crt;
+            proxy_ssl_certificate_key /ssl/keys/{{ base_domain_cert }}.key;
+
+            proxy_ssl_trusted_certificate /ssl/certs/{{ service.name }}.{{ base_domain_cert }}.crt;
+
+            proxy_ssl_verify on;
+            proxy_ssl_verify_depth 2;
+            {% else %}
+            # Standard HTTP proxy for frontend
+            proxy_pass http://{{ service.name }};
+            {% endif %}
+
+            proxy_set_header Host $host;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        }
+    }
+
+    {% endfor %}
+}

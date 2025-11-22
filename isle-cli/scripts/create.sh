@@ -35,8 +35,9 @@ show_help() {
     echo -e "with a single command. It will:"
     echo -e ""
     echo -e "  ${GREEN}1.${NC} Start the Isle Agent (unified nginx proxy)"
-    echo -e "  ${GREEN}2.${NC} Initialize and start the OpenWRT Router"
-    echo -e "  ${GREEN}3.${NC} Deploy a sample Python app at ${CYAN}${SAMPLE_DOMAIN}${NC}"
+    echo -e "  ${GREEN}2.${NC} Install mDNS system (service discovery infrastructure)"
+    echo -e "  ${GREEN}3.${NC} Initialize and start the OpenWRT Router"
+    echo -e "  ${GREEN}4.${NC} Deploy a sample Python app at ${CYAN}${SAMPLE_DOMAIN}${NC}"
     echo -e "      (also accessible via ${CYAN}sample.vlan${NC} after join protocol)"
     echo -e ""
     echo -e "The sample app demonstrates how Isle Mesh dual-domain support works"
@@ -224,14 +225,51 @@ setup_agent() {
     echo ""
 }
 
-# Step 2: Create/Start Isle Router
+# Step 2: Install mDNS System
+setup_mdns_system() {
+    log_step "Step 2: Setting up mDNS System"
+
+    # Check if mDNS system is already running
+    if systemctl is-active --quiet mesh-mdns.service 2>/dev/null; then
+        log_success "mDNS system is already installed and running"
+        return 0
+    fi
+
+    log_info "Installing mDNS system infrastructure..."
+    log_info "This configures systemd, dnsmasq, and mDNS broadcasting"
+    echo ""
+
+    # Install mDNS system
+    if bash "$SCRIPT_DIR/mdns.sh" system install; then
+        log_success "mDNS system installed successfully"
+
+        # Wait a moment for service to start
+        sleep 2
+
+        # Verify it's running
+        if systemctl is-active --quiet mesh-mdns.service 2>/dev/null; then
+            log_success "mesh-mdns.service is running"
+        else
+            log_warning "mesh-mdns.service may not be running yet"
+            log_info "Check status with: isle mdns system status"
+        fi
+    else
+        log_warning "mDNS system installation failed or incomplete"
+        log_info "You can manually install it later with: isle mdns system install"
+        log_info "Continuing with setup..."
+    fi
+
+    echo ""
+}
+
+# Step 3: Create/Start Isle Router
 setup_router() {
     if [[ "$SKIP_ROUTER" == true ]]; then
         log_warning "Skipping router setup (libvirt not available)"
         return 0
     fi
 
-    log_step "Step 2: Setting up Isle Router"
+    log_step "Step 3: Setting up Isle Router"
 
     # Check if router is already running
     # Try without sudo first (for users with libvirt group access), then with sudo
@@ -271,9 +309,9 @@ setup_router() {
     echo ""
 }
 
-# Step 3: Create and deploy sample app
+# Step 4: Create and deploy sample app
 setup_sample_app() {
-    log_step "Step 3: Setting up Sample Application"
+    log_step "Step 4: Setting up Sample Application"
 
     log_info "Creating sample app directory..."
     rm -rf "$SAMPLE_APP_DIR"
@@ -654,6 +692,7 @@ show_completion() {
     echo ""
     echo -e "${CYAN}Components Running:${NC}"
     echo -e "  ✓ Isle Agent (unified proxy)"
+    echo -e "  ✓ mDNS System (service discovery)"
     echo -e "  ✓ Isle Router (OpenWRT VM)"
     echo -e "  ✓ Sample Application"
     echo ""
@@ -690,6 +729,7 @@ main() {
 
             check_prerequisites
             setup_agent
+            setup_mdns_system
             setup_router
             setup_sample_app
             show_completion

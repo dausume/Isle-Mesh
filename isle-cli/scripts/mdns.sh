@@ -1,183 +1,170 @@
 #!/bin/bash
-# Script for managing Isle Mesh mDNS system setup using docker-compose
+# Isle mDNS Namespace Router
+# Routes commands to appropriate scope handlers
 
-# Get the directory where this script is located
+set -e
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Get the project root (parent of isle-cli)
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-# Path to mdns directory
-MDNS_DIR="$PROJECT_ROOT/mdns"
 
-# Check if mdns directory exists
-if [ ! -d "$MDNS_DIR" ]; then
-    echo "Error: mdns directory not found at $MDNS_DIR"
-    exit 1
-fi
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m'
 
-# Change to mdns directory
-cd "$MDNS_DIR" || exit 1
+# Sub-script paths
+MDNS_SYSTEM_SCRIPT="$SCRIPT_DIR/mdns-system.sh"
+MDNS_DOMAIN_SCRIPT="$SCRIPT_DIR/mdns-domain.sh"
+MDNS_APP_SCRIPT="$SCRIPT_DIR/mdns-app.sh"
+MDNS_SAMPLE_SCRIPT="$SCRIPT_DIR/mdns-sample.sh"
 
-# Always use docker-compose.yml
-COMPOSE_FILE="docker-compose.yml"
+show_help() {
+    echo -e "${BOLD}Isle mDNS Namespace${NC}"
+    echo ""
+    echo "Manage mDNS infrastructure, domains, applications, and samples."
+    echo ""
+    echo "╔═══════════════════════════════════════════════════════════════╗"
+    echo "║                         SCOPES                                ║"
+    echo "╚═══════════════════════════════════════════════════════════════╝"
+    echo ""
+    echo -e "${CYAN}isle mdns system${NC}    System-level mDNS infrastructure"
+    echo "                    Install systemd services, manage mesh-mdns daemon,"
+    echo "                    configure host networking for mDNS broadcasting."
+    echo ""
+    echo -e "${CYAN}isle mdns domain${NC}    Domain broadcasting management"
+    echo "                    Add, remove, and list domains for mDNS broadcasting."
+    echo "                    Auto-detect domains from application configs."
+    echo ""
+    echo -e "${CYAN}isle mdns app${NC}       Localhost application management"
+    echo "                    Manage localhost-only apps (no router/DHCP)."
+    echo "                    List, start, stop, and monitor application containers."
+    echo ""
+    echo -e "${CYAN}isle mdns sample${NC}    Demo environment management"
+    echo "                    Run hand-crafted example environments for testing"
+    echo "                    and demonstrating Isle Mesh concepts."
+    echo ""
+    echo -e "${CYAN}isle mdns discover${NC}  Discover mDNS services on local network"
+    echo "                    Scan for .local domains via Avahi (physical machine perspective)"
+    echo ""
+    echo "╔═══════════════════════════════════════════════════════════════╗"
+    echo "║                    DETAILED HELP                              ║"
+    echo "╚═══════════════════════════════════════════════════════════════╝"
+    echo ""
+    echo "For detailed commands in each scope:"
+    echo ""
+    echo -e "  ${GREEN}isle mdns system help${NC}    Show all system infrastructure commands"
+    echo -e "  ${GREEN}isle mdns domain help${NC}    Show all domain management commands"
+    echo -e "  ${GREEN}isle mdns app help${NC}       Show all application commands"
+    echo -e "  ${GREEN}isle mdns sample help${NC}    Show all sample environment commands"
+    echo ""
+    echo "╔═══════════════════════════════════════════════════════════════╗"
+    echo "║                    QUICK START                                ║"
+    echo "╚═══════════════════════════════════════════════════════════════╝"
+    echo ""
+    echo -e "${YELLOW}1. Install mDNS system:${NC}"
+    echo "   isle mdns system install"
+    echo ""
+    echo -e "${YELLOW}2. Check installation status:${NC}"
+    echo "   isle mdns system status"
+    echo ""
+    echo -e "${YELLOW}3. Add domains for broadcasting:${NC}"
+    echo "   isle mdns domain add myapp.local"
+    echo "   isle mdns domain list"
+    echo ""
+    echo -e "${YELLOW}4. Start a localhost app:${NC}"
+    echo "   isle mdns app list"
+    echo "   isle mdns app up <app-name>"
+    echo ""
+    echo -e "${YELLOW}5. Run demo environment:${NC}"
+    echo "   isle mdns sample up"
+    echo "   isle mdns sample logs"
+    echo ""
+    echo "╔═══════════════════════════════════════════════════════════════╗"
+    echo "║                    COMMON WORKFLOWS                           ║"
+    echo "╚═══════════════════════════════════════════════════════════════╝"
+    echo ""
+    echo -e "${BOLD}Setup new development environment:${NC}"
+    echo "  isle mdns system install       # Install infrastructure"
+    echo "  isle mdns system status        # Verify installation"
+    echo "  isle mdns domain detect        # Auto-detect app domains"
+    echo "  isle mdns system reload        # Apply domain changes"
+    echo ""
+    echo -e "${BOLD}Manage localhost applications:${NC}"
+    echo "  isle mdns app list             # See available apps"
+    echo "  isle mdns app up myapp         # Start application"
+    echo "  isle mdns app logs myapp       # Monitor logs"
+    echo "  isle mdns app down myapp       # Stop application"
+    echo ""
+    echo -e "${BOLD}Test with demo environment:${NC}"
+    echo "  isle mdns sample up            # Start demo stack"
+    echo "  isle mdns sample status        # Check containers"
+    echo "  isle mdns sample logs          # View all logs"
+    echo "  isle mdns sample down          # Stop demo"
+    echo ""
+    echo "For more information: https://github.com/yourusername/IsleMesh/docs"
+}
 
-ACTION=${1:-help}
+SCOPE=${1:-help}
+shift || true
 
-case $ACTION in
-    install|up)
-        echo "Installing Isle Mesh mDNS system..."
-        echo "This will configure your host system for mDNS networking."
-        docker compose -f "$COMPOSE_FILE" up --build
+case $SCOPE in
+    system)
+        exec bash "$MDNS_SYSTEM_SCRIPT" "$@"
         ;;
-    uninstall|down)
-        echo "Running mDNS uninstall script..."
-        if [ -f "./scripts/uninstall-mesh-mdns.sh" ]; then
-            bash ./scripts/uninstall-mesh-mdns.sh
-        else
-            echo "Warning: Uninstall script not found"
-            docker compose -f "$COMPOSE_FILE" down
-        fi
+    domain)
+        exec bash "$MDNS_DOMAIN_SCRIPT" "$@"
         ;;
-    status)
-        echo "Checking Isle Mesh mDNS installation status..."
+    app)
+        exec bash "$MDNS_APP_SCRIPT" "$@"
+        ;;
+    sample)
+        exec bash "$MDNS_SAMPLE_SCRIPT" "$@"
+        ;;
+    discover)
+        # Physical machine mDNS discovery
+        echo -e "${BOLD}Discovering mDNS services from physical machine...${NC}"
         echo ""
 
-        # Check if systemd service exists and is running (primary indicator)
-        if systemctl list-unit-files 2>/dev/null | grep -q "mesh-mdns.service"; then
-            if systemctl is-active --quiet mesh-mdns.service 2>/dev/null; then
-                echo "✅ IsleMesh mDNS is fully installed and running"
-            else
-                echo "⚠️  IsleMesh mDNS is installed but not running"
-                echo "   Start with: sudo systemctl start mesh-mdns.service"
-            fi
-            echo ""
-            echo "Service status:"
-            systemctl status mesh-mdns.service --no-pager || true
-        else
-            # Service doesn't exist, check installation flags
-            if [ -f "/etc/isle-mesh/.install_complete" ]; then
-                echo "⚠️  Installation flags present but service not found"
-                echo "   Run 'isle mdns install' to reinstall"
-            elif [ -f "/etc/isle-mesh/.installed_started" ]; then
-                echo "⚠️  Partial installation detected (incomplete)"
-                echo "   Run 'isle mdns install' to complete or 'isle mdns uninstall' to clean up"
-            else
-                echo "ℹ️  IsleMesh mDNS is not installed"
-                echo "   Run 'isle mdns install' to set up"
-            fi
-            echo ""
-            echo "📋 mesh-mdns.service not found"
+        # Use avahi-browse to discover .local services
+        if ! command -v avahi-browse &> /dev/null; then
+            echo -e "${RED}Error: avahi-browse not found${NC}"
+            echo "Install with: ${CYAN}sudo apt-get install avahi-utils${NC}"
+            exit 1
         fi
+
+        echo -e "${CYAN}▸ Scanning for .local mDNS services...${NC}"
+        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo ""
+
+        # Discover HTTP/HTTPS services
+        timeout 5 avahi-browse -at 2>/dev/null | grep -E "(_http\._tcp|_https\._tcp)" | grep "\.local" | awk '{print $4}' | sort -u | while read -r service; do
+            if [ -n "$service" ]; then
+                echo -e "  ${GREEN}✓${NC} ${service}.local"
+                echo -e "    ${CYAN}→${NC} http://${service}.local"
+                echo -e "    ${CYAN}→${NC} https://${service}.local"
+            fi
+        done
+
+        # Also discover generic hosts
+        echo ""
+        echo -e "${CYAN}▸ All .local hosts:${NC}"
+        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo ""
+
+        timeout 5 avahi-browse -at 2>/dev/null | grep "\.local" | grep -v "^=" | awk '{print $4}' | sort -u | head -20 | while read -r host; do
+            if [ -n "$host" ]; then
+                echo -e "  ${GREEN}✓${NC} ${host}.local"
+            fi
+        done
 
         echo ""
-        # Check docker container status
-        echo "Docker container status:"
-        docker compose -f "$COMPOSE_FILE" ps
-        ;;
-    logs)
-        echo "Viewing mDNS installer logs..."
-        docker compose -f "$COMPOSE_FILE" logs -f
-        ;;
-    broadcast)
-        echo "Testing mDNS broadcast..."
-        if [ -f "./scripts/mesh-mdns-broadcast.sh" ]; then
-            bash ./scripts/mesh-mdns-broadcast.sh
-        else
-            echo "Error: mesh-mdns-broadcast.sh not found"
-            exit 1
-        fi
-        ;;
-    detect-domains)
-        echo "Detecting domains from mesh configuration..."
-        MESH_CONFIG="${2:-./isle-mesh.yml}"
-        COMPOSE_FILE="${3:-./docker-compose.mesh-app.yml}"
-        MODE="${4:-append}"
-
-        if [ -f "./scripts/mesh-mdns-domains-detect.sh" ]; then
-            bash ./scripts/mesh-mdns-domains-detect.sh "$MESH_CONFIG" "$COMPOSE_FILE" "$MODE"
-        else
-            echo "Error: mesh-mdns-domains-detect.sh not found"
-            exit 1
-        fi
-        ;;
-    add-domain)
-        DOMAIN="$2"
-        if [ -z "$DOMAIN" ]; then
-            echo "Usage: isle mdns add-domain <domain>"
-            exit 1
-        fi
-
-        if [ -f "./scripts/mesh-mdns-domains-add.sh" ]; then
-            bash ./scripts/mesh-mdns-domains-add.sh "$DOMAIN"
-        else
-            echo "Error: mesh-mdns-domains-add.sh not found"
-            exit 1
-        fi
-        ;;
-    remove-domain)
-        DOMAIN="$2"
-        if [ -z "$DOMAIN" ]; then
-            echo "Usage: isle mdns remove-domain <domain>"
-            exit 1
-        fi
-
-        if [ -f "./scripts/mesh-mdns-domains-remove.sh" ]; then
-            bash ./scripts/mesh-mdns-domains-remove.sh "$DOMAIN"
-        else
-            echo "Error: mesh-mdns-domains-remove.sh not found"
-            exit 1
-        fi
-        ;;
-    list-domains)
-        if [ -f "./scripts/mesh-mdns-domains-list.sh" ]; then
-            bash ./scripts/mesh-mdns-domains-list.sh
-        else
-            echo "Error: mesh-mdns-domains-list.sh not found"
-            exit 1
-        fi
-        ;;
-    reload)
-        echo "Reloading mDNS broadcast service..."
-        if systemctl is-active --quiet mesh-mdns.service; then
-            sudo systemctl restart mesh-mdns.service
-            echo "✅ Service reloaded"
-        else
-            echo "⚠️  mesh-mdns.service is not running"
-            echo "Run 'isle mdns install' first"
-            exit 1
-        fi
+        echo -e "${YELLOW}ℹ${NC}  For router DNS perspective (.vlan domains), use: ${CYAN}isle dns discover${NC}"
         ;;
     help|*)
-        echo "Isle Mesh mDNS System Setup"
-        echo ""
-        echo "Usage: isle mdns [action] [options]"
-        echo ""
-        echo "This manages the real Isle Mesh mDNS infrastructure for"
-        echo "setting up an intranet with mDNS-based service discovery."
-        echo ""
-        echo "System Actions:"
-        echo "  install/up    - Install and configure mDNS on the host system"
-        echo "  uninstall/down- Uninstall mDNS configuration from host"
-        echo "  status        - Check mDNS installation status"
-        echo "  logs          - View installer logs"
-        echo "  broadcast     - Test mDNS broadcast functionality"
-        echo ""
-        echo "Domain Management:"
-        echo "  detect-domains [config] [compose] [mode]"
-        echo "                - Auto-detect domains from isle-mesh.yml and docker-compose"
-        echo "                  mode: append (default) or replace"
-        echo "  add-domain <domain>"
-        echo "                - Manually add a domain to broadcast list"
-        echo "  remove-domain <domain>"
-        echo "                - Remove a domain from broadcast list"
-        echo "  list-domains  - Show all configured domains"
-        echo "  reload        - Restart broadcast service with updated domains"
-        echo ""
-        echo "  help          - Show this help message"
-        echo ""
-        echo "Note: This requires privileged access to modify host system"
-        echo "      networking configuration (dnsmasq, systemd, etc.)"
-        echo ""
-        echo "For a sample/demo environment, see:"
-        echo "  isle sample localhost-mdns"
+        show_help
         ;;
 esac

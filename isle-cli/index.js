@@ -12,9 +12,16 @@ const scriptPaths = {
     'app': path.join(__dirname, 'scripts', 'app.sh'),
     'router': path.join(__dirname, 'scripts', 'router.sh'),
     'agent': path.join(__dirname, 'scripts', 'agent.sh'),
+    'mdns': path.join(__dirname, 'scripts', 'mdns.sh'),
+    'dns': path.join(__dirname, 'scripts', 'dns.sh'),
+
+    // Deprecated - backward compatibility
+    'localhost': path.join(__dirname, 'scripts', 'mdns-app.sh'),
 
     // Top-level utilities
+    'status': path.join(__dirname, 'scripts', 'status.sh'),
     'create': path.join(__dirname, 'scripts', 'create.sh'),
+    'destroy': path.join(__dirname, 'scripts', 'destroy.sh'),
     'install': path.join(__dirname, 'scripts', 'install.sh'),
     'uninstall': path.join(__dirname, 'scripts', 'uninstall.sh'),
     'permissions': path.join(__dirname, 'scripts', 'permissions.sh'),
@@ -115,10 +122,12 @@ const showNamespaceError = (attemptedCommand) => {
   console.error('\x1b[31m%s\x1b[0m', '  ERROR: Command Requires Namespace');
   console.error('\x1b[31m%s\x1b[0m', '═══════════════════════════════════════════════════════════════');
   console.error('\x1b[33m%s\x1b[0m', `\nThe command '${attemptedCommand}' requires a namespace specifier.\n`);
-  console.log('Isle CLI commands are organized into three categories:\n');
-  console.log('  \x1b[36m%s\x1b[0m', '• isle app <command>     - Mesh application management');
-  console.log('  \x1b[36m%s\x1b[0m', '• isle router <command>  - Router and network management');
-  console.log('  \x1b[36m%s\x1b[0m', '• isle agent <command>   - Agent and bridge management\n');
+  console.log('Isle CLI commands are organized into five categories:\n');
+  console.log('  \x1b[36m%s\x1b[0m', '• isle app <command>       - Mesh application management');
+  console.log('  \x1b[36m%s\x1b[0m', '• isle mdns <scope> <cmd>  - mDNS infrastructure (.local)');
+  console.log('  \x1b[36m%s\x1b[0m', '• isle dns <command>       - Router DNS management (.vlan)');
+  console.log('  \x1b[36m%s\x1b[0m', '• isle router <command>    - Router and network management');
+  console.log('  \x1b[36m%s\x1b[0m', '• isle agent <command>     - Agent and bridge management\n');
   console.log('Examples:');
   console.log('  \x1b[32m%s\x1b[0m', `  isle app ${attemptedCommand}`);
   console.log('  \x1b[32m%s\x1b[0m', `  isle router ${attemptedCommand}\n`);
@@ -165,10 +174,45 @@ switch (command) {
     execSync(`bash ${scriptPaths['agent']} ${agentArgs}`, { stdio: 'inherit', cwd: projectRoot });
     break;
 
+  case 'mdns':
+    // mDNS namespace (system, domain, app, sample, discover)
+    const mdnsArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
+    execSync(`bash ${scriptPaths['mdns']} ${mdnsArgs}`, { stdio: 'inherit', cwd: projectRoot });
+    break;
+
+  case 'dns':
+    // DNS namespace (router DNS management - .vlan domains)
+    const dnsArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
+    try {
+      execSync(`bash ${scriptPaths['dns']} ${dnsArgs}`, { stdio: 'inherit', cwd: projectRoot });
+    } catch (error) {
+      process.exit(error.status || 1);
+    }
+    break;
+
+  case 'localhost':
+    // DEPRECATED - backward compatibility, redirect to mdns app
+    console.log('\x1b[33m%s\x1b[0m', '⚠️  WARNING: "isle localhost" is deprecated');
+    console.log('\x1b[33m%s\x1b[0m', '   Use "isle mdns app" instead');
+    console.log('');
+    const localhostArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
+    execSync(`bash ${scriptPaths['localhost']} ${localhostArgs}`, { stdio: 'inherit', cwd: projectRoot });
+    break;
+
   case 'create':
     // One-command setup: agent + router + sample app
     const createArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
     execSync(`bash ${scriptPaths['create']} ${createArgs}`, { stdio: 'inherit', cwd: projectRoot });
+    break;
+
+  case 'destroy':
+    // Complete teardown: apps + agent + router
+    const destroyArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
+    try {
+      execSync(`bash ${scriptPaths['destroy']} ${destroyArgs}`, { stdio: 'inherit', cwd: projectRoot });
+    } catch (error) {
+      process.exit(error.status || 1);
+    }
     break;
 
   case 'install':
@@ -204,6 +248,12 @@ switch (command) {
     }
     break;
 
+  case 'status':
+    // Show unified system status
+    const statusArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
+    execSync(`bash ${scriptPaths['status']} ${statusArgs}`, { stdio: 'inherit', cwd: projectRoot });
+    break;
+
   case 'help':
   case undefined:
     console.log(`\x1b[1mIsle-Mesh CLI\x1b[0m - Zero-configuration mesh networking for containerized applications
@@ -212,13 +262,25 @@ switch (command) {
 ║                    COMMAND STRUCTURE                          ║
 ╚═══════════════════════════════════════════════════════════════╝
 
-Isle commands are organized into three main categories:
+Isle commands are organized into five main categories:
 
   \x1b[36misle app <command>\x1b[0m      Mesh application management
                           • Initialize and scaffold apps
                           • Start/stop services (init, up, down, logs, ps)
                           • Service discovery and SSL
                           • Configuration management
+
+  \x1b[36misle mdns <scope> <command>\x1b[0m   mDNS infrastructure (physical machines)
+                          • System installation (install/status/reload)
+                          • Domain broadcasting (.local domains via Avahi)
+                          • Localhost app management (up/down/logs)
+                          • Sample environments and discovery
+
+  \x1b[36misle dns <command>\x1b[0m      DNS management (router .vlan domains)
+                          • Router DNS discovery and status
+                          • .vlan domain mappings via dnsmasq
+                          • Join protocol synchronization
+                          • DNS verification and testing
 
   \x1b[36misle router <command>\x1b[0m   Router and network management
                           • OpenWRT router lifecycle
@@ -234,7 +296,9 @@ Isle commands are organized into three main categories:
 ║                    GLOBAL COMMANDS                            ║
 ╚═══════════════════════════════════════════════════════════════╝
 
+  isle status             Show comprehensive system status (all components)
   isle create             Complete setup (agent + router + sample app)
+  isle destroy            Complete teardown (apps + agent + router)
   isle install [target]   Install dependencies (app/router/agent/all)
   isle uninstall [target] Uninstall components (app/router/all)
   isle permissions        Manage file permissions
@@ -248,6 +312,8 @@ Isle commands are organized into three main categories:
 For detailed command information:
 
   \x1b[32misle app help\x1b[0m           Show all mesh application commands
+  \x1b[32misle mdns help\x1b[0m          Show all mDNS infrastructure commands (.local)
+  \x1b[32misle dns help\x1b[0m           Show all DNS management commands (.vlan)
   \x1b[32misle router help\x1b[0m        Show all router management commands
   \x1b[32misle agent help\x1b[0m         Show all agent commands
 
@@ -294,7 +360,6 @@ https://github.com/yourusername/IsleMesh
   case 'proxy':
   case 'embed-jinja':
   case 'jinja':
-  case 'mdns':
   case 'sample':
     showNamespaceError(command);
     process.exit(1);
