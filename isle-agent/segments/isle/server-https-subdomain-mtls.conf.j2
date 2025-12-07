@@ -1,0 +1,38 @@
+{# HTTPS server with mTLS for subdomain (like backend) #}
+    # {{ subdomain }}.{{ base_domain }} https server proxy with mTLS
+    server {
+        listen 443 ssl;
+        server_name {{ subdomain }}.{{ base_domain }};
+
+        # For the proxy level we still use the base {{ base_domain }} cert for communicating to all sub-domains as a front-door,
+        # the 'actual' subdomain key/cert re-encrypt occurs via mTLS with the backend server, where the key
+        # only exists on the backend side and our proxy does not have the key, only the cert for verifying the backend
+        # identity via mTLS. Whereas our backend should also have the {{ base_domain }} (proxy) cert only without the key.
+        ssl_certificate /ssl/certs/{{ base_cert }};
+        ssl_certificate_key /ssl/keys/{{ base_key }};
+
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_ciphers HIGH:!aNULL:!MD5;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Host $server_name;
+
+        location / {
+            proxy_pass https://{{ upstream_name }};
+
+            # NOTE : proxy_ssl_* MUST be set at the location level, it CANNOT be set at the server level.
+            proxy_ssl_certificate     /ssl/certs/{{ base_cert }};
+            proxy_ssl_certificate_key /ssl/keys/{{ base_key }};
+
+            # Trust the backend server's identity
+            proxy_ssl_trusted_certificate /ssl/certs/{{ subdomain_cert }};
+
+            proxy_ssl_verify on;
+            proxy_ssl_verify_depth 2;
+
+            proxy_set_header Host $host;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        }
+
+    }

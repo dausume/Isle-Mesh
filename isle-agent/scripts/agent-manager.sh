@@ -1,18 +1,52 @@
 #!/usr/bin/env bash
 #
-# Isle Agent Manager - Lifecycle management for unified nginx proxy
+# Isle Agent Manager - Lifecycle management for three-component agent architecture
 #
-# Manages the single isle-agent container that serves all mesh apps
-# with virtual MAC address for OpenWRT router integration
+# Manages the three-component isle-agent system:
+#   1. isle-host-agent: Systemd service for mDNS broadcasting/relaying
+#   2. isle-agent-sync: Python container for receiving mDNS and generating configs
+#   3. isle-vlan-agent: Nginx container for reverse proxy
 
 set -euo pipefail
 
+# Get script directory and source dependency checker
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CLI_DIR="$(dirname "$(dirname "$SCRIPT_DIR")")/isle-cli"
+DEPENDENCY_CHECKER="$CLI_DIR/scripts/check-dependencies.sh"
+PROJECT_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
+
+# Source dependency management if available
+if [[ -f "$DEPENDENCY_CHECKER" ]]; then
+    source "$DEPENDENCY_CHECKER"
+fi
+
 # Configuration
 ISLE_AGENT_DIR="/etc/isle-mesh/agent"
-COMPOSE_FILE="/etc/isle-mesh/agent/docker-compose.yml"
-CONTAINER_NAME="isle-agent"
-REGISTRY_FILE="/etc/isle-mesh/agent/registry.json"
-NGINX_CONF="/etc/isle-mesh/agent/nginx.conf"
+COMPOSE_FILE="${ISLE_AGENT_DIR}/docker-compose.yml"
+REGISTRY_FILE="${ISLE_AGENT_DIR}/registry.json"
+
+# Component names
+SYNC_CONTAINER="isle-agent-sync"
+VLAN_CONTAINER="isle-vlan-agent"
+HOST_SERVICE="isle-host-agent"
+
+# Component paths
+HOST_AGENT_DIR="${PROJECT_ROOT}/isle-agent/isle-host-agent"
+SYNC_AGENT_DIR="${PROJECT_ROOT}/isle-agent/isle-agent-sync"
+VLAN_AGENT_DIR="${PROJECT_ROOT}/isle-agent/isle-vlan-agent"
+
+# Detect which docker compose command to use
+DOCKER_COMPOSE_CMD=""
+detect_docker_compose() {
+    if docker compose version &>/dev/null; then
+        DOCKER_COMPOSE_CMD="docker compose"
+    elif command -v docker-compose &>/dev/null; then
+        DOCKER_COMPOSE_CMD="docker-compose"
+    else
+        return 1
+    fi
+    return 0
+}
 
 # Colors for output
 RED='\033[0;31m'
@@ -39,42 +73,130 @@ log_error() {
 }
 
 # Check if user has proper permissions for /etc/isle-mesh
+# This is advisory only - we allow operation with sudo or as root
 check_permissions() {
-    # Check if user is in isle-mesh group
+    # If running as root (via sudo or directly), skip group check
+    if [[ $EUID -eq 0 ]]; then
+        return 0
+    fi
+
+    # Check if user is in isle-mesh group (advisory only)
     if ! id -nG | grep -qw "isle-mesh"; then
-        log_error "User is not in the isle-mesh group"
-        echo ""
-        echo "  Please run the following command to set up permissions:"
-        echo ""
+        log_warn "User is not in the isle-mesh group"
+        log_info "For better permissions management, consider running:"
         echo "    sudo isle permissions agent"
         echo ""
-        echo "  Then log out and log back in (or run: newgrp isle-mesh)"
-        echo ""
-        return 1
+        # Continue anyway - don't block execution
     fi
 
-    # Check if /etc/isle-mesh directory exists with proper permissions
-    if [[ ! -d "/etc/isle-mesh" ]]; then
-        log_error "/etc/isle-mesh directory does not exist"
-        echo ""
-        echo "  Please run the following command to set up permissions:"
-        echo ""
-        echo "    sudo isle permissions agent"
-        echo ""
-        return 1
-    fi
-
-    # Check if we can write to /etc/isle-mesh
-    if [[ ! -w "/etc/isle-mesh" ]]; then
+    # Check if we can write to /etc/isle-mesh (this will be created if needed)
+    # If directory exists but we can't write, that's a real error
+    if [[ -d "/etc/isle-mesh" ]] && [[ ! -w "/etc/isle-mesh" ]]; then
         log_error "Cannot write to /etc/isle-mesh (permission denied)"
         echo ""
-        echo "  Please run the following command to fix permissions:"
+        echo "  Please run with sudo, or run this command to fix permissions:"
         echo ""
         echo "    sudo isle permissions agent"
         echo ""
-        echo "  Then log out and log back in (or run: newgrp isle-mesh)"
+        return 1
+    fi
+
+    return 0
+}
+
+# Check if Docker is installed and accessible
+check_docker_available() {
+    # Use new dependency management if available
+    if declare -f ensure_dependency &>/dev/null; then
+        if ! ensure_dependency "docker" "run the Isle agent" "true"; then
+            return 1
+        fi
+
+        # Detect docker compose command
+        if ! detect_docker_compose; then
+            if ! ensure_dependency "docker-compose" "run the Isle agent" "true"; then
+                return 1
+            fi
+
+            # Re-detect after installation
+            if ! detect_docker_compose; then
+                log_error "Docker Compose installation failed or incomplete"
+                echo ""
+                echo "  Please install manually:"
+                echo "    https://docs.docker.com/compose/install/"
+                echo ""
+                return 1
+            fi
+        fi
+
+        return 0
+    fi
+
+    # Fallback to old behavior if dependency checker not available
+    if ! command -v docker &>/dev/null; then
+        log_error "Docker is not installed"
+        echo ""
+        echo "  The Isle agent requires Docker to run."
+        echo ""
+        echo "  To install Docker, run:"
+        echo ""
+        echo "    isle install dependencies docker"
+        echo ""
+        echo "  Or install Docker manually:"
+        echo "    https://docs.docker.com/engine/install/"
         echo ""
         return 1
+    fi
+
+    # Check if Docker daemon is accessible
+    if ! docker ps &>/dev/null; then
+        log_error "Cannot access Docker daemon"
+        echo ""
+        echo "  Docker is installed but not accessible."
+        echo ""
+        echo "  Common causes:"
+        echo "    1. Docker daemon is not running"
+        echo "    2. User lacks permissions (not in docker group)"
+        echo "    3. Docker socket permissions issue"
+        echo ""
+        echo "  To fix permissions, run:"
+        echo ""
+        echo "    sudo usermod -aG docker \$USER"
+        echo "    newgrp docker"
+        echo ""
+        echo "  To start Docker daemon:"
+        echo ""
+        echo "    sudo systemctl start docker"
+        echo ""
+        return 1
+    fi
+
+    # Detect docker compose command
+    if ! detect_docker_compose; then
+        if declare -f ensure_dependency &>/dev/null; then
+            if ! ensure_dependency "docker-compose" "run the Isle agent" "true"; then
+                return 1
+            fi
+
+            # Re-detect after installation
+            if ! detect_docker_compose; then
+                log_error "Docker Compose installation failed or incomplete"
+                echo ""
+                echo "  Please install manually:"
+                echo "    https://docs.docker.com/compose/install/"
+                echo ""
+                return 1
+            fi
+        else
+            log_error "Docker Compose is not installed"
+            echo ""
+            echo "  The Isle agent requires Docker Compose."
+            echo ""
+            echo "  Please install Docker Compose:"
+            echo "    https://docs.docker.com/compose/install/"
+            echo ""
+            return 1
+        fi
     fi
 
     return 0
@@ -84,19 +206,11 @@ check_permissions() {
 init_agent_dir() {
     log_info "Initializing isle-agent directory structure..."
 
-    # Check permissions first
-    if ! check_permissions; then
-        return 1
-    fi
+    # Check permissions (advisory)
+    check_permissions || true  # Continue even if check fails
 
     # Create directory structure in /etc/isle-mesh/agent
-    mkdir -p "${ISLE_AGENT_DIR}"/{configs,ssl/{certs,keys},logs,mdns/services}
-
-    # Copy docker-compose.yml if it doesn't exist
-    if [[ ! -f "${COMPOSE_FILE}" ]]; then
-        log_info "Installing agent docker-compose.yml..."
-        cp "$(dirname "$0")/../docker-compose.yml" "${COMPOSE_FILE}"
-    fi
+    mkdir -p "${ISLE_AGENT_DIR}"/{configs,ssl/{certs,keys},logs,sync-data}
 
     # Initialize empty registry if doesn't exist
     if [[ ! -f "${REGISTRY_FILE}" ]]; then
@@ -104,78 +218,120 @@ init_agent_dir() {
         echo '{"domains": {}, "subdomains": {}, "apps": {}}' > "${REGISTRY_FILE}"
     fi
 
-    # Create base nginx config if doesn't exist
-    if [[ ! -f "${NGINX_CONF}" ]]; then
-        log_info "Creating base nginx config..."
-        create_base_nginx_config
-    fi
-
     log_success "Agent directory initialized at ${ISLE_AGENT_DIR}"
 }
 
-# Create base nginx configuration
-create_base_nginx_config() {
-    cat <<'EOF' > "${NGINX_CONF}"
-# Isle Agent - Base nginx configuration
-# This file is auto-generated and includes all mesh-app fragments
+# Ensure mesh-mdns system is installed and running
+ensure_mesh_mdns() {
+    log_info "Checking mesh-mdns system..."
 
-user nginx;
-worker_processes auto;
-error_log /var/log/nginx/error.log warn;
-pid /var/run/nginx.pid;
+    # Check if mesh-mdns.service is installed
+    if systemctl list-unit-files 2>/dev/null | grep -q "mesh-mdns.service"; then
+        # Service exists, check if it's running
+        if ! systemctl is-active --quiet mesh-mdns.service 2>/dev/null; then
+            log_warn "mesh-mdns.service is installed but not running"
+            log_info "Starting mesh-mdns.service..."
+            if sudo systemctl start mesh-mdns.service 2>/dev/null; then
+                log_success "mesh-mdns.service started"
+            else
+                log_error "Failed to start mesh-mdns.service"
+                return 1
+            fi
+        else
+            log_success "mesh-mdns.service is running"
+        fi
 
-events {
-    worker_connections 1024;
-    use epoll;
-    multi_accept on;
+        # Add health.local domain if not already present
+        local health_domain="health.local"
+        if ! grep -Fxq "$health_domain" /usr/local/etc/mesh-mdns-domains.list 2>/dev/null; then
+            log_info "Adding ${health_domain} for agent health check..."
+            echo "$health_domain" | sudo tee -a /usr/local/etc/mesh-mdns-domains.list > /dev/null
+            # Reload to apply changes
+            sudo systemctl restart mesh-mdns.service 2>/dev/null || true
+            log_success "Added ${health_domain}"
+        fi
+
+        return 0
+    fi
+
+    # Service not installed - offer to install
+    log_warn "mesh-mdns.service is not installed"
+    echo ""
+    echo "The mesh-mdns service is required for .local domain broadcasting."
+    echo "Would you like to install it now? (y/N)"
+    read -r response
+
+    if [[ "$response" =~ ^[Yy]$ ]]; then
+        log_info "Installing mesh-mdns system..."
+
+        # Check if mdns directory and install script exist
+        local mdns_dir="${PROJECT_ROOT}/mdns"
+        local install_script="${mdns_dir}/scripts/install-mesh-mdns.sh"
+
+        if [[ ! -f "$install_script" ]]; then
+            log_error "mesh-mdns install script not found: $install_script"
+            echo ""
+            echo "Install manually with: isle mdns system install"
+            return 1
+        fi
+
+        # Run install via the CLI
+        if bash "${CLI_DIR}/scripts/mdns.sh" system install; then
+            log_success "mesh-mdns.service installed"
+
+            # Add health.local domain
+            echo "health.local" | sudo tee -a /usr/local/etc/mesh-mdns-domains.list > /dev/null
+            sudo systemctl restart mesh-mdns.service 2>/dev/null || true
+
+            return 0
+        else
+            log_error "Failed to install mesh-mdns.service"
+            echo ""
+            echo "You can install manually later with: isle mdns system install"
+            return 1
+        fi
+    else
+        log_warn "Skipping mesh-mdns installation"
+        echo ""
+        echo "Note: .local domains will not be broadcasted without mesh-mdns"
+        echo "Install later with: isle mdns system install"
+        echo ""
+        return 1
+    fi
 }
 
-http {
-    include /etc/nginx/mime.types;
-    default_type application/octet-stream;
+# Check if a router exists on the system
+check_router_exists() {
+    # Check if any router VM exists using virsh
+    if ! command -v virsh &>/dev/null; then
+        # Offer to install virtualization dependencies if needed
+        if declare -f ensure_dependency &>/dev/null; then
+            log_info "Virtualization tools not found"
+            if ! ensure_dependency "virsh" "check for router VMs" "false"; then
+                return 1
+            fi
+        else
+            return 1
+        fi
+    fi
 
-    # Logging
-    log_format main '$remote_addr - $remote_user [$time_local] "$request" '
-                    '$status $body_bytes_sent "$http_referer" '
-                    '"$http_user_agent" "$http_x_forwarded_for"';
-    access_log /var/log/nginx/access.log main;
+    # Try without sudo first, then with sudo
+    local router_exists=false
+    if virsh list --all 2>/dev/null | grep -qE "openwrt|router-core"; then
+        router_exists=true
+    elif sudo virsh list --all 2>/dev/null | grep -qE "openwrt|router-core"; then
+        router_exists=true
+    fi
 
-    # Performance
-    sendfile on;
-    tcp_nopush on;
-    tcp_nodelay on;
-    keepalive_timeout 65;
-    types_hash_max_size 2048;
-
-    # Security headers (default)
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-XSS-Protection "1; mode=block" always;
-
-    # Health check endpoint
-    server {
-        listen 80 default_server;
-        server_name _;
-
-        location /health {
-            access_log off;
-            return 200 "isle-agent healthy\n";
-            add_header Content-Type text/plain;
-        }
-
-        location / {
-            return 404 "No mesh apps registered\n";
-            add_header Content-Type text/plain;
-        }
-    }
-
-    # Include all mesh-app config fragments
-    include /etc/nginx/configs/*.conf;
-}
-EOF
+    if $router_exists; then
+        return 0
+    else
+        return 1
+    fi
 }
 
 # Detect isle-br-X bridges for OpenWRT connectivity
+# This is now optional - only required if a router exists
 setup_isle_bridge() {
     log_info "Checking for isle-br-X bridges..."
 
@@ -184,15 +340,27 @@ setup_isle_bridge() {
     bridges=$(ip link show | grep -oP 'isle-br-\d+' | sort -u || true)
 
     if [[ -z "$bridges" ]]; then
-        log_error "No isle-br-X bridges found"
-        echo ""
-        echo "  The agent needs at least one isle-br-X bridge to connect to OpenWRT."
-        echo "  Bridges should be created by the router setup, not by the agent."
-        echo ""
-        echo "  To create a router with bridges, run:"
-        echo "    isle router create"
-        echo ""
-        return 1
+        # Check if router exists
+        if check_router_exists; then
+            log_error "No isle-br-X bridges found, but router exists"
+            echo ""
+            echo "  A router VM exists but no isle-br-X bridges were found."
+            echo "  The router should have created these bridges."
+            echo ""
+            echo "  Try recreating the router:"
+            echo "    sudo isle router destroy"
+            echo "    sudo isle router init"
+            echo ""
+            return 1
+        else
+            log_warn "No isle-br-X bridges found (no router detected)"
+            echo ""
+            echo "  The agent will start without bridge connectivity."
+            echo "  To enable router connectivity, create a router first:"
+            echo "    sudo isle router init"
+            echo ""
+            return 0  # Non-fatal - agent can start without router
+        fi
     fi
 
     # Report found bridges
@@ -222,17 +390,37 @@ setup_isle_bridge() {
     fi
 }
 
-# Check if agent is running
-is_running() {
-    docker ps --filter "name=${CONTAINER_NAME}" --filter "status=running" --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"
+# Check if sync agent is running
+is_sync_running() {
+    docker ps --filter "name=${SYNC_CONTAINER}" --filter "status=running" --format '{{.Names}}' | grep -q "^${SYNC_CONTAINER}$"
 }
 
-# Check if stale container exists (stopped/exited/created)
-has_stale_container() {
+# Check if vlan agent is running
+is_vlan_running() {
+    docker ps --filter "name=${VLAN_CONTAINER}" --filter "status=running" --format '{{.Names}}' | grep -q "^${VLAN_CONTAINER}$"
+}
+
+# Check if host agent is running
+is_host_running() {
+    systemctl is-active --quiet "${HOST_SERVICE}" 2>/dev/null
+}
+
+# Check if all agents are running
+is_running() {
+    is_sync_running && is_vlan_running
+}
+
+# Check if stale containers exist (stopped/exited/created)
+has_stale_containers() {
     # Check for containers in exited, created, or dead status
-    docker ps -a --filter "name=${CONTAINER_NAME}" --format '{{.Names}} {{.Status}}' | \
-        grep "^${CONTAINER_NAME}" | \
-        grep -qE "(Exited|Created|Dead)"
+    for container in "${SYNC_CONTAINER}" "${VLAN_CONTAINER}"; do
+        if docker ps -a --filter "name=${container}" --format '{{.Names}} {{.Status}}' | \
+            grep "^${container}" | \
+            grep -qE "(Exited|Created|Dead)"; then
+            return 0
+        fi
+    done
+    return 1
 }
 
 # Validate and cleanup Docker network for isle-br-0
@@ -451,390 +639,259 @@ cleanup_network_cache() {
     return 0
 }
 
-# Check if agent can discover OpenWRT router via mDNS
-check_router_mdns() {
-    local quiet_mode="${1:-false}"
 
-    if [[ "$quiet_mode" != "true" ]]; then
-        log_info "Checking for OpenWRT router mDNS signal..."
-    fi
+# === COMPONENT SETUP FUNCTIONS ===
 
-    if ! is_running; then
-        if [[ "$quiet_mode" != "true" ]]; then
-            log_error "isle-agent is not running"
-        fi
-        return 1
-    fi
+# Setup Component 1: Host Agent (systemd service)
+setup_host_agent() {
+    log_info "Setting up host agent (isle-host-agent systemd service)..."
 
-    # Only use DNS resolution of openwrt.local to detect router
-    local router_found=false
-    local router_ip=""
-
-    if docker exec "${CONTAINER_NAME}" sh -c "command -v getent" >/dev/null 2>&1; then
-        local resolve_result
-        resolve_result=$(docker exec "${CONTAINER_NAME}" getent hosts openwrt.local 2>/dev/null || echo "")
-
-        if [[ -n "$resolve_result" ]]; then
-            router_ip=$(echo "$resolve_result" | awk '{print $1}')
-            router_found=true
-        fi
-    fi
-
-    # Report results
-    if [[ "$router_found" == true ]]; then
-        if [[ "$quiet_mode" != "true" ]]; then
-            log_success "OpenWRT router detected"
-            echo "  Router: openwrt.local"
-            echo "  IP: $router_ip"
-        fi
+    # Check if host agent files exist
+    if [[ ! -d "${HOST_AGENT_DIR}" ]]; then
+        log_warn "Host agent directory not found: ${HOST_AGENT_DIR}"
+        echo "  Host agent is optional. Skipping..."
         return 0
-    else
-        if [[ "$quiet_mode" != "true" ]]; then
-            log_warn "Could not detect OpenWRT router"
-            echo ""
-            echo "  This may mean:"
-            echo "    - OpenWRT router is not running"
-            echo "    - Avahi/mDNS is not configured on the router"
-            echo "    - Router is not connected to isle-br-0 bridge"
-            echo "    - mDNS packets are not reaching the agent"
-            echo ""
-            echo "  To troubleshoot:"
-            echo "    1. Verify router is running: isle router status"
-            echo "    2. Check router connectivity: ping openwrt.local"
-            echo "    3. Verify isle-br-0 bridge connects agent to router"
-            echo ""
-        fi
-        return 1
     fi
-}
 
-# Get current agent mode (mdns or lightweight)
-get_agent_mode() {
-    local mode_file="${ISLE_AGENT_DIR}/agent.mode"
-    if [[ -f "$mode_file" ]]; then
-        cat "$mode_file"
+    # Install host agent files
+    sudo mkdir -p /usr/local/bin/isle-mesh
+    sudo cp "${HOST_AGENT_DIR}/isle-host-agent-relay.sh" /usr/local/bin/isle-mesh/
+    sudo chmod +x /usr/local/bin/isle-mesh/isle-host-agent-relay.sh
+
+    # Copy config if doesn't exist
+    if [[ ! -f /etc/isle-mesh/agent/host-agent.conf ]]; then
+        sudo cp "${HOST_AGENT_DIR}/host-agent.conf" /etc/isle-mesh/agent/
+        log_info "Created host agent config at /etc/isle-mesh/agent/host-agent.conf"
     else
-        echo "mdns"  # Default to mDNS for initial setup
+        log_info "Host agent config already exists, skipping"
     fi
-}
 
-# Set agent mode
-set_agent_mode() {
-    local mode="$1"
-    local mode_file="${ISLE_AGENT_DIR}/agent.mode"
-    echo "$mode" > "$mode_file"
-}
+    # Copy systemd service
+    sudo cp "${HOST_AGENT_DIR}/isle-host-agent.service" /etc/systemd/system/
+    sudo systemctl daemon-reload
 
-# Build the isle-agent-mdns image if needed
-build_mdns_image() {
-    local image_exists
-    image_exists=$(docker images -q isle-agent-mdns:latest 2>/dev/null)
+    log_success "Host agent files installed"
 
-    if [[ -z "$image_exists" ]]; then
-        log_info "Building isle-agent-mdns image (includes Avahi mDNS support)..."
-        log_info "This may take a few minutes on first run..."
-
-        local project_root
-        project_root="$(cd "$(dirname "$0")/../.." && pwd)"
-        cd "${project_root}/isle-agent-mdns"
-
-        if docker build -t isle-agent-mdns:latest .; then
-            log_success "isle-agent-mdns image built successfully"
-        else
-            log_error "Failed to build isle-agent-mdns image"
-            return 1
-        fi
-    else
-        log_info "isle-agent-mdns image already exists"
-    fi
+    # Ask if user wants to enable it
+    echo ""
+    log_info "Host agent is installed but not started (optional component)"
+    echo "  To enable and start: sudo systemctl enable --now isle-host-agent"
+    echo "  To check status: sudo systemctl status isle-host-agent"
+    echo ""
 
     return 0
 }
 
-# Start agent with mDNS support (for initial setup)
-start_agent_mdns() {
-    log_info "Starting isle-agent with mDNS support (setup mode)..."
+# Setup Component 2: Sync Agent (Python container)
+setup_sync_agent() {
+    log_info "Setting up sync agent (isle-agent-sync container)..."
 
-    # Build the mDNS image if needed
-    build_mdns_image || return 1
-
-    # Create temporary docker-compose with mDNS image
-    local temp_compose="${ISLE_AGENT_DIR}/docker-compose.mdns.yml"
-    cat > "$temp_compose" <<'EOF'
-version: '3.8'
-services:
-  isle-agent:
-    image: isle-agent-mdns:latest
-    container_name: isle-agent
-    restart: unless-stopped
-    mac_address: "02:00:00:00:0a:01"
-    cap_add:
-      - NET_ADMIN
-      - NET_RAW
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - /etc/isle-mesh/agent/nginx.conf:/etc/nginx/nginx.conf:ro
-      - /etc/isle-mesh/agent/configs:/etc/nginx/configs:ro
-      - /etc/isle-mesh/agent/ssl/certs:/etc/nginx/ssl/certs:ro
-      - /etc/isle-mesh/agent/ssl/keys:/etc/nginx/ssl/keys:ro
-      - /etc/isle-mesh/agent/logs:/var/log/nginx
-      - /etc/isle-mesh/agent/registry.json:/etc/isle-mesh/agent/registry.json:ro
-      - /etc/isle-mesh/agent/mdns/services:/etc/avahi/services
-      - /var/run/dbus:/var/run/dbus
-    networks:
-      isle-agent-net:
-      isle-br-0:
-        priority: 100
-    labels:
-      isle.component: "agent"
-      isle.role: "proxy-mdns"
-      isle.version: "1.0.0"
-      isle.mdns: "enabled"
-    healthcheck:
-      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://127.0.0.1/health && pgrep avahi-daemon"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 15s
-networks:
-  isle-agent-net:
-    driver: bridge
-    name: isle-agent-net
-    ipam:
-      config:
-        - subnet: 172.21.0.0/16
-  isle-br-0:
-    driver: macvlan
-    driver_opts:
-      parent: isle-br-0
-    name: isle-br-0
-EOF
-
-    # Start with mDNS compose file (with retry logic for network issues)
-    log_info "Launching nginx + Avahi container with virtual MAC..."
-    cd "${ISLE_AGENT_DIR}"
-
-    local max_retries=2
-    local retry_count=0
-    local start_success=false
-
-    while [[ $retry_count -lt $max_retries ]]; do
-        if docker compose -f docker-compose.mdns.yml up -d 2>&1; then
-            start_success=true
-            break
-        else
-            retry_count=$((retry_count + 1))
-
-            if [[ $retry_count -lt $max_retries ]]; then
-                log_warn "Failed to start agent (attempt $retry_count/$max_retries)"
-                log_info "Cleaning up stale resources and retrying..."
-
-                # Remove any stale containers created during the failed attempt
-                docker rm -f "${CONTAINER_NAME}" 2>/dev/null || true
-
-                # Brief pause before retry
-                sleep 2
-            else
-                log_error "Failed to start agent after $max_retries attempts"
-                return 1
-            fi
-        fi
-    done
-
-    if ! $start_success; then
+    # Check if sync agent directory exists
+    if [[ ! -d "${SYNC_AGENT_DIR}" ]]; then
+        log_error "Sync agent directory not found: ${SYNC_AGENT_DIR}"
         return 1
     fi
 
-    # Mark as mDNS mode
-    set_agent_mode "mdns"
-}
-
-# Start agent in lightweight mode (after setup confirmed)
-start_agent_lightweight() {
-    log_info "Starting isle-agent in lightweight mode (nginx only)..."
-
-    # Start with regular compose file (with retry logic for network issues)
-    log_info "Launching nginx container with virtual MAC..."
-    cd "${ISLE_AGENT_DIR}"
-
-    local max_retries=2
-    local retry_count=0
-    local start_success=false
-
-    while [[ $retry_count -lt $max_retries ]]; do
-        if docker compose up -d 2>&1; then
-            start_success=true
-            break
-        else
-            retry_count=$((retry_count + 1))
-
-            if [[ $retry_count -lt $max_retries ]]; then
-                log_warn "Failed to start agent (attempt $retry_count/$max_retries)"
-                log_info "Cleaning up stale resources and retrying..."
-
-                # Remove any stale containers created during the failed attempt
-                docker rm -f "${CONTAINER_NAME}" 2>/dev/null || true
-
-                # Brief pause before retry
-                sleep 2
-            else
-                log_error "Failed to start agent after $max_retries attempts"
-                return 1
-            fi
-        fi
-    done
-
-    if ! $start_success; then
+    # Build sync agent image
+    log_info "Building sync agent image..."
+    cd "${PROJECT_ROOT}/isle-agent"
+    if ! $DOCKER_COMPOSE_CMD build isle-agent-sync 2>&1; then
+        log_error "Failed to build sync agent image"
         return 1
     fi
 
-    # Mark as lightweight mode
-    set_agent_mode "lightweight"
+    log_success "Sync agent image built"
+    return 0
 }
 
-# Start the isle-agent container (auto-detect mode)
+# Setup Component 3: VLAN Agent (nginx container)
+setup_vlan_agent() {
+    log_info "Setting up VLAN agent (isle-vlan-agent container)..."
+
+    # Check if vlan agent directory exists
+    if [[ ! -d "${VLAN_AGENT_DIR}" ]]; then
+        log_error "VLAN agent directory not found: ${VLAN_AGENT_DIR}"
+        return 1
+    fi
+
+    # VLAN agent uses official nginx:alpine image, no build needed
+    log_info "VLAN agent uses nginx:alpine image (official)"
+
+    # Pull nginx image
+    if ! docker pull nginx:alpine; then
+        log_warn "Failed to pull nginx:alpine image, will try to use cached version"
+    fi
+
+    log_success "VLAN agent image ready"
+    return 0
+}
+
+# Copy docker-compose.yml to /etc/isle-mesh/agent
+copy_compose_file() {
+    log_info "Copying docker-compose.yml to /etc/isle-mesh/agent..."
+
+    # Copy from source
+    local source_compose="${PROJECT_ROOT}/isle-agent/docker-compose.yml"
+
+    if [[ ! -f "${source_compose}" ]]; then
+        log_error "Source docker-compose.yml not found: ${source_compose}"
+        return 1
+    fi
+
+    cp "${source_compose}" "${COMPOSE_FILE}"
+    log_success "docker-compose.yml copied to ${COMPOSE_FILE}"
+    return 0
+}
+
+# Start all three agent components
 start_agent() {
+    echo ""
+    log_info "=== Starting Isle Agent (Three-Component Architecture) ==="
+    echo ""
+
     # Initialize directories if needed
     init_agent_dir
 
-    # Setup isle-br-0 bridge for OpenWRT connectivity
-    setup_isle_bridge
+    # Ensure mesh-mdns is installed and running
+    ensure_mesh_mdns || log_warn "Continuing without mesh-mdns (domains won't be broadcasted)"
 
     # Check if already running
     if is_running; then
-        log_warn "isle-agent is already running"
-        log_info "Current mode: $(get_agent_mode)"
+        log_warn "Agent components are already running"
+        echo ""
+        show_status
         return 0
     fi
 
-    # ALWAYS cleanup network cache before starting to prevent loops
-    # This runs silently and handles all edge cases
-    log_info "Cleaning network cache before start..."
-    local network_issues=false
+    # Step 1: Setup all components (if not already done)
+    echo "Step 1/4: Setting up components..."
+    echo ""
 
-    # Check for common network cache issues
-    if docker network inspect isle-br-0 &>/dev/null || docker network inspect isle-agent-net &>/dev/null; then
-        # Networks exist - verify they're valid
-        if ! validate_docker_network 2>/dev/null; then
-            network_issues=true
-        fi
+    # Copy compose file if it doesn't exist
+    if [[ ! -f "${COMPOSE_FILE}" ]]; then
+        copy_compose_file || return 1
     fi
 
-    # Check for stale containers that might block network cleanup
-    if docker ps -a --filter "name=${CONTAINER_NAME}" --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
-        network_issues=true
+    # Setup sync agent (build image)
+    setup_sync_agent || return 1
+    echo ""
+
+    # Setup vlan agent (pull nginx image)
+    setup_vlan_agent || return 1
+    echo ""
+
+    # Setup host agent (optional)
+    setup_host_agent || true  # Don't fail if host agent setup fails
+    echo ""
+
+    # Step 2: Start containers
+    echo "Step 2/4: Starting containers..."
+    cd "${PROJECT_ROOT}/isle-agent"
+
+    if ! $DOCKER_COMPOSE_CMD up -d; then
+        log_error "Failed to start agent containers"
+        echo ""
+        echo "Check logs with: docker logs isle-agent-sync"
+        echo "                 docker logs isle-vlan-agent"
+        return 1
     fi
 
-    # If any issues detected, run full cleanup (force mode, no prompts)
-    if $network_issues; then
-        log_warn "Detected stale network state, cleaning up..."
+    log_success "Containers started"
+    echo ""
 
-        # Stop any running containers first
-        docker stop "${CONTAINER_NAME}" 2>/dev/null || true
-        docker rm -f "${CONTAINER_NAME}" 2>/dev/null || true
+    # Step 3: Wait for health checks
+    echo "Step 3/4: Waiting for health checks..."
+    echo ""
 
-        # Disconnect all containers from isle networks
-        for network in isle-br-0 isle-agent-net; do
-            if docker network inspect "$network" &>/dev/null; then
-                local connected_containers
-                connected_containers=$(docker network inspect "$network" --format '{{range $k,$v := .Containers}}{{$v.Name}} {{end}}' 2>/dev/null || echo "")
-
-                if [[ -n "$connected_containers" ]]; then
-                    for container in $connected_containers; do
-                        docker network disconnect -f "$network" "$container" 2>/dev/null || true
-                    done
-                fi
-            fi
-        done
-
-        # Remove networks
-        docker network rm isle-br-0 2>/dev/null || true
-        docker network rm isle-agent-net 2>/dev/null || true
-
-        # Remove system bridge if exists
-        if ip link show isle-br-0 &>/dev/null; then
-            sudo ip link set isle-br-0 down 2>/dev/null || true
-            sudo ip link delete isle-br-0 2>/dev/null || true
-        fi
-
-        # Remove temp files
-        sudo rm -f "${ISLE_AGENT_DIR}/docker-compose.mdns.yml" 2>/dev/null || rm -f "${ISLE_AGENT_DIR}/docker-compose.mdns.yml" 2>/dev/null || true
-        sudo rm -f "${ISLE_AGENT_DIR}/agent.mode" 2>/dev/null || rm -f "${ISLE_AGENT_DIR}/agent.mode" 2>/dev/null || true
-
-        log_success "Network cache cleaned"
-
-        # Recreate the bridge after cleanup
-        setup_isle_bridge
-    else
-        log_info "Network cache is clean"
-    fi
-
-    # Determine which version to start
-    local mode=$(get_agent_mode)
-
-    if [[ "$mode" == "lightweight" ]]; then
-        log_info "Agent mode: lightweight (nginx only)"
-        start_agent_lightweight
-    else
-        log_info "Agent mode: mDNS (setup/discovery)"
-        log_info "Use 'isle agent switch-to-lightweight' after confirming setup"
-        start_agent_mdns
-    fi
-
-    # Wait for health check
-    log_info "Waiting for agent to be healthy..."
+    # Wait for sync agent health
+    log_info "Checking isle-agent-sync..."
+    local sync_healthy=false
     for i in {1..30}; do
-        if docker exec "${CONTAINER_NAME}" wget --quiet --tries=1 --spider http://127.0.0.1/health 2>/dev/null; then
-            log_success "isle-agent started successfully"
-            echo ""
-
-            # Check for OpenWRT router mDNS connectivity
-            check_router_mdns
-
-            echo ""
-            show_status
-            return 0
+        if curl -sf http://localhost:8888/health >/dev/null 2>&1; then
+            sync_healthy=true
+            break
         fi
         sleep 1
     done
 
-    log_error "isle-agent failed to become healthy"
-    return 1
+    if ! $sync_healthy; then
+        log_error "isle-agent-sync failed to become healthy"
+        echo "Check logs: docker logs isle-agent-sync"
+        return 1
+    fi
+    log_success "isle-agent-sync is healthy"
+    echo ""
+
+    # Wait for vlan agent health
+    log_info "Checking isle-vlan-agent..."
+    local vlan_healthy=false
+    for i in {1..30}; do
+        if curl -sf http://localhost/health >/dev/null 2>&1; then
+            vlan_healthy=true
+            break
+        fi
+        sleep 1
+    done
+
+    if ! $vlan_healthy; then
+        log_error "isle-vlan-agent failed to become healthy"
+        echo "Check logs: docker logs isle-vlan-agent"
+        return 1
+    fi
+    log_success "isle-vlan-agent is healthy"
+    echo ""
+
+    # Step 4: Summary
+    echo "Step 4/4: Verification"
+    echo ""
+    log_success "All agent components are running!"
+    echo ""
+
+    show_status
+
+    echo ""
+    log_info "Next steps:"
+    echo "  - View sync API: http://localhost:8888/services"
+    echo "  - View vlan agent: http://localhost/"
+    echo "  - Test health endpoint: http://health.local (if mdns is running)"
+    echo "  - Check status: isle agent status"
+    echo ""
+
+    return 0
 }
 
-# Stop the isle-agent container
+# Stop all agent containers
 stop_agent() {
-    log_info "Stopping isle-agent..."
+    log_info "Stopping isle-agent components..."
 
     if ! is_running; then
-        log_warn "isle-agent is not running"
+        log_warn "Agent containers are not running"
         return 0
     fi
 
-    cd "${ISLE_AGENT_DIR}"
+    cd "${PROJECT_ROOT}/isle-agent"
 
-    # Stop both possible compose configurations to ensure cleanup
-    # Try mDNS compose file first
-    if [[ -f "docker-compose.mdns.yml" ]]; then
-        log_info "Stopping mDNS configuration..."
-        docker compose -f docker-compose.mdns.yml down 2>/dev/null || true
+    # Stop containers using docker-compose
+    if [[ -f "${COMPOSE_FILE}" ]]; then
+        $DOCKER_COMPOSE_CMD down 2>/dev/null || true
     fi
 
-    # Then try regular compose file
-    if [[ -f "docker-compose.yml" ]]; then
-        log_info "Stopping regular configuration..."
-        docker compose down 2>/dev/null || true
-    fi
+    # Force remove any remaining containers
+    for container in "${SYNC_CONTAINER}" "${VLAN_CONTAINER}"; do
+        if docker ps -a --filter "name=${container}" --format '{{.Names}}' | grep -q "^${container}$"; then
+            log_info "Force removing ${container}..."
+            docker rm -f "${container}" 2>/dev/null || true
+        fi
+    done
 
-    # Force remove container if still exists
-    if docker ps -a --filter "name=${CONTAINER_NAME}" --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
-        log_info "Force removing container..."
-        docker rm -f "${CONTAINER_NAME}" 2>/dev/null || true
-    fi
+    log_success "Agent containers stopped"
 
-    log_success "isle-agent stopped"
+    # Note about host agent
+    if is_host_running; then
+        echo ""
+        log_info "Host agent (systemd service) is still running"
+        echo "  To stop: sudo systemctl stop isle-host-agent"
+    fi
 }
 
 # Restart the isle-agent container
@@ -849,19 +906,19 @@ restart_agent() {
 reload_config() {
     log_info "Reloading nginx configuration..."
 
-    if ! is_running; then
-        log_error "isle-agent is not running. Start it first with 'isle agent start'"
+    if ! is_vlan_running; then
+        log_error "isle-vlan-agent is not running. Start it first with 'isle agent start'"
         return 1
     fi
 
     # Test config first
-    if ! docker exec "${CONTAINER_NAME}" nginx -t 2>&1; then
+    if ! docker exec "${VLAN_CONTAINER}" nginx -t 2>&1; then
         log_error "nginx configuration test failed. Not reloading."
         return 1
     fi
 
     # Reload nginx
-    docker exec "${CONTAINER_NAME}" nginx -s reload
+    docker exec "${VLAN_CONTAINER}" nginx -s reload
 
     log_success "nginx configuration reloaded"
 }
@@ -869,87 +926,80 @@ reload_config() {
 # Show agent status
 show_status() {
     echo ""
-    echo "=== Isle Agent Status ==="
+    echo "=== Isle Agent Status (Three Components) ==="
     echo ""
 
-    if is_running; then
-        log_success "Status: RUNNING"
-
-        # Container info
-        echo ""
-        echo "Container Details:"
-        docker ps --filter "name=${CONTAINER_NAME}" --format "  ID: {{.ID}}\n  Image: {{.Image}}\n  Uptime: {{.Status}}\n  Ports: {{.Ports}}"
-
-        # Network info
-        echo ""
-        echo "Network Configuration:"
-        local mac_addr
-        mac_addr=$(docker inspect "${CONTAINER_NAME}" --format '{{range .NetworkSettings.Networks}}{{.MacAddress}}{{end}}' | head -n1)
-        local ip_addr
-        ip_addr=$(docker inspect "${CONTAINER_NAME}" --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' | head -n1)
-        echo "  MAC Address: ${mac_addr}"
-        echo "  IP Address: ${ip_addr}"
-
-        # OpenWRT Router Detection Status
-        echo ""
-        echo "OpenWRT Router Detection:"
-        echo "  Detection method: DNS resolution of openwrt.local"
-
-        # Check if openwrt.local resolves
-        local router_detected=false
-        local router_ip=""
-        if docker exec "${CONTAINER_NAME}" sh -c "command -v getent" >/dev/null 2>&1; then
-            local resolve_result
-            resolve_result=$(docker exec "${CONTAINER_NAME}" getent hosts openwrt.local 2>/dev/null || echo "")
-
-            if [[ -n "$resolve_result" ]]; then
-                router_ip=$(echo "$resolve_result" | awk '{print $1}')
-                router_detected=true
-                echo -e "  ${GREEN}✓ OpenWRT router detected${NC}"
-                echo "    Router: openwrt.local"
-                echo "    IP: ${router_ip}"
-            else
-                echo -e "  ${YELLOW}✗ OpenWRT router not detected${NC}"
-                echo "    openwrt.local does not resolve"
-            fi
-        else
-            echo -e "  ${RED}✗ Cannot check (getent not available)${NC}"
-        fi
-
-        # Isle Bridge Status
-        echo ""
-        echo "Bridge Status:"
-        if ip link show isle-br-0 &>/dev/null; then
-            local bridge_state
-            bridge_state=$(ip link show isle-br-0 | grep -oP '(?<=state )\w+')
-            echo "  Bridge isle-br-0: ${bridge_state}"
-
-            local connected_interfaces
-            connected_interfaces=$(brctl show isle-br-0 2>/dev/null | tail -n +2 | awk '{print $NF}' | grep -v "^isle-br-0$" | tr '\n' ', ' | sed 's/,$//' || echo "none")
-            echo "  Connected interfaces: ${connected_interfaces}"
-        else
-            echo -e "  ${RED}✗ Bridge isle-br-0 does not exist${NC}"
-        fi
-
-        # Registered apps
-        echo ""
-        echo "Registered Mesh Apps:"
-        if [[ -f "${REGISTRY_FILE}" ]]; then
-            local app_count
-            app_count=$(jq -r '.apps | length' "${REGISTRY_FILE}")
-            if [[ "${app_count}" -eq 0 ]]; then
-                echo "  (none)"
-            else
-                jq -r '.apps | to_entries[] | "  - \(.key): \(.value.domain)"' "${REGISTRY_FILE}"
-            fi
-        else
-            echo "  (registry not found)"
-        fi
-
+    # Component 1: Host Agent (Systemd Service)
+    echo "Component 1: isle-host-agent (systemd service)"
+    if is_host_running; then
+        log_success "  Status: RUNNING"
+        echo "  Mode: $(grep ISLE_AGENT_MODE /etc/isle-mesh/agent/host-agent.conf 2>/dev/null | cut -d= -f2 || echo 'unknown')"
     else
-        log_warn "Status: STOPPED"
-        echo ""
-        echo "Start the agent with: isle agent start"
+        echo "  Status: NOT RUNNING (optional)"
+    fi
+    echo ""
+
+    # Component 2: Sync Agent (Python Container)
+    echo "Component 2: isle-agent-sync (Python API)"
+    if is_sync_running; then
+        log_success "  Status: RUNNING"
+        docker ps --filter "name=${SYNC_CONTAINER}" --format "  ID: {{.ID}}\n  Uptime: {{.Status}}"
+        echo "  API: http://localhost:8888"
+
+        # Get service count from sync agent
+        local service_count
+        service_count=$(curl -sf http://localhost:8888/services 2>/dev/null | jq '. | length' 2>/dev/null || echo "0")
+        echo "  Services: ${service_count}"
+    else
+        log_warn "  Status: STOPPED"
+    fi
+    echo ""
+
+    # Component 3: VLAN Agent (Nginx Container)
+    echo "Component 3: isle-vlan-agent (nginx proxy)"
+    if is_vlan_running; then
+        log_success "  Status: RUNNING"
+        docker ps --filter "name=${VLAN_CONTAINER}" --format "  ID: {{.ID}}\n  Uptime: {{.Status}}"
+
+        # Get MAC and IP
+        local mac_addr
+        mac_addr=$(docker inspect "${VLAN_CONTAINER}" --format '{{range .NetworkSettings.Networks}}{{.MacAddress}}{{end}}' | head -n1)
+        local ip_addr
+        ip_addr=$(docker inspect "${VLAN_CONTAINER}" --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' | head -n1)
+        echo "  MAC: ${mac_addr}"
+        echo "  IP: ${ip_addr}"
+        echo "  HTTP: http://localhost/"
+    else
+        log_warn "  Status: STOPPED"
+    fi
+    echo ""
+
+    # Registered apps
+    echo "Registered Mesh Apps:"
+    if [[ -f "${REGISTRY_FILE}" ]]; then
+        local app_count
+        app_count=$(jq -r '.apps | length' "${REGISTRY_FILE}" 2>/dev/null || echo "0")
+        if [[ "${app_count}" -eq 0 ]]; then
+            echo "  (none)"
+        else
+            jq -r '.apps | to_entries[] | "  - \(.key): \(.value.domain)"' "${REGISTRY_FILE}"
+        fi
+    else
+        echo "  (registry not found)"
+    fi
+    echo ""
+
+    # Overall status
+    local host_status=""
+    if is_host_running; then
+        host_status=" (including optional host agent)"
+    fi
+
+    if is_running; then
+        log_success "Overall: All required components running${host_status}"
+    else
+        log_warn "Overall: Some required components are stopped"
+        echo "  Start with: isle agent start"
     fi
 
     echo ""
@@ -958,206 +1008,156 @@ show_status() {
 # Show logs
 show_logs() {
     local follow="${1:-false}"
+    local component="${2:-all}"
 
-    if ! is_running; then
-        log_error "isle-agent is not running"
-        return 1
-    fi
-
-    if [[ "${follow}" == "true" ]]; then
-        docker logs -f "${CONTAINER_NAME}"
-    else
-        docker logs --tail 50 "${CONTAINER_NAME}"
-    fi
+    # Determine which logs to show
+    case "${component}" in
+        sync)
+            if ! is_sync_running; then
+                log_error "isle-agent-sync is not running"
+                return 1
+            fi
+            if [[ "${follow}" == "true" ]]; then
+                docker logs -f "${SYNC_CONTAINER}"
+            else
+                docker logs --tail 50 "${SYNC_CONTAINER}"
+            fi
+            ;;
+        vlan)
+            if ! is_vlan_running; then
+                log_error "isle-vlan-agent is not running"
+                return 1
+            fi
+            if [[ "${follow}" == "true" ]]; then
+                docker logs -f "${VLAN_CONTAINER}"
+            else
+                docker logs --tail 50 "${VLAN_CONTAINER}"
+            fi
+            ;;
+        host)
+            log_info "Host agent logs:"
+            sudo journalctl -u "${HOST_SERVICE}" -n 50 ${follow:+-f}
+            ;;
+        all|*)
+            echo "=== Sync Agent Logs ==="
+            if is_sync_running; then
+                docker logs --tail 20 "${SYNC_CONTAINER}"
+            else
+                echo "(not running)"
+            fi
+            echo ""
+            echo "=== VLAN Agent Logs ==="
+            if is_vlan_running; then
+                docker logs --tail 20 "${VLAN_CONTAINER}"
+            else
+                echo "(not running)"
+            fi
+            echo ""
+            echo "Use 'isle agent logs sync' or 'isle agent logs vlan' for detailed logs"
+            ;;
+    esac
 }
 
 # Test nginx configuration
 test_config() {
     log_info "Testing nginx configuration..."
 
-    if ! is_running; then
-        # Test config without running container
-        docker run --rm -v "${NGINX_CONF}:/etc/nginx/nginx.conf:ro" nginx:alpine nginx -t
-    else
-        # Test config in running container
-        docker exec "${CONTAINER_NAME}" nginx -t
+    if ! is_vlan_running; then
+        log_error "isle-vlan-agent is not running"
+        echo "  Start the agent first: isle agent start"
+        return 1
     fi
+
+    # Test config in running container
+    docker exec "${VLAN_CONTAINER}" nginx -t
 
     log_success "nginx configuration is valid"
 }
 
-# Verify setup is complete (mDNS working, router discovering agent)
+# Verify all three components are healthy
 verify_setup() {
     log_info "Verifying agent setup..."
     echo ""
 
     local all_checks_passed=true
 
-    # Check 1: Agent is running
-    echo "=== Check 1: Agent Status ==="
-    if is_running; then
-        log_success "Agent is running"
-        local mode=$(get_agent_mode)
-        echo "  Mode: $mode"
-    else
-        log_error "Agent is not running"
-        all_checks_passed=false
-    fi
-    echo ""
-
-    # Check 2: Router connectivity via mDNS
-    echo "=== Check 2: Router Discovery ==="
-    if check_router_mdns "quiet"; then
-        log_success "Agent can discover OpenWRT router"
-    else
-        log_warn "Agent cannot discover router via mDNS (may still work via IP)"
-        all_checks_passed=false
-    fi
-    echo ""
-
-    # Check 3: Agent is broadcasting mDNS (if in mDNS mode)
-    echo "=== Check 3: Agent mDNS Broadcasting ==="
-    local mode=$(get_agent_mode)
-    if [[ "$mode" == "mdns" ]]; then
-        if docker exec "${CONTAINER_NAME}" pgrep avahi-daemon >/dev/null 2>&1; then
-            log_success "Avahi daemon is running in agent"
-
-            # Check if any services are registered
-            local service_count=$(docker exec "${CONTAINER_NAME}" ls /etc/avahi/services/*.service 2>/dev/null | wc -l || echo "0")
-            if [[ "$service_count" -gt 0 ]]; then
-                log_success "Found $service_count mDNS service(s) registered"
-            else
-                log_warn "No mDNS services registered yet"
-            fi
+    # Check 1: Sync agent health
+    echo "=== Check 1: Sync Agent (isle-agent-sync) ==="
+    if is_sync_running; then
+        if curl -sf http://localhost:8888/health >/dev/null 2>&1; then
+            log_success "Sync agent is healthy"
+            local health_data
+            health_data=$(curl -sf http://localhost:8888/health)
+            echo "  ${health_data}"
         else
-            log_error "Avahi daemon is not running (expected in mDNS mode)"
+            log_error "Sync agent is not responding to health checks"
             all_checks_passed=false
         fi
     else
-        log_info "Agent is in lightweight mode (no mDNS broadcasting)"
+        log_error "Sync agent is not running"
+        all_checks_passed=false
     fi
     echo ""
 
-    # Check 4: Router can discover agent (from router's perspective)
-    echo "=== Check 4: Router Can Discover Agent ==="
-    log_info "Testing from router's perspective..."
-    # This would require SSH to router - skip for now
-    log_info "To test manually from router:"
-    echo "  ssh root@<router-ip> 'avahi-browse -a -t | grep isle'"
+    # Check 2: VLAN agent health
+    echo "=== Check 2: VLAN Agent (isle-vlan-agent) ==="
+    if is_vlan_running; then
+        if curl -sf http://localhost/health >/dev/null 2>&1; then
+            log_success "VLAN agent is healthy"
+            if docker exec "${VLAN_CONTAINER}" nginx -t >/dev/null 2>&1; then
+                log_success "Nginx configuration is valid"
+            else
+                log_warn "Nginx configuration has issues"
+            fi
+        else
+            log_error "VLAN agent is not responding to health checks"
+            all_checks_passed=false
+        fi
+    else
+        log_error "VLAN agent is not running"
+        all_checks_passed=false
+    fi
+    echo ""
+
+    # Check 3: Host agent (optional)
+    echo "=== Check 3: Host Agent (isle-host-agent - optional) ==="
+    if is_host_running; then
+        log_success "Host agent is running"
+        echo "  Mode: $(grep ISLE_AGENT_MODE /etc/isle-mesh/agent/host-agent.conf 2>/dev/null | cut -d= -f2 || echo 'unknown')"
+    else
+        log_info "Host agent is not running (optional component)"
+    fi
     echo ""
 
     # Summary
     echo "=== Summary ==="
     if $all_checks_passed; then
-        log_success "All checks passed! Setup is complete."
+        log_success "All required components are healthy!"
         echo ""
-        if [[ "$mode" == "mdns" ]]; then
-            log_info "You can now switch to lightweight mode:"
-            echo "  isle agent switch-to-lightweight"
-        fi
+        echo "Next steps:"
+        echo "  - Deploy mesh apps: isle app up"
+        echo "  - View registered apps: isle agent status"
+        echo "  - Check sync API: curl http://localhost:8888/services"
     else
-        log_warn "Some checks failed. Review the output above."
+        log_error "Some checks failed. Review the output above."
         return 1
     fi
-}
-
-# Switch from mDNS mode to lightweight mode
-switch_to_lightweight() {
-    log_info "Switching agent to lightweight mode..."
-
-    if ! is_running; then
-        log_error "Agent is not running"
-        return 1
-    fi
-
-    local current_mode=$(get_agent_mode)
-    if [[ "$current_mode" == "lightweight" ]]; then
-        log_warn "Agent is already in lightweight mode"
-        return 0
-    fi
-
-    # Verify setup is complete before switching
     echo ""
-    log_info "Verifying setup before switching..."
-    if ! check_router_mdns "quiet"; then
-        log_warn "Router discovery check failed"
-        echo ""
-        echo -n "Continue anyway? (y/N): "
-        read -r response
-        if [[ ! "$response" =~ ^[Yy]$ ]]; then
-            log_info "Switch cancelled"
-            return 1
-        fi
-    fi
-
-    echo ""
-    log_info "Stopping mDNS-enabled agent..."
-    stop_agent
-
-    echo ""
-    log_info "Starting lightweight agent..."
-    start_agent_lightweight
-
-    # Wait for health check
-    log_info "Waiting for agent to be healthy..."
-    for i in {1..30}; do
-        if docker exec "${CONTAINER_NAME}" wget --quiet --tries=1 --spider http://127.0.0.1/health 2>/dev/null; then
-            log_success "Agent switched to lightweight mode successfully"
-            echo ""
-            show_status
-            return 0
-        fi
-        sleep 1
-    done
-
-    log_error "Agent failed to become healthy after switch"
-    return 1
-}
-
-# Switch back to mDNS mode
-switch_to_mdns() {
-    log_info "Switching agent to mDNS mode..."
-
-    if ! is_running; then
-        log_error "Agent is not running"
-        return 1
-    fi
-
-    local current_mode=$(get_agent_mode)
-    if [[ "$current_mode" == "mdns" ]]; then
-        log_warn "Agent is already in mDNS mode"
-        return 0
-    fi
-
-    echo ""
-    log_info "Stopping lightweight agent..."
-    stop_agent
-
-    echo ""
-    log_info "Starting mDNS-enabled agent..."
-    start_agent_mdns
-
-    # Wait for health check
-    log_info "Waiting for agent to be healthy..."
-    for i in {1..30}; do
-        if docker exec "${CONTAINER_NAME}" wget --quiet --tries=1 --spider http://127.0.0.1/health 2>/dev/null; then
-            if docker exec "${CONTAINER_NAME}" pgrep avahi-daemon >/dev/null 2>&1; then
-                log_success "Agent switched to mDNS mode successfully"
-                echo ""
-                show_status
-                return 0
-            fi
-        fi
-        sleep 1
-    done
-
-    log_error "Agent failed to become healthy after switch"
-    return 1
 }
 
 # Main command handler
 main() {
     local command="${1:-help}"
+
+    # Commands that don't require Docker
+    case "${command}" in
+        help|--help|-h|init)
+            ;;
+        *)
+            # All other commands require Docker
+            check_docker_available || exit 1
+            ;;
+    esac
 
     case "${command}" in
         start)
@@ -1176,22 +1176,22 @@ main() {
             show_status
             ;;
         logs)
-            show_logs "${2:-false}"
+            show_logs "${2:-false}" "${3:-all}"
             ;;
         test)
             test_config
             ;;
-        check-router|verify-router)
-            check_router_mdns
-            ;;
         verify-setup|verify)
             verify_setup
             ;;
-        switch-to-lightweight|lightweight)
-            switch_to_lightweight
+        setup-host)
+            setup_host_agent
             ;;
-        switch-to-mdns|mdns)
-            switch_to_mdns
+        setup-sync)
+            setup_sync_agent
+            ;;
+        setup-vlan)
+            setup_vlan_agent
             ;;
         cleanup-cache|clean-cache|cleanup)
             cleanup_network_cache
@@ -1201,68 +1201,58 @@ main() {
             ;;
         help|--help|-h)
             cat <<EOF
-Isle Agent Manager - Manage the unified nginx proxy container
+Isle Agent Manager - Manage the three-component agent architecture
 
 Usage: $(basename "$0") <command>
 
+=== THREE-COMPONENT ARCHITECTURE ===
+
+The Isle Agent consists of three independent components:
+  1. isle-host-agent  : Systemd service (mDNS broadcasting/relay)
+  2. isle-agent-sync  : Python container (config generation)
+  3. isle-vlan-agent  : Nginx container (reverse proxy)
+
 Commands:
   Lifecycle:
-    start                   Start the isle-agent container (mDNS mode by default)
-                           Automatically cleans network cache before starting
-    stop                    Stop the isle-agent container
-    restart                 Restart the isle-agent container
-    reload                  Reload nginx config without restarting (zero-downtime)
-    status                  Show agent status and registered apps
+    start                   Start all agent components (automated setup)
+    stop                    Stop all agent containers
+    restart                 Restart all agent components
+    reload                  Reload nginx config without restarting
+    status                  Show status of all three components
 
-  Setup & Verification:
-    verify-setup            Verify agent setup is complete (mDNS broadcasting, router discovery)
-    check-router            Check if agent can discover OpenWRT router via mDNS
-    switch-to-lightweight   Switch from mDNS mode to lightweight mode (after setup confirmed)
-    switch-to-mdns          Switch from lightweight mode back to mDNS mode
+  Setup (Individual Components):
+    setup-host              Setup host agent (systemd service)
+    setup-sync              Setup sync agent (build Python container)
+    setup-vlan              Setup VLAN agent (pull nginx image)
 
-  Troubleshooting:
-    cleanup-cache           Force cleanup of all network cache (Docker networks, system bridge)
-                           Use this if agent won't start or gets stuck in a loop
-    logs [follow]           Show agent logs (add 'follow' to tail logs)
+  Verification:
+    verify-setup            Verify all components are healthy
     test                    Test nginx configuration validity
+    logs [follow] [component]  Show logs (component: sync|vlan|host|all)
 
   Configuration:
     init                    Initialize agent directory structure
     help                    Show this help message
 
-Agent Modes:
-  mDNS Mode (default):
-    - Runs nginx + Avahi mDNS daemon
-    - Broadcasts services for router auto-discovery
-    - Uses more resources (~100MB memory)
-    - Required for initial setup and domain registration
-
-  Lightweight Mode (after setup):
-    - Runs nginx only
-    - Minimal resource usage (~20MB memory)
-    - Domain mappings persist on router
-    - Switch to this after verifying setup
-
 Workflow:
-  1. Start agent (defaults to mDNS mode):
+  1. Start all components (fully automated):
      $(basename "$0") start
 
-  2. Verify setup is working:
+  2. Verify all components are healthy:
      $(basename "$0") verify-setup
 
-  3. Switch to lightweight mode (optional):
-     $(basename "$0") switch-to-lightweight
+  3. Check status:
+     $(basename "$0") status
 
 Examples:
-  $(basename "$0") start                      # Start agent (mDNS mode, auto-cleans cache)
-  $(basename "$0") verify-setup               # Check setup is complete
-  $(basename "$0") switch-to-lightweight      # Switch to lightweight mode
-  $(basename "$0") status                     # Check agent status and mode
-  $(basename "$0") logs follow                # Tail agent logs
-  $(basename "$0") cleanup-cache              # Force cleanup network cache (troubleshooting)
+  $(basename "$0") start                      # Start all components (auto-setup)
+  $(basename "$0") verify-setup               # Check all components are healthy
+  $(basename "$0") status                     # Show status of all components
+  $(basename "$0") logs sync                  # View sync agent logs
+  $(basename "$0") logs vlan                  # View VLAN agent logs
+  $(basename "$0") setup-host                 # Setup host agent only
 
-The isle-agent is a single container that serves all mesh apps with a
-virtual MAC address for OpenWRT router integration.
+The 'start' command orchestrates setup and health checks for all components.
 
 EOF
             ;;

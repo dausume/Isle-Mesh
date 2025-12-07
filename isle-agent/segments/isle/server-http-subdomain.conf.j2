@@ -1,0 +1,12 @@
+{# HTTP server for subdomain #}
+    # {{ subdomain }}.{{ base_domain }} http server proxy
+    server {
+        listen 80;
+        server_name {{ subdomain }}.{{ base_domain }};
+
+        location / {
+            default_type text/plain;
+            return 200 "http://{{ subdomain }}.{{ base_domain }} reached successfully.\n";
+        }
+
+    }

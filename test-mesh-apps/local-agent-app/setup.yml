@@ -1,0 +1,23 @@
+# setup.yml - Environment configuration for local-agent-app
+# This app demonstrates isle-agent integration with localhost-mdns
+
+current-setup:
+  env: local
+
+environments:
+  local:
+    domain: local-app.local
+    mode: local  # Uses localhost-mdns
+    agent: isle-agent  # Uses unified isle-agent proxy
+    projects:
+      local-app: { path: . }
+      backend: { port: '8443' }
+      frontend: { port: '8080' }
+
+  dev:
+    domain: localhost
+    expose_ports_on_localhost: true
+    projects:
+      local-app: { path: . }
+      backend: { port: '8443' }
+      frontend: { port: '8080' }

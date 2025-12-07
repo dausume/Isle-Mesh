@@ -1,0 +1,10 @@
+# @mesh-environments/localhost-mdns/frontend/Dockerfile.lh-mdns.frontend
+# We are not re-encrypting this since it is a simple frontend being hosted at the same location as our nginx proxy.
+FROM python:3.11-slim
+
+WORKDIR /app
+COPY app.py .
+
+RUN pip install falcon gunicorn
+
+CMD ["gunicorn", "app:app", "-b", "0.0.0.0:8443"]

@@ -1,0 +1,54 @@
+# isle-mesh.yml - Mesh network configuration for local-agent-app
+# Demonstrates integration with unified isle-agent
+
+mesh:
+  name: local-app
+  domain: local-app.local
+  version: "1.0.0"
+  mode: local  # localhost-mdns mode
+
+network:
+  name: isle-agent-net
+  driver: bridge
+  external: true  # Uses isle-agent network
+
+ssl:
+  enabled: true
+  cert_dir: ./ssl/certs
+  key_dir: ./ssl/keys
+  base_cert: local-app.local.crt
+  base_key: local-app.local.key
+
+proxy:
+  enabled: true
+  type: isle-agent  # Uses unified isle-agent instead of per-app proxy
+  managed_by: isle-agent
+  fragment_path: /etc/isle-mesh/agent/configs/local-app.conf
+
+services:
+  backend:
+    subdomain: api
+    port: 8443
+    mtls: true
+    url: https://api.local-app.local
+
+  frontend:
+    subdomain: app
+    port: 8080
+    mtls: false
+    url: https://app.local-app.local
+
+mdns:
+  enabled: true
+  publish_services: true
+  discovery: true
+  domains:
+    - local-app.local
+    - api.local-app.local
+    - app.local-app.local
+
+automation:
+  auto_ssl_renewal: false
+  auto_proxy_rebuild: true
+  auto_agent_reload: true  # Automatically reload isle-agent on changes
+  watch_compose_changes: false

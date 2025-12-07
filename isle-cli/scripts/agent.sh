@@ -1,10 +1,12 @@
 #!/bin/bash
 
 # Isle-Mesh Agent Commands
-# Unified nginx proxy container with virtual MAC for OpenWRT integration
+# Three-component agent architecture for mesh proxy and config management
 #
-# The isle-agent is a single nginx container that serves all mesh apps
-# with isolated network access via virtual MAC address.
+# Components:
+#   1. isle-host-agent: Systemd service (mDNS broadcasting/relay)
+#   2. isle-agent-sync: Python container (config generation)
+#   3. isle-vlan-agent: Nginx container (reverse proxy)
 
 set -e
 
@@ -26,38 +28,47 @@ BOLD='\033[1m'
 NC='\033[0m' # No Color
 
 show_help() {
-    echo -e "${BOLD}Isle Agent Commands${NC} - Unified Nginx Proxy Container"
+    echo -e "${BOLD}Isle Agent Commands${NC} - Three-Component Agent Architecture"
     echo -e ""
     echo -e "╔═══════════════════════════════════════════════════════════════╗"
-    echo -e "║                    AGENT OVERVIEW                             ║"
+    echo -e "║              THREE-COMPONENT ARCHITECTURE                     ║"
     echo -e "╚═══════════════════════════════════════════════════════════════╝"
     echo -e ""
-    echo -e "The Isle Agent is a unified nginx proxy container that serves ALL"
-    echo -e "mesh applications on this device. It uses a virtual MAC address"
-    echo -e "for isolated connectivity with the OpenWRT router."
+    echo -e "The Isle Agent consists of three independent components:"
     echo -e ""
-    echo -e "Each mesh app generates a config fragment that gets merged into"
-    echo -e "the agent's configuration, allowing zero-downtime updates."
+    echo -e "1. ${GREEN}isle-host-agent${NC} (Systemd Service)"
+    echo -e "   • Broadcasts mDNS for service discovery"
+    echo -e "   • Can relay to sync container"
+    echo -e "   • Optional component"
+    echo -e ""
+    echo -e "2. ${GREEN}isle-agent-sync${NC} (Python Container)"
+    echo -e "   • Receives mDNS service data via API"
+    echo -e "   • Generates nginx config fragments"
+    echo -e "   • HTTP API on port 8888"
+    echo -e ""
+    echo -e "3. ${GREEN}isle-vlan-agent${NC} (Nginx Container)"
+    echo -e "   • Reverse proxy for all mesh apps"
+    echo -e "   • Virtual MAC: 02:00:00:00:0a:01"
+    echo -e "   • Ports: 80 (HTTP), 443 (HTTPS)"
     echo -e ""
     echo -e "╔═══════════════════════════════════════════════════════════════╗"
     echo -e "║                    AGENT LIFECYCLE                            ║"
     echo -e "╚═══════════════════════════════════════════════════════════════╝"
     echo -e ""
-    echo -e "  ${CYAN}isle agent start${NC}               Start the isle-agent container (mDNS mode default)"
-    echo -e "  ${CYAN}isle agent stop${NC}                Stop the isle-agent container"
-    echo -e "  ${CYAN}isle agent restart${NC}             Restart the isle-agent container"
-    echo -e "  ${CYAN}isle agent status${NC}              Show agent status and registered apps"
+    echo -e "  ${CYAN}isle agent start${NC}               Start all agent components (automated setup)"
+    echo -e "  ${CYAN}isle agent stop${NC}                Stop all agent containers"
+    echo -e "  ${CYAN}isle agent restart${NC}             Restart all agent components"
+    echo -e "  ${CYAN}isle agent status${NC}              Show status of all three components"
     echo -e "  ${CYAN}isle agent reload${NC}              Reload nginx config (zero-downtime)"
-    echo -e "  ${CYAN}isle agent destroy${NC}             Completely remove agent (--full removes configs)"
     echo -e ""
     echo -e "╔═══════════════════════════════════════════════════════════════╗"
-    echo -e "║                    SETUP & VERIFICATION                       ║"
+    echo -e "║                SETUP & VERIFICATION                           ║"
     echo -e "╚═══════════════════════════════════════════════════════════════╝"
     echo -e ""
-    echo -e "  ${CYAN}isle agent verify-setup${NC}        Verify agent setup is complete"
-    echo -e "  ${CYAN}isle agent check-router${NC}        Check OpenWRT router discovery via mDNS"
-    echo -e "  ${CYAN}isle agent switch-to-lightweight${NC} Switch to lightweight mode (after setup)"
-    echo -e "  ${CYAN}isle agent switch-to-mdns${NC}      Switch back to mDNS mode"
+    echo -e "  ${CYAN}isle agent verify-setup${NC}        Verify all components are healthy"
+    echo -e "  ${CYAN}isle agent setup-host${NC}          Setup host agent (systemd service)"
+    echo -e "  ${CYAN}isle agent setup-sync${NC}          Setup sync agent (build Python container)"
+    echo -e "  ${CYAN}isle agent setup-vlan${NC}          Setup VLAN agent (pull nginx image)"
     echo -e ""
     echo -e "╔═══════════════════════════════════════════════════════════════╗"
     echo -e "║                    CONFIGURATION                              ║"
@@ -72,70 +83,47 @@ show_help() {
     echo -e "║                    LOGGING & DEBUG                            ║"
     echo -e "╚═══════════════════════════════════════════════════════════════╝"
     echo -e ""
-    echo -e "  ${CYAN}isle agent logs${NC}                Show recent agent logs"
-    echo -e "  ${CYAN}isle agent logs follow${NC}         Tail agent logs in real-time"
+    echo -e "  ${CYAN}isle agent logs${NC}                Show logs from all components"
+    echo -e "  ${CYAN}isle agent logs sync${NC}           Show sync agent logs"
+    echo -e "  ${CYAN}isle agent logs vlan${NC}           Show VLAN agent logs"
+    echo -e "  ${CYAN}isle agent logs host${NC}           Show host agent logs (systemd)"
     echo -e ""
     echo -e "╔═══════════════════════════════════════════════════════════════╗"
     echo -e "║                    HOW IT WORKS                               ║"
     echo -e "╚═══════════════════════════════════════════════════════════════╝"
     echo -e ""
-    echo -e "1. ${GREEN}Single Container${NC}: One nginx container for all mesh apps"
-    echo -e "   • Reduces resource usage"
-    echo -e "   • Simplifies network management"
-    echo -e "   • Uses virtual MAC (02:00:00:00:0a:01) for OpenWRT DHCP"
+    echo -e "1. ${GREEN}Component Architecture${NC}: Three independent services"
+    echo -e "   • Modular design for flexibility"
+    echo -e "   • Each component can be managed separately"
+    echo -e "   • Host agent is optional"
     echo -e ""
-    echo -e "2. ${GREEN}Config Fragments${NC}: Each app generates its own config"
+    echo -e "2. ${GREEN}Config Fragments${NC}: Dynamic nginx configuration"
+    echo -e "   • Sync agent generates configs from service data"
     echo -e "   • Stored in /etc/isle-mesh/agent/configs/{app}.conf"
-    echo -e "   • Merged via nginx 'include' directive"
-    echo -e "   • Independent updates without recomputing other apps"
+    echo -e "   • VLAN agent includes fragments dynamically"
     echo -e ""
-    echo -e "3. ${GREEN}Conflict Detection${NC}: Registry tracks claimed domains"
-    echo -e "   • Prevents subdomain collisions"
-    echo -e "   • Validates before allowing app registration"
-    echo -e "   • Clear error messages with suggestions"
-    echo -e ""
-    echo -e "4. ${GREEN}Hot Reload${NC}: Zero-downtime config changes"
-    echo -e "   • Apps spin up/down without affecting others"
-    echo -e "   • nginx gracefully reloads configuration"
+    echo -e "3. ${GREEN}Hot Reload${NC}: Zero-downtime config changes"
+    echo -e "   • Apps register/deregister without affecting others"
+    echo -e "   • Nginx gracefully reloads configuration"
     echo -e "   • No dropped connections"
-    echo -e ""
-    echo -e "╔═══════════════════════════════════════════════════════════════╗"
-    echo -e "║                    AGENT MODES                                ║"
-    echo -e "╚═══════════════════════════════════════════════════════════════╝"
-    echo -e ""
-    echo -e "${GREEN}mDNS Mode${NC} (Default for initial setup):"
-    echo -e "  • Runs nginx + Avahi mDNS daemon (~100MB memory)"
-    echo -e "  • Broadcasts services for router auto-discovery"
-    echo -e "  • Required for domain registration with router"
-    echo -e ""
-    echo -e "${GREEN}Lightweight Mode${NC} (After setup confirmed):"
-    echo -e "  • Runs nginx only (~20MB memory)"
-    echo -e "  • Domain mappings persist on router"
-    echo -e "  • Minimal resource usage for production"
     echo -e ""
     echo -e "╔═══════════════════════════════════════════════════════════════╗"
     echo -e "║                    TYPICAL WORKFLOW                           ║"
     echo -e "╚═══════════════════════════════════════════════════════════════╝"
     echo -e ""
-    echo -e "# 0. First-time setup: Configure permissions (one-time)"
-    echo -e "${CYAN}sudo isle permissions agent${NC}"
-    echo -e ""
-    echo -e "# 1. Start the agent (mDNS mode by default)"
+    echo -e "# 1. Start all agent components (fully automated)"
     echo -e "${CYAN}isle agent start${NC}"
     echo -e ""
-    echo -e "# 2. Verify setup is working"
+    echo -e "# 2. Verify all components are healthy"
     echo -e "${CYAN}isle agent verify-setup${NC}"
     echo -e ""
-    echo -e "# 3. Switch to lightweight mode (optional)"
-    echo -e "${CYAN}isle agent switch-to-lightweight${NC}"
-    echo -e ""
-    echo -e "# 4. Deploy mesh apps (they auto-register with agent)"
+    echo -e "# 3. Deploy mesh apps (they auto-register with agent)"
     echo -e "${CYAN}isle app up${NC}"
     echo -e ""
-    echo -e "# 5. View registered apps"
+    echo -e "# 4. View registered apps and component status"
     echo -e "${CYAN}isle agent status${NC}"
     echo -e ""
-    echo -e "# 6. When app configs change, reload agent"
+    echo -e "# 5. When app configs change, reload nginx"
     echo -e "${CYAN}isle agent reload${NC}"
     echo -e ""
     echo -e "╔═══════════════════════════════════════════════════════════════╗"
@@ -143,13 +131,12 @@ show_help() {
     echo -e "╚═══════════════════════════════════════════════════════════════╝"
     echo -e ""
     echo -e "Configuration: ${YELLOW}/etc/isle-mesh/agent/${NC}"
-    echo -e "  ├── docker-compose.yml          Agent container definition"
-    echo -e "  ├── nginx.conf                  Master nginx config"
+    echo -e "  ├── docker-compose.yml          Container orchestration"
     echo -e "  ├── registry.json               Domain/subdomain registry"
-    echo -e "  ├── configs/                    Per-app config fragments"
-    echo -e "  │   ├── app1.conf"
-    echo -e "  │   └── app2.conf"
-    echo -e "  └── ssl/                        Shared SSL certificates"
+    echo -e "  ├── configs/                    Per-app nginx fragments"
+    echo -e "  ├── ssl/                        Shared SSL certificates"
+    echo -e "  ├── logs/                       Nginx logs"
+    echo -e "  └── sync-data/                  Sync agent persistence"
     echo -e ""
 }
 
@@ -209,24 +196,24 @@ case $COMMAND in
         exec "${AGENT_MANAGER}" test "$@"
         ;;
 
-    check-router|verify-router)
-        check_agent_available
-        exec "${AGENT_MANAGER}" check-router "$@"
-        ;;
-
     verify-setup|verify)
         check_agent_available
         exec "${AGENT_MANAGER}" verify-setup "$@"
         ;;
 
-    switch-to-lightweight|lightweight)
+    setup-host)
         check_agent_available
-        exec "${AGENT_MANAGER}" switch-to-lightweight "$@"
+        exec "${AGENT_MANAGER}" setup-host "$@"
         ;;
 
-    switch-to-mdns|mdns-mode)
+    setup-sync)
         check_agent_available
-        exec "${AGENT_MANAGER}" switch-to-mdns "$@"
+        exec "${AGENT_MANAGER}" setup-sync "$@"
+        ;;
+
+    setup-vlan)
+        check_agent_available
+        exec "${AGENT_MANAGER}" setup-vlan "$@"
         ;;
 
     # Config management commands - delegate to merge-configs.sh

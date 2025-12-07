@@ -1,0 +1,49 @@
+{# HTTPS server for base domain #}
+    # Core static information for the proxies {{ base_domain }} specification
+    # {{ base_domain }} https server
+    server {
+        listen 443 ssl{% if is_default %} default_server{% endif %};
+        # mDNS server name auto-inserted from configuration
+        server_name {{ base_domain }};
+
+        # SSL Configuration for the base mDNS server name
+        ssl_certificate /ssl/certs/{{ base_cert }};
+        ssl_certificate_key /ssl/keys/{{ base_key }};
+
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_prefer_server_ciphers on;
+        ssl_ciphers HIGH:!aNULL:!MD5;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Host $server_name;
+
+{% if enable_static_files %}
+        location = /robots.txt {
+            root /etc/nginx/static/;
+            default_type text/plain;
+        }
+
+        # Advertises the api's that should be well-known, as well as child well-known endpoints like those on sub-domains,
+        # or if certain endpoints also need well-known json documentations.
+        #
+        #location = /.well-known {
+        #    return 302 /.well-known/well-known.json;
+        #}
+
+        #location = /site-map.xml {
+        #    return 302 /.well-known/site-map.xml;
+        #}
+{% endif %}
+
+        location / {
+            default_type text/plain;
+            return 200 "https://{{ base_domain }} reached successfully.\n";
+        }
+
+        # Anything not specified to be defined otherwise will default to this url.
+        #location / {
+        #    return 302 https://frontend.{{ base_domain }};
+        #}
+
+    }

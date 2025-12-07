@@ -1,0 +1,23 @@
+[Unit]
+Description=Isle Host Agent - mDNS Broadcaster/Relay for Agent
+After=network.target avahi-daemon.service mesh-mdns.service
+Requires=avahi-daemon.service
+# Note: mesh-mdns.service is optional - only needed if not using isle-host-agent's broadcast mode
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/isle-mesh/agent/host-agent.conf
+ExecStart=/usr/local/bin/isle-mesh/isle-host-agent-relay.sh
+Restart=always
+RestartSec=5
+Nice=10
+
+# Security hardening
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/log/isle-mesh
+PrivateTmp=yes
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

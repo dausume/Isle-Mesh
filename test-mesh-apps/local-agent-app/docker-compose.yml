@@ -1,0 +1,59 @@
+# docker-compose.yml
+# Local Agent App - Works with isle-agent for proxy
+# This app demonstrates integration with the unified isle-agent
+
+version: '3.8'
+
+# Project-level mesh configuration
+labels:
+  mesh.domain: "local-app.local"
+  mesh.enabled: "true"
+  mesh.mode: "local"  # Uses localhost-mdns
+
+networks:
+  # Connect to the isle-agent network
+  isle-agent-net:
+    external: true
+  # Internal network for inter-service communication
+  local-app_internal:
+    driver: bridge
+
+services:
+  # Backend Service (with mTLS)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: local-app_backend
+    expose:
+      - "8443"
+    ports:
+      - "8100:8443"  # Optional: for direct testing
+    labels:
+      mesh.subdomain: "api"
+      mesh.port: "8443"
+      mesh.mtls: "true"
+    networks:
+      - isle-agent-net
+      - local-app_internal
+    volumes:
+      - ./ssl/certs:/ssl/certs:ro
+      - ./ssl/keys:/ssl/keys:ro
+
+  # Frontend Service (without mTLS)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: local-app_frontend
+    expose:
+      - "8080"
+    ports:
+      - "8081:8080"  # Optional: for direct testing
+    labels:
+      mesh.subdomain: "app"
+      mesh.port: "8080"
+      mesh.mtls: "false"
+    networks:
+      - isle-agent-net
+      - local-app_internal

@@ -5,6 +5,15 @@
 
 set -e
 
+# Get script directory and source dependency checker
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEPENDENCY_CHECKER="$SCRIPT_DIR/check-dependencies.sh"
+
+# Source dependency management if available
+if [[ -f "$DEPENDENCY_CHECKER" ]]; then
+    source "$DEPENDENCY_CHECKER"
+fi
+
 # Config file location
 CONFIG_FILE="${HOME}/.isle-config.yml"
 
@@ -36,57 +45,183 @@ ensure_mdns_installed() {
     return 0
   fi
 
-  # mDNS not installed - offer to install
+  # Check for avahi-daemon dependency if using new dependency system
+  if declare -f ensure_dependency &>/dev/null; then
+    if ! ensure_dependency "avahi-daemon" "${context}" "false"; then
+      # User declined or installation failed
+      echo ""
+      echo -e "${YELLOW}Skipping mDNS setup.${NC}"
+      echo ""
+      echo "You can install and configure mDNS later with:"
+      echo "  isle mdns system install"
+      echo ""
+      return 1
+    fi
+  fi
+
+  # mDNS dependencies installed, now install the service
   echo ""
   echo -e "${YELLOW}╔═══════════════════════════════════════════════════════════════╗${NC}"
-  echo -e "${YELLOW}║           mDNS Service Not Installed                          ║${NC}"
+  echo -e "${YELLOW}║           mDNS Service Not Configured                         ║${NC}"
   echo -e "${YELLOW}╚═══════════════════════════════════════════════════════════════╝${NC}"
   echo ""
-  echo -e "${BLUE}The localhost-mdns service is required to ${context}.${NC}"
+  echo -e "${BLUE}The localhost-mdns service needs to be configured to ${context}.${NC}"
   echo ""
   echo "This service:"
   echo "  • Broadcasts .local domain names on your network"
   echo "  • Enables automatic service discovery"
   echo "  • Required for mesh networking functionality"
   echo ""
-  echo -e "${YELLOW}Would you like to install localhost-mdns now? (y/N)${NC}"
+  echo -e "${YELLOW}Would you like to configure localhost-mdns now? (y/N)${NC}"
 
   read -r response
 
   if [[ "$response" =~ ^[Yy]$ ]]; then
     echo ""
-    echo -e "${BLUE}Installing localhost-mdns...${NC}"
+    echo -e "${BLUE}Configuring localhost-mdns...${NC}"
     echo ""
-
-    # Get script directory
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
     # Run the mdns system install command
     if bash "$SCRIPT_DIR/mdns.sh" system install; then
       echo ""
-      echo -e "${GREEN}✓ localhost-mdns installed successfully${NC}"
+      echo -e "${GREEN}✓ localhost-mdns configured successfully${NC}"
       echo ""
       echo -e "${BLUE}Continuing with ${context}...${NC}"
       echo ""
       return 0
     else
       echo ""
-      echo -e "${RED}✗ Failed to install localhost-mdns${NC}"
+      echo -e "${RED}✗ Failed to configure localhost-mdns${NC}"
       echo ""
-      echo -e "${YELLOW}You can install it manually later with:${NC}"
+      echo -e "${YELLOW}You can configure it manually later with:${NC}"
       echo "  isle mdns system install"
       echo ""
       return 1
     fi
   else
     echo ""
-    echo -e "${YELLOW}Skipping mDNS installation.${NC}"
+    echo -e "${YELLOW}Skipping mDNS configuration.${NC}"
     echo ""
-    echo "You can install it later with:"
+    echo "You can configure it later with:"
     echo "  isle mdns system install"
     echo ""
     echo "Domain registration will be skipped for now."
     echo ""
+    return 1
+  fi
+}
+
+# Register app with isle-agent
+# Returns: 0 if successful, 1 if failed or not needed
+register_with_agent() {
+  local project_dir="$1"
+  local mesh_config="$project_dir/isle-mesh.yml"
+  local compose_file="$project_dir/docker-compose.yml"
+
+  # Check if mesh config exists
+  if [ ! -f "$mesh_config" ]; then
+    return 1
+  fi
+
+  # Check if proxy type is isle-agent
+  if command -v yq &> /dev/null; then
+    local proxy_type=$(yq eval '.proxy.type' "$mesh_config" 2>/dev/null)
+    if [ "$proxy_type" != "isle-agent" ]; then
+      return 1
+    fi
+  else
+    # Fallback: check with grep
+    if ! grep -q "type: isle-agent" "$mesh_config" 2>/dev/null; then
+      return 1
+    fi
+  fi
+
+  echo ""
+  echo -e "${BLUE}Registering app with isle-agent...${NC}"
+
+  # Check if isle-agent is running
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  if ! bash "$SCRIPT_DIR/agent.sh" status &>/dev/null; then
+    echo -e "${YELLOW}⚠️  isle-agent is not running${NC}"
+    echo "Would you like to start isle-agent now? (y/N)"
+    read -r response
+    if [[ "$response" =~ ^[Yy]$ ]]; then
+      if sudo bash "$SCRIPT_DIR/agent.sh" start; then
+        echo -e "${GREEN}✓ isle-agent started${NC}"
+      else
+        echo -e "${RED}✗ Failed to start isle-agent${NC}"
+        return 1
+      fi
+    else
+      echo -e "${YELLOW}Skipping isle-agent registration${NC}"
+      return 1
+    fi
+  fi
+
+  # Extract app name and domain from mesh config
+  local app_name=""
+  local domain=""
+  local mode="local"  # default mode
+
+  if command -v yq &> /dev/null; then
+    app_name=$(yq eval '.mesh.name' "$mesh_config" 2>/dev/null)
+    domain=$(yq eval '.mesh.domain' "$mesh_config" 2>/dev/null)
+    mode=$(yq eval '.mesh.mode // "local"' "$mesh_config" 2>/dev/null)
+  fi
+
+  if [ -z "$app_name" ] || [ "$app_name" = "null" ]; then
+    app_name=$(basename "$project_dir")
+  fi
+
+  if [ -z "$domain" ] || [ "$domain" = "null" ]; then
+    echo -e "${RED}✗ No domain found in isle-mesh.yml${NC}"
+    return 1
+  fi
+
+  # Get project root to find the fragment generator
+  CLI_DIR="$(dirname "$SCRIPT_DIR")"
+  PROJECT_ROOT="$(dirname "$CLI_DIR")"
+  FRAGMENT_GEN="$PROJECT_ROOT/isle-agent/scripts/generate-app-fragment.py"
+
+  if [ ! -f "$FRAGMENT_GEN" ]; then
+    echo -e "${RED}✗ Fragment generator not found: $FRAGMENT_GEN${NC}"
+    return 1
+  fi
+
+  # Ensure Python3 is available
+  if declare -f ensure_dependency &>/dev/null; then
+    if ! ensure_dependency "python3" "generate nginx configuration" "true"; then
+      return 1
+    fi
+  fi
+
+  # Generate nginx fragment
+  echo "Generating nginx fragment for $app_name..."
+  if python3 "$FRAGMENT_GEN" \
+      --app-name "$app_name" \
+      --compose "$compose_file" \
+      --domain "$domain" \
+      --mode "$mode" \
+      --output "/etc/isle-mesh/agent/configs/$app_name.conf" 2>&1; then
+
+    echo -e "${GREEN}✓ Fragment generated${NC}"
+
+    # Reload isle-agent
+    echo "Reloading isle-agent..."
+    if sudo bash "$SCRIPT_DIR/agent.sh" reload; then
+      echo -e "${GREEN}✓ isle-agent reloaded successfully${NC}"
+      echo ""
+      echo -e "${GREEN}App registered with isle-agent:${NC}"
+      echo "  • App: $app_name"
+      echo "  • Domain: $domain"
+      echo "  • Mode: $mode"
+      return 0
+    else
+      echo -e "${RED}✗ Failed to reload isle-agent${NC}"
+      return 1
+    fi
+  else
+    echo -e "${RED}✗ Failed to generate nginx fragment${NC}"
     return 1
   fi
 }
@@ -418,6 +553,9 @@ cmd_up() {
     echo "Error: No docker-compose file found in $project_dir"
     exit 1
   fi
+
+  # Auto-register with isle-agent if configured
+  register_with_agent "$project_dir"
 
   # Auto-register domains with mDNS
   echo ""

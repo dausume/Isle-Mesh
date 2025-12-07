@@ -26,6 +26,8 @@ const scriptPaths = {
     'uninstall': path.join(__dirname, 'scripts', 'uninstall.sh'),
     'permissions': path.join(__dirname, 'scripts', 'permissions.sh'),
     'fix-docker': path.join(__dirname, 'scripts', 'fix-docker-cgroups.sh'),
+    'dependencies': path.join(__dirname, 'scripts', 'check-dependencies.sh'),
+    'deps': path.join(__dirname, 'scripts', 'check-dependencies.sh'),  // Alias
 };
 
 const makeExecutable = (filePath) => {
@@ -171,7 +173,12 @@ switch (command) {
   case 'agent':
     // All agent and bridge management commands
     const agentArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
-    execSync(`bash ${scriptPaths['agent']} ${agentArgs}`, { stdio: 'inherit', cwd: projectRoot });
+    try {
+      execSync(`bash ${scriptPaths['agent']} ${agentArgs}`, { stdio: 'inherit', cwd: projectRoot });
+    } catch (error) {
+      // Agent script already displayed error message, just exit with same code
+      process.exit(error.status || 1);
+    }
     break;
 
   case 'mdns':
@@ -218,7 +225,12 @@ switch (command) {
   case 'install':
     // Install system dependencies with optional target (app/router/agent/all)
     const installArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
-    execSync(`bash ${scriptPaths['install']} ${installArgs}`, { stdio: 'inherit', cwd: projectRoot });
+    try {
+      execSync(`bash ${scriptPaths['install']} ${installArgs}`, { stdio: 'inherit', cwd: projectRoot });
+    } catch (error) {
+      // Install script already displayed error message, just exit with same code
+      process.exit(error.status || 1);
+    }
     break;
 
   case 'uninstall':
@@ -243,6 +255,17 @@ switch (command) {
     const fixDockerArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
     try {
       execSync(`bash ${scriptPaths['fix-docker']} ${fixDockerArgs}`, { stdio: 'inherit', cwd: projectRoot });
+    } catch (error) {
+      process.exit(error.status || 1);
+    }
+    break;
+
+  case 'dependencies':
+  case 'deps':
+    // Manage Isle-Mesh dependencies
+    const depsArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
+    try {
+      execSync(`bash ${scriptPaths['dependencies']} ${depsArgs}`, { stdio: 'inherit', cwd: projectRoot });
     } catch (error) {
       process.exit(error.status || 1);
     }
@@ -301,6 +324,7 @@ Isle commands are organized into five main categories:
   isle destroy            Complete teardown (apps + agent + router)
   isle install [target]   Install dependencies (app/router/agent/all)
   isle uninstall [target] Uninstall components (app/router/all)
+  isle dependencies       Manage system dependencies (check/install)
   isle permissions        Manage file permissions
   isle fix-docker [cmd]   Check/fix Docker cgroup configuration issues
   isle help               Show this help message

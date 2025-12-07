@@ -108,10 +108,14 @@ def update_registry(app_name: str, domain: str, services: list, registry_file: P
         registry["subdomains"][subdomain_fqdn] = app_name
 
     # Register app metadata
+    # Preserve existing modes if app already exists, otherwise set empty
+    existing_modes = registry.get("apps", {}).get(app_name, {}).get("modes", [])
+
     registry.setdefault("apps", {})[app_name] = {
         "domain": domain,
         "services": len(services),
         "subdomains": [f"{svc['subdomain']}.{domain}" for svc in services],
+        "modes": existing_modes if existing_modes else [],  # Will be set by app configuration
         "updated_at": datetime.now().isoformat()
     }
 
@@ -128,14 +132,23 @@ def build_app_fragment(
     base_cert: str,
     base_key: str,
     template_dir: Path,
-    segments_dir: Path
+    segments_dir: Path,
+    mode: str = 'local'
 ) -> str:
     """
     Build nginx config fragment for a single app using Jinja2 templates.
+
+    Args:
+        mode: 'local' for localhost-mdns implementations, 'isle' for isle mesh network
     """
+    # Select segment subdirectory based on mode
+    mode_segments_dir = segments_dir / mode
+    if not mode_segments_dir.exists():
+        raise ValueError(f"Segment directory for mode '{mode}' not found: {mode_segments_dir}")
+
     # Set up Jinja2 environment
     env = Environment(
-        loader=FileSystemLoader([str(template_dir), str(segments_dir)]),
+        loader=FileSystemLoader([str(template_dir), str(mode_segments_dir)]),
         autoescape=select_autoescape(),
         trim_blocks=True,
         lstrip_blocks=True
@@ -222,6 +235,13 @@ def main():
         action='store_true',
         help='Force generation even if conflicts exist'
     )
+    parser.add_argument(
+        '--mode',
+        type=str,
+        choices=['local', 'isle'],
+        default='local',
+        help='Segment mode: "local" for localhost-mdns, "isle" for isle mesh network (default: local)'
+    )
 
     args = parser.parse_args()
 
@@ -281,7 +301,7 @@ def main():
                 print("\nWarning: Proceeding with --force flag")
 
     # Build nginx fragment
-    print(f"\nGenerating nginx config fragment for '{args.app_name}'...")
+    print(f"\nGenerating nginx config fragment for '{args.app_name}' in '{args.mode}' mode...")
     fragment = build_app_fragment(
         app_name=args.app_name,
         services=services,
@@ -289,7 +309,8 @@ def main():
         base_cert=args.base_cert,
         base_key=args.base_key,
         template_dir=template_dir,
-        segments_dir=segments_dir
+        segments_dir=segments_dir,
+        mode=args.mode
     )
 
     # Write output file
