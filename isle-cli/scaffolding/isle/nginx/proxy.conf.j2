@@ -12,12 +12,6 @@
     }
     {% endif %}
 
-    {% if isle_agent_mdns_enabled %}
-    # Isle agent mDNS receiver upstream
-    upstream isle_agent_mdns {
-        server isle-agent-mdns:8888;
-    }
-    {% endif %}
 {% endblock %}
 
 {# Additional server blocks for isle-specific endpoints #}
@@ -42,24 +36,11 @@
     }
     {% endif %}
 
-    {% if isle_agent_mdns_enabled %}
-    # Isle agent mDNS API (internal only)
-    # This is NOT exposed externally, only for internal container communication
-    server {
-        listen 127.0.0.1:8888;
-        server_name localhost;
-
-        location / {
-            proxy_pass http://isle_agent_mdns;
-            proxy_set_header Host $host;
-        }
-    }
-    {% endif %}
 {% endblock %}
 
 {# Note: This template builds on localhost-mdns scaffolding #}
 {# Isle-specific features: #}
-{#  - DHCP integration via isle-agent-mdns #}
+{#  - DHCP integration via isle-host-agent #}
 {#  - Router management proxy #}
 {#  - vLAN networking support #}
 {#  - Enhanced security for network isolation #}

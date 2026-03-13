@@ -461,11 +461,11 @@ test_orchestration_agent_detection() {
 test_mesh_proxy_templates() {
     log_test "Mesh-proxy nginx templates availability"
 
-    local mesh_proxy_dir="${PROJECT_ROOT}/mesh-proxy"
+    local mesh_proxy_dir="${PROJECT_ROOT}/mesh-app-scaffolding"
     local templates_dir="${mesh_proxy_dir}/segments"
 
     if [[ ! -d "$templates_dir" ]]; then
-        log_fail "Mesh-proxy templates directory not found"
+        log_fail "Mesh-app-scaffolding templates directory not found"
         return 1
     fi
 
@@ -501,7 +501,7 @@ test_mesh_proxy_templates() {
 test_template_rendering() {
     log_test "Mesh-proxy template rendering capability"
 
-    local mesh_proxy_dir="${PROJECT_ROOT}/mesh-proxy"
+    local mesh_proxy_dir="${PROJECT_ROOT}/mesh-app-scaffolding"
 
     # Look for proxy generator script/tool
     if [[ -f "${mesh_proxy_dir}/generate.py" ]] || [[ -f "${mesh_proxy_dir}/generate.sh" ]]; then

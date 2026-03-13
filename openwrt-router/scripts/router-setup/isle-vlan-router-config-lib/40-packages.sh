@@ -34,10 +34,15 @@ install_required_packages(){
   local pkg_count=$(ls -1 "$PACKAGES_DIR"/*.ipk 2>/dev/null | wc -l)
   info "Found $pkg_count package(s) to transfer"
 
-  scp $SSH_OPTS "$PACKAGES_DIR"/*.ipk "${OPENWRT_USER}@${OPENWRT_IP}:${REMOTE_TMP}/" || {
+  # Use copy_to_openwrt for sshpass/key fallback (copies one-by-one for reliability)
+  local fail=0
+  for pkg in "$PACKAGES_DIR"/*.ipk; do
+    copy_to_openwrt "$pkg" "${REMOTE_TMP}/" || { fail=1; break; }
+  done
+  if [[ $fail -eq 1 ]]; then
     err "Failed to transfer packages"
     exit 1
-  }
+  fi
   ok "Packages transferred"
 
   # Install packages on router

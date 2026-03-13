@@ -1,20 +1,20 @@
 #!/bin/bash
-# Script for managing mesh-proxy docker-compose
+# Script for managing mesh-app-scaffolding docker-compose (formerly mesh-proxy)
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Get the project root (parent of isle-cli)
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-# Path to mesh-proxy directory
-MESH_PROXY_DIR="$PROJECT_ROOT/mesh-proxy"
+# Path to mesh-app-scaffolding directory (formerly mesh-proxy)
+MESH_PROXY_DIR="$PROJECT_ROOT/mesh-app-scaffolding"
 
-# Check if mesh-proxy directory exists
+# Check if mesh-app-scaffolding directory exists
 if [ ! -d "$MESH_PROXY_DIR" ]; then
-    echo "Error: mesh-proxy directory not found at $MESH_PROXY_DIR"
+    echo "Error: mesh-app-scaffolding directory not found at $MESH_PROXY_DIR"
     exit 1
 fi
 
-# Change to mesh-proxy directory
+# Change to mesh-app-scaffolding directory
 cd "$MESH_PROXY_DIR" || exit 1
 
 ACTION=${1:-help}

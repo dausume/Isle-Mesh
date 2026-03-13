@@ -31,7 +31,7 @@ MESH_PROXY_DIR=""
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLI_DIR="$(dirname "$SCRIPT_DIR")"
 PROJECT_ROOT="$(dirname "$CLI_DIR")"
-MESH_PROXY_DIR="${PROJECT_ROOT}/mesh-proxy"
+MESH_PROXY_DIR="${PROJECT_ROOT}/mesh-app-scaffolding"
 
 # Logging
 log_info() {
@@ -62,16 +62,16 @@ log_step() {
 detect_agent() {
     log_step "Step 1: Detecting Agent Setup"
 
-    if docker ps --filter "name=isle-agent" --filter "status=running" --format '{{.Names}}' | grep -q "^isle-agent$"; then
+    if docker ps --filter "name=isle-vlan-agent" --filter "status=running" --format '{{.Names}}' | grep -q "^isle-vlan-agent$"; then
         log_success "Agent container detected and running"
 
         # Get agent details
         local agent_uptime
-        agent_uptime=$(docker ps --filter "name=isle-agent" --format '{{.Status}}')
+        agent_uptime=$(docker ps --filter "name=isle-vlan-agent" --format '{{.Status}}')
         log_info "Agent uptime: $agent_uptime"
 
         # Check agent health
-        if docker exec isle-agent wget --quiet --tries=1 --spider http://127.0.0.1/health 2>/dev/null; then
+        if docker exec isle-vlan-agent wget --quiet --tries=1 --spider http://127.0.0.1/health 2>/dev/null; then
             log_success "Agent health check passed"
         else
             log_warn "Agent health check failed (may still be starting up)"
@@ -361,14 +361,14 @@ register_app() {
 reload_agent() {
     log_step "Step 5: Reloading Agent (Zero-Downtime)"
 
-    if ! docker ps --filter "name=isle-agent" --filter "status=running" -q | grep -q .; then
+    if ! docker ps --filter "name=isle-vlan-agent" --filter "status=running" -q | grep -q .; then
         log_error "Agent is not running"
         return 1
     fi
 
     # Test complete configuration first
     log_info "Testing complete nginx configuration..."
-    if ! docker exec isle-agent nginx -t 2>&1; then
+    if ! docker exec isle-vlan-agent nginx -t 2>&1; then
         log_error "Nginx configuration test failed"
         return 1
     fi
@@ -377,12 +377,12 @@ reload_agent() {
 
     # Reload nginx
     log_info "Reloading nginx..."
-    if docker exec isle-agent nginx -s reload 2>/dev/null; then
+    if docker exec isle-vlan-agent nginx -s reload 2>/dev/null; then
         log_success "Agent reloaded successfully"
 
         # Verify reload worked
         sleep 2
-        if docker exec isle-agent wget --quiet --tries=1 --spider http://127.0.0.1/health 2>/dev/null; then
+        if docker exec isle-vlan-agent wget --quiet --tries=1 --spider http://127.0.0.1/health 2>/dev/null; then
             log_success "Agent health check passed after reload"
             return 0
         else

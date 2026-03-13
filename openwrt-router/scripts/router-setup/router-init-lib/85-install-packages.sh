@@ -5,26 +5,17 @@ if [[ -n "${_INSTALL_PACKAGES_SH_SOURCED:-}" ]]; then return 0; fi; _INSTALL_PAC
 install_and_configure_packages() {
   log_step "Step 9: Installing and Configuring Packages on Router"
 
-  # Router connection details
-  local router_ip="${ROUTER_IP:-192.168.1.1}"
-  local router_user="${ROUTER_USER:-root}"
   local router_dest="${ROUTER_PACKAGE_DIR:-/tmp/packages}"
 
-  # Use dedicated SSH key (from 15-ssh-key.sh)
-  local ssh_opts="$ISLE_SSH_OPTS -o ConnectTimeout=5"
-
-  log_info "Router IP: $router_ip"
-
   # Check SSH connection
-  if ! sudo ssh $ssh_opts "${router_user}@${router_ip}" "exit" 2>/dev/null; then
+  if ! router_ssh_test; then
     log_error "Cannot connect to router via SSH"
     exit 1
   fi
 
   # Install packages
   log_info "Installing packages from ${router_dest}..."
-  if sudo ssh $ssh_opts "${router_user}@${router_ip}" \
-         "opkg install ${router_dest}/*.ipk" 2>/dev/null; then
+  if router_ssh "opkg install ${router_dest}/*.ipk" 2>/dev/null; then
     log_success "Packages installed successfully"
   else
     log_warning "Some packages may have failed to install (this is often OK if already installed)"
@@ -33,8 +24,7 @@ install_and_configure_packages() {
   # Configure and start avahi-daemon
   log_info "Configuring avahi-daemon..."
 
-  # Enable and start avahi-daemon service
-  sudo ssh $ssh_opts "${router_user}@${router_ip}" \
+  router_ssh \
       "uci set avahi.@avahi[0].enable_reflector='1' && \
        uci set avahi.@avahi[0].enable_dbus='yes' && \
        uci commit avahi && \
@@ -49,8 +39,7 @@ install_and_configure_packages() {
 
   # Enable dbus (required for avahi)
   log_info "Enabling dbus service..."
-  sudo ssh $ssh_opts "${router_user}@${router_ip}" \
-      "/etc/init.d/dbus enable && /etc/init.d/dbus start" 2>/dev/null
+  router_ssh "/etc/init.d/dbus enable && /etc/init.d/dbus start" 2>/dev/null
 
   if [[ $? -eq 0 ]]; then
     log_success "dbus service enabled and started"
@@ -60,8 +49,8 @@ install_and_configure_packages() {
 
   # Verify services are running
   log_info "Verifying services..."
-  local avahi_status=$(sudo ssh $ssh_opts "${router_user}@${router_ip}" \
-                          "/etc/init.d/avahi-daemon status" 2>/dev/null)
+  local avahi_status
+  avahi_status=$(router_ssh "/etc/init.d/avahi-daemon status" 2>/dev/null) || true
 
   if echo "$avahi_status" | grep -q "running"; then
     log_success "avahi-daemon is running"
@@ -71,8 +60,8 @@ install_and_configure_packages() {
 
   # Verify installed packages
   log_info "Verifying installed packages..."
-  local installed_pkgs=$(sudo ssh $ssh_opts "${router_user}@${router_ip}" \
-                            "opkg list-installed | grep -E '(avahi|ip-full|tcpdump)' | wc -l" 2>/dev/null)
+  local installed_pkgs
+  installed_pkgs=$(router_ssh "opkg list-installed | grep -cE '(avahi|ip-full|tcpdump)'" 2>/dev/null) || installed_pkgs=0
 
   log_info "Verified $installed_pkgs package(s) installed"
 

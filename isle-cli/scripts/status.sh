@@ -99,7 +99,7 @@ check_router_status() {
 
     # If no local router, check for remote router via mDNS
     if [[ "$router_type" == "none" ]] && command_exists avahi-browse; then
-        log_info "No local router detected, checking for remote router via mDNS..."
+        # Silently check for remote router (no log output - this function returns data only)
 
         # Try to resolve openwrt.local
         if command_exists getent; then

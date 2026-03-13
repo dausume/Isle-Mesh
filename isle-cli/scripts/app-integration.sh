@@ -42,7 +42,7 @@ log_step() {
 
 # Detect if agent is running
 is_agent_running() {
-    docker ps --filter "name=isle-agent" --filter "status=running" --format '{{.Names}}' 2>/dev/null | grep -q "^isle-agent$"
+    docker ps --filter "name=isle-vlan-agent" --filter "status=running" --format '{{.Names}}' 2>/dev/null | grep -q "^isle-vlan-agent$"
 }
 
 # Detect agent and show status
@@ -60,7 +60,7 @@ detect_agent() {
 
     # Get agent network info
     local agent_ip
-    agent_ip=$(docker inspect isle-agent --format='{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' 2>/dev/null | awk '{print $1}')
+    agent_ip=$(docker inspect isle-vlan-agent --format='{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' 2>/dev/null | awk '{print $1}')
     log_info "Agent IP: $agent_ip"
 
     # Check how many apps are registered
@@ -326,13 +326,13 @@ reload_agent() {
     log_info "Reloading agent nginx configuration..."
 
     # Test config first
-    if ! docker exec isle-agent nginx -t 2>&1 | tail -2; then
+    if ! docker exec isle-vlan-agent nginx -t 2>&1 | tail -2; then
         log_error "Nginx config test failed"
         return 1
     fi
 
     # Reload
-    if docker exec isle-agent nginx -s reload 2>/dev/null; then
+    if docker exec isle-vlan-agent nginx -s reload 2>/dev/null; then
         log_success "Agent reloaded successfully"
         return 0
     else
@@ -444,7 +444,7 @@ fix_deployed_app() {
     local app_networks
     app_networks=$(docker inspect "$container_name" --format='{{range .NetworkSettings.Networks}}{{.NetworkID}} {{end}}')
     local agent_network
-    agent_network=$(docker inspect isle-agent --format='{{range .NetworkSettings.Networks}}{{.NetworkID}}{{end}}' | awk '{print $1}')
+    agent_network=$(docker inspect isle-vlan-agent --format='{{range .NetworkSettings.Networks}}{{.NetworkID}}{{end}}' | awk '{print $1}')
 
     if echo "$app_networks" | grep -q "$agent_network"; then
         log_success "App is already on agent network"

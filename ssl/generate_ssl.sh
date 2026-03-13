@@ -111,10 +111,13 @@ done
 # --- Check Existing Files ---
 if [ -f "$FULL_CERT_FILE_PATH" ] || [ -f "$FULL_KEY_FILE_PATH" ]; then
     if [ "$OVERWRITE_SSL" == "false" ]; then
-        echo "SSL Certificate or key already exists at one of the following paths : '$FULL_CERT_FILE_PATH', '$FULL_KEY_FILE_PATH'"
-        echo "SSL Cert-Key pairs must always be generated together, you cannot expect ones generated separately to work together."
-        echo "If you want to overwrite the existing certs with a new cert-pair, set the env var OVERWRITE_SSL to be 'true'."
-        exit 1
+        echo "ℹ️  SSL certificates already exist:" >&2
+        echo "   Cert: $FULL_CERT_FILE_PATH" >&2
+        echo "   Key:  $FULL_KEY_FILE_PATH" >&2
+        echo "" >&2
+        echo "   Skipping generation (OVERWRITE_SSL=false)" >&2
+        echo "   To regenerate certificates, set: OVERWRITE_SSL=true" >&2
+        exit 0
     fi
 fi
 

@@ -458,7 +458,7 @@ ${BLUE}Troubleshooting:${NC}
      docker ps | grep isle-agent
 
   5. ${CYAN}Check agent logs${NC}
-     docker logs isle-agent-mdns
+     docker logs isle-vlan-agent
 
 ${YELLOW}Review the failed tests above for specific issues.${NC}
 

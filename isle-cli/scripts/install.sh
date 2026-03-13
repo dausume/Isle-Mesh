@@ -249,14 +249,45 @@ install_app() {
 
 # Install agent dependencies
 install_agent() {
-    log_step "Agent Dependencies (Coming Soon)"
+    log_step "Installing Agent Dependencies"
 
-    log_warning "The isle agent is currently under development."
-    log_info "Future dependencies may include:"
-    log_info "  • Network bridge management tools (already available)"
-    log_info "  • Container runtime integration libraries"
+    local PROJECT_ROOT="$(cd "$ISLE_CLI_ROOT/.." && pwd)"
+    local AGENT_SCRIPTS_DIR="$PROJECT_ROOT/isle-agent/scripts"
+    local AGENT_REGISTRY_SYNC_INSTALL="$AGENT_SCRIPTS_DIR/install-agent-registry-sync.sh"
+
+    # Check if running with sudo
+    check_root
+
     echo ""
-    log_info "For now, no additional dependencies are required."
+    log_info "Installing agent-registry-sync service..."
+    log_info "This service automatically syncs .local domains from the agent registry to mDNS"
+    echo ""
+
+    # Check if install script exists
+    if [[ ! -f "$AGENT_REGISTRY_SYNC_INSTALL" ]]; then
+        log_error "Agent registry sync install script not found: $AGENT_REGISTRY_SYNC_INSTALL"
+        log_info "Please ensure the isle-agent/scripts directory contains install-agent-registry-sync.sh"
+        return 1
+    fi
+
+    # Run the install script
+    if bash "$AGENT_REGISTRY_SYNC_INSTALL"; then
+        log_success "agent-registry-sync service installed successfully"
+        echo ""
+        log_info "The service will automatically:"
+        log_info "  • Watch /etc/isle-mesh/agent/registry.json for changes"
+        log_info "  • Sync .local domains to mDNS broadcast configuration"
+        log_info "  • Reload mesh-mdns service when domains change"
+        echo ""
+        log_info "Check service status: ${CYAN}sudo systemctl status agent-registry-sync${NC}"
+        log_info "View logs: ${CYAN}sudo journalctl -u agent-registry-sync -f${NC}"
+    else
+        log_error "Failed to install agent-registry-sync service"
+        return 1
+    fi
+
+    echo ""
+    log_success "Agent dependencies installed successfully!"
     echo ""
 }
 
@@ -294,8 +325,8 @@ show_help() {
     echo -e "                       - bridge-utils (Network bridging)"
     echo -e "                       - wget (Image downloads)"
     echo ""
-    echo -e "  ${CYAN}agent${NC}               Agent dependencies (coming soon)"
-    echo -e "                       - Future bridge management tools"
+    echo -e "  ${CYAN}agent${NC}               Install agent dependencies"
+    echo -e "                       - agent-registry-sync service (domain sync automation)"
     echo ""
     echo -e "  ${CYAN}all${NC}                 Install/check all dependencies"
     echo ""
@@ -364,7 +395,7 @@ case "$FEATURE" in
         echo "Available features:"
         echo "  app      - Check mesh application dependencies"
         echo "  router   - Install router virtualization dependencies"
-        echo "  agent    - Agent dependencies (coming soon)"
+        echo "  agent    - Install agent dependencies"
         echo "  all      - Install/check all dependencies"
         echo ""
         echo "Run 'isle install help' for more information"

@@ -111,12 +111,14 @@ ensure_mdns_installed() {
   fi
 }
 
-# Register app with isle-agent
+# Register app with isle-agent (unified registry format)
+# Writes services as array of objects to registry.json
+# The registry-watcher detects the change and triggers nginx config regeneration
 # Returns: 0 if successful, 1 if failed or not needed
 register_with_agent() {
   local project_dir="$1"
   local mesh_config="$project_dir/isle-mesh.yml"
-  local compose_file="$project_dir/docker-compose.yml"
+  local mesh_compose="$project_dir/docker-compose.mesh-app.yml"
 
   # Check if mesh config exists
   if [ ! -f "$mesh_config" ]; then
@@ -139,29 +141,17 @@ register_with_agent() {
   echo ""
   echo -e "${BLUE}Registering app with isle-agent...${NC}"
 
-  # Check if isle-agent is running
-  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  if ! bash "$SCRIPT_DIR/agent.sh" status &>/dev/null; then
-    echo -e "${YELLOW}⚠️  isle-agent is not running${NC}"
-    echo "Would you like to start isle-agent now? (y/N)"
-    read -r response
-    if [[ "$response" =~ ^[Yy]$ ]]; then
-      if sudo bash "$SCRIPT_DIR/agent.sh" start; then
-        echo -e "${GREEN}✓ isle-agent started${NC}"
-      else
-        echo -e "${RED}✗ Failed to start isle-agent${NC}"
-        return 1
-      fi
-    else
-      echo -e "${YELLOW}Skipping isle-agent registration${NC}"
-      return 1
-    fi
+  # Check if isle-agent-net exists
+  if ! docker network inspect isle-agent-net &>/dev/null 2>&1; then
+    echo -e "${YELLOW}Warning: isle-agent-net network does not exist${NC}"
+    echo "  Run 'isle agent start' to create the network and start the agent"
+    return 1
   fi
 
   # Extract app name and domain from mesh config
   local app_name=""
   local domain=""
-  local mode="local"  # default mode
+  local mode="local"
 
   if command -v yq &> /dev/null; then
     app_name=$(yq eval '.mesh.name' "$mesh_config" 2>/dev/null)
@@ -174,56 +164,108 @@ register_with_agent() {
   fi
 
   if [ -z "$domain" ] || [ "$domain" = "null" ]; then
-    echo -e "${RED}✗ No domain found in isle-mesh.yml${NC}"
+    echo -e "${RED}No domain found in isle-mesh.yml${NC}"
     return 1
   fi
 
-  # Get project root to find the fragment generator
-  CLI_DIR="$(dirname "$SCRIPT_DIR")"
-  PROJECT_ROOT="$(dirname "$CLI_DIR")"
-  FRAGMENT_GEN="$PROJECT_ROOT/isle-agent/scripts/generate-app-fragment.py"
+  # Registry file location
+  local registry_file="/etc/isle-mesh/agent/registry.json"
 
-  if [ ! -f "$FRAGMENT_GEN" ]; then
-    echo -e "${RED}✗ Fragment generator not found: $FRAGMENT_GEN${NC}"
-    return 1
+  # Create registry if it doesn't exist
+  if [ ! -f "$registry_file" ]; then
+    echo '{"domains": {}, "subdomains": {}, "apps": {}}' | sudo tee "$registry_file" > /dev/null
   fi
 
-  # Ensure Python3 is available
-  if declare -f ensure_dependency &>/dev/null; then
-    if ! ensure_dependency "python3" "generate nginx configuration" "true"; then
-      return 1
-    fi
+  # Build services array from the mesh compose file or isle-mesh.yml
+  local services_json="[]"
+  local compose_to_parse="$mesh_compose"
+  if [ ! -f "$compose_to_parse" ]; then
+    compose_to_parse="$project_dir/docker-compose.yml"
   fi
 
-  # Generate nginx fragment
-  echo "Generating nginx fragment for $app_name..."
-  if python3 "$FRAGMENT_GEN" \
-      --app-name "$app_name" \
-      --compose "$compose_file" \
-      --domain "$domain" \
-      --mode "$mode" \
-      --output "/etc/isle-mesh/agent/configs/$app_name.conf" 2>&1; then
+  if [ -f "$compose_to_parse" ] && command -v yq &> /dev/null; then
+    local services
+    services=$(yq eval '.services | keys | .[]' "$compose_to_parse" 2>/dev/null || echo "")
 
-    echo -e "${GREEN}✓ Fragment generated${NC}"
+    while IFS= read -r service; do
+      [ -z "$service" ] && continue
+      # Skip proxy services
+      if [[ "$service" =~ proxy ]] || [[ "$service" =~ nginx ]] || [[ "$service" =~ traefik ]]; then
+        continue
+      fi
 
-    # Reload isle-agent
-    echo "Reloading isle-agent..."
-    if sudo bash "$SCRIPT_DIR/agent.sh" reload; then
-      echo -e "${GREEN}✓ isle-agent reloaded successfully${NC}"
-      echo ""
-      echo -e "${GREEN}App registered with isle-agent:${NC}"
-      echo "  • App: $app_name"
-      echo "  • Domain: $domain"
-      echo "  • Mode: $mode"
-      return 0
-    else
-      echo -e "${RED}✗ Failed to reload isle-agent${NC}"
-      return 1
-    fi
-  else
-    echo -e "${RED}✗ Failed to generate nginx fragment${NC}"
-    return 1
+      local subdomain
+      subdomain=$(yq eval ".services.$service.labels.\"mesh.subdomain\" // \"$service\"" "$compose_to_parse" 2>/dev/null) || subdomain="$service"
+
+      local port
+      port=$(yq eval ".services.$service.expose[0] // .services.$service.ports[0]" "$compose_to_parse" 2>/dev/null | sed 's/:.*//')
+      if [ -z "$port" ] || [ "$port" = "null" ]; then
+        port="80"
+      fi
+
+      local container_name
+      container_name=$(yq eval ".services.$service.container_name // \"\"" "$compose_to_parse" 2>/dev/null)
+      if [ -z "$container_name" ] || [ "$container_name" = "null" ]; then
+        container_name="${app_name}-${service}-1"
+      fi
+
+      services_json=$(echo "$services_json" | jq \
+        --arg name "$service" \
+        --arg subdomain "$subdomain" \
+        --arg container "$container_name" \
+        --argjson port "$port" \
+        --arg protocol "http" \
+        '. + [{"name": $name, "subdomain": $subdomain, "container": $container, "port": $port, "protocol": $protocol}]')
+    done <<< "$services"
   fi
+
+  # Write unified registry format
+  local timestamp=$(date -u +"%Y-%m-%dT%H:%M:%S.%6N")
+  local temp_file=$(mktemp)
+
+  # Update domains
+  jq --arg domain "$domain" --arg app "$app_name" \
+    '.domains[$domain] = $app' "$registry_file" > "$temp_file" && sudo mv "$temp_file" "$registry_file"
+
+  # Update subdomains
+  local svc_count
+  svc_count=$(echo "$services_json" | jq 'length')
+  local i=0
+  while [ "$i" -lt "$svc_count" ]; do
+    local sub
+    sub=$(echo "$services_json" | jq -r ".[$i].subdomain")
+    local fqdn="${sub}.${domain}"
+    temp_file=$(mktemp)
+    jq --arg subdomain "$fqdn" --arg app "$app_name" \
+      '.subdomains[$subdomain] = $app' "$registry_file" > "$temp_file" && sudo mv "$temp_file" "$registry_file"
+    i=$((i + 1))
+  done
+
+  # Update apps section with unified format
+  temp_file=$(mktemp)
+  jq --arg app "$app_name" \
+     --arg domain "$domain" \
+     --argjson services "$services_json" \
+     --arg mode "$mode" \
+     --arg timestamp "$timestamp" \
+    '.apps[$app] = {
+      "domain": $domain,
+      "services": $services,
+      "modes": [$mode],
+      "updated_at": $timestamp
+    }' "$registry_file" > "$temp_file" && sudo mv "$temp_file" "$registry_file"
+
+  # Touch the file to ensure mtime change triggers the registry watcher
+  sudo touch "$registry_file"
+
+  echo -e "${GREEN}✓ App registered with isle-agent:${NC}"
+  echo "  App: $app_name"
+  echo "  Domain: $domain"
+  echo "  Services: $svc_count"
+  echo "  Mode: $mode"
+  echo ""
+  echo "  The registry watcher will automatically regenerate nginx configs"
+  return 0
 }
 
 # Get current project directory
@@ -468,6 +510,13 @@ mesh:
 network:
   name: ${project_name}_meshnet
   driver: bridge
+
+ssl:
+  enabled: true
+  cert_dir: ./ssl/certs
+  key_dir: ./ssl/keys
+  base_cert: $project_name.crt
+  base_key: $project_name.key
 
 services: {}
 EOF

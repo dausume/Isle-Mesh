@@ -47,6 +47,13 @@ CERT_AND_KEY_NAME="${BASE_CERT%.crt}"
 # Extract subdomains from isle-mesh.yml services
 SUBDOMAINS=$(yq eval '.services | keys | .[]' "$ISLE_MESH_FILE" | tr '\n' ' ' | sed 's/ $//')
 
+# Set ENABLE_SUBDOMAINS based on whether we have subdomains
+if [ -z "$SUBDOMAINS" ] || [ "$SUBDOMAINS" = "{}" ]; then
+  ENABLE_SUBDOMAINS=false
+else
+  ENABLE_SUBDOMAINS=true
+fi
+
 # Create config directory if it doesn't exist
 mkdir -p "$(dirname "$OUTPUT_FILE")"
 
@@ -78,7 +85,7 @@ CERT_COMMON_NAME=$DOMAIN
 CERT_DAYS=365
 
 # Enable subdomain support
-ENABLE_SUBDOMAINS=true
+ENABLE_SUBDOMAINS=$ENABLE_SUBDOMAINS
 
 # Subdomains (extracted from isle-mesh.yml)
 SUBDOMAINS="$SUBDOMAINS"

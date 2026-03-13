@@ -32,12 +32,7 @@ VLAN_ID="${VLAN_ID:-10}"
 ROUTER_IP="${ROUTER_IP:-192.168.1.1}"
 ROUTER_USER="${ROUTER_USER:-root}"
 
-# Use dedicated SSH key if available, otherwise fall back to default
-if [ -n "${ISLE_SSH_OPTS:-}" ]; then
-    SSH_OPTS="$ISLE_SSH_OPTS"
-else
-    SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-fi
+# SSH auth handled by router_ssh/router_scp from 15-ssh-key.sh
 
 # Parse arguments
 parse_args() {
@@ -280,31 +275,31 @@ deploy_to_router() {
     sed -i "s/\$ISLE_NAME/$ISLE_NAME/g" "$tmpdir/isle-join-protocol.sh"
     sed -i "s/\$VLAN_ID/$VLAN_ID/g" "$tmpdir/isle-join-protocol.sh"
 
-    # Copy files to router
+    # Copy files to router using centralized helpers (key + sshpass fallback + -O flag)
     log_info "Copying files to router..."
 
-    sudo scp $SSH_OPTS "$tmpdir/isle-join-protocol.init" \
-        "${ROUTER_USER}@${ROUTER_IP}:/etc/init.d/isle-join-protocol" &>/dev/null
+    router_scp "/etc/init.d/isle-join-protocol" "$tmpdir/isle-join-protocol.init" || {
+        log_error "Failed to copy init script to router"
+        rm -rf "$tmpdir"
+        return 1
+    }
 
-    sudo scp $SSH_OPTS "$tmpdir/isle-join-protocol.sh" \
-        "${ROUTER_USER}@${ROUTER_IP}:/usr/bin/isle-join-protocol" &>/dev/null
+    router_scp "/usr/bin/isle-join-protocol" "$tmpdir/isle-join-protocol.sh" || {
+        log_error "Failed to copy daemon script to router"
+        rm -rf "$tmpdir"
+        return 1
+    }
 
     # Set permissions and enable
     log_info "Configuring service on router..."
-    sudo ssh $SSH_OPTS "${ROUTER_USER}@${ROUTER_IP}" << REMOTE_EOF
-chmod +x /etc/init.d/isle-join-protocol
-chmod +x /usr/bin/isle-join-protocol
-
-# Enable and start the service
-/etc/init.d/isle-join-protocol enable
-/etc/init.d/isle-join-protocol start
-
-# Ensure dnsmasq is configured to read from dnsmasq.d
-if ! grep -q "conf-dir=/etc/dnsmasq.d" /etc/dnsmasq.conf 2>/dev/null; then
-    echo "conf-dir=/etc/dnsmasq.d" >> /etc/dnsmasq.conf
-    /etc/init.d/dnsmasq restart
-fi
-REMOTE_EOF
+    router_ssh "chmod +x /etc/init.d/isle-join-protocol && \
+chmod +x /usr/bin/isle-join-protocol && \
+/etc/init.d/isle-join-protocol enable && \
+/etc/init.d/isle-join-protocol start && \
+if ! grep -q 'conf-dir=/etc/dnsmasq.d' /etc/dnsmasq.conf 2>/dev/null; then \
+    echo 'conf-dir=/etc/dnsmasq.d' >> /etc/dnsmasq.conf && \
+    /etc/init.d/dnsmasq restart; \
+fi"
 
     # Cleanup
     rm -rf "$tmpdir"
@@ -317,8 +312,7 @@ verify_service() {
     log_step "Verifying Join Protocol Service"
 
     local status
-    status=$(sudo ssh $SSH_OPTS "${ROUTER_USER}@${ROUTER_IP}" \
-        "/etc/init.d/isle-join-protocol status" 2>/dev/null || echo "stopped")
+    status=$(router_ssh "/etc/init.d/isle-join-protocol status" 2>/dev/null || echo "stopped")
 
     if echo "$status" | grep -q "running"; then
         log_success "Service is running"

@@ -66,10 +66,11 @@ EOF
   run_bridge_setup
 
   download_openwrt_packages
-  copy_packages_to_router
 
-  # Install SSH key before package installation
+  # Install SSH key BEFORE copying packages (key needed for SCP)
   install_ssh_key_to_router
+
+  copy_packages_to_router
 
   install_and_configure_packages
   show_next_steps

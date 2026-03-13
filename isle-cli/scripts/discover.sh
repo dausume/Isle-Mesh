@@ -121,8 +121,8 @@ discover_docker_labels() {
     fi
 
     if ! docker ps &> /dev/null; then
-        print_error "Cannot access Docker daemon"
-        return 1
+        print_warning "Cannot access Docker daemon - some features may not work"
+        print_info "You may need sudo or docker group membership"
     fi
 
     local found=0

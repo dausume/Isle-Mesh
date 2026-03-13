@@ -12,7 +12,44 @@ source "$SCRIPT_DIR/../lib/template-engine.sh"
 # Configuration
 OPENWRT_IP="${OPENWRT_IP:-192.168.1.1}"
 OPENWRT_USER="${OPENWRT_USER:-root}"
-SSH_OPTS="-o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+
+# Build SSH_OPTS with key if available
+ISLE_SSH_KEY_PATH="${ISLE_SSH_KEY:-/etc/isle-mesh/router/ssh/isle_router_key}"
+if [[ -f "$ISLE_SSH_KEY_PATH" ]]; then
+  SSH_OPTS="-i $ISLE_SSH_KEY_PATH -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+else
+  SSH_OPTS="-o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+fi
+
+# Load cached password for sshpass fallback
+_CACHED_PASS=""
+_PASS_FILE="/etc/isle-mesh/router/ssh/.cached_password"
+if [[ -f "$_PASS_FILE" ]]; then
+  _CACHED_PASS="$(cat "$_PASS_FILE" 2>/dev/null)"
+fi
+
+_ssh_router() {
+  if ssh -o BatchMode=yes $SSH_OPTS "${OPENWRT_USER}@${OPENWRT_IP}" "$@" 2>/dev/null; then
+    return 0
+  fi
+  if [[ -n "$_CACHED_PASS" ]] && command -v sshpass >/dev/null 2>&1; then
+    sshpass -p "$_CACHED_PASS" ssh $SSH_OPTS "${OPENWRT_USER}@${OPENWRT_IP}" "$@"
+    return $?
+  fi
+  ssh $SSH_OPTS "${OPENWRT_USER}@${OPENWRT_IP}" "$@"
+}
+
+_scp_router() {
+  local src="$1" dst="$2"
+  if scp -O -o BatchMode=yes $SSH_OPTS "$src" "${OPENWRT_USER}@${OPENWRT_IP}:${dst}" 2>/dev/null; then
+    return 0
+  fi
+  if [[ -n "$_CACHED_PASS" ]] && command -v sshpass >/dev/null 2>&1; then
+    sshpass -p "$_CACHED_PASS" scp -O $SSH_OPTS "$src" "${OPENWRT_USER}@${OPENWRT_IP}:${dst}"
+    return $?
+  fi
+  scp -O $SSH_OPTS "$src" "${OPENWRT_USER}@${OPENWRT_IP}:${dst}"
+}
 
 # Isle configuration (should match router config)
 ISLE_NAME="${ISLE_NAME:-my-isle}"
@@ -89,10 +126,9 @@ parse_args() {
 
 check_ssh_connectivity() {
     log_info "Testing SSH connectivity to ${OPENWRT_USER}@${OPENWRT_IP}..."
-    if ! ssh $SSH_OPTS "${OPENWRT_USER}@${OPENWRT_IP}" "echo SSHOK" >/dev/null 2>&1; then
+    if ! _ssh_router "echo SSHOK" >/dev/null 2>&1; then
         log_error "Cannot connect to OpenWRT via SSH"
         log_info "Ensure the router is running and accessible"
-        log_info "You may need to set root password or configure SSH keys"
         return 1
     fi
     log_success "SSH connectivity OK"
@@ -127,32 +163,25 @@ deploy_discovery_beacon() {
 
     # Copy beacon script to OpenWRT
     log_info "Copying beacon script to OpenWRT..."
-    scp $SSH_OPTS "$tmp_dir/isle-discovery-beacon.sh" \
-        "${OPENWRT_USER}@${OPENWRT_IP}:/tmp/" || {
+    _scp_router "$tmp_dir/isle-discovery-beacon.sh" "/tmp/" || {
         log_error "Failed to copy beacon script"
         return 1
     }
 
     # Install beacon script
     log_info "Installing beacon on OpenWRT..."
-    ssh $SSH_OPTS "${OPENWRT_USER}@${OPENWRT_IP}" << 'INSTALL_EOF'
-        mv /tmp/isle-discovery-beacon.sh /usr/bin/isle-discovery-beacon
-        chmod +x /usr/bin/isle-discovery-beacon
-        echo "Beacon installed: /usr/bin/isle-discovery-beacon"
-INSTALL_EOF
+    _ssh_router "mv /tmp/isle-discovery-beacon.sh /usr/bin/isle-discovery-beacon && \
+        chmod +x /usr/bin/isle-discovery-beacon && \
+        echo 'Beacon installed: /usr/bin/isle-discovery-beacon'"
 
     # Copy and run init script
     log_info "Setting up discovery service..."
-    scp $SSH_OPTS "$tmp_dir/isle-discovery-init.sh" \
-        "${OPENWRT_USER}@${OPENWRT_IP}:/tmp/" || {
+    _scp_router "$tmp_dir/isle-discovery-init.sh" "/tmp/" || {
         log_error "Failed to copy init script"
         return 1
     }
 
-    ssh $SSH_OPTS "${OPENWRT_USER}@${OPENWRT_IP}" << 'SERVICE_EOF'
-        sh /tmp/isle-discovery-init.sh
-        rm /tmp/isle-discovery-init.sh
-SERVICE_EOF
+    _ssh_router "sh /tmp/isle-discovery-init.sh && rm /tmp/isle-discovery-init.sh"
 
     log_success "Discovery beacon deployed and started"
 }

@@ -10,8 +10,6 @@ copy_packages_to_router() {
   local packages_dir="${script_dir}/../packages"
 
   # Router connection details
-  local router_ip="${ROUTER_IP:-192.168.1.1}"
-  local router_user="${ROUTER_USER:-root}"
   local router_dest="${ROUTER_PACKAGE_DIR:-/tmp/packages}"
 
   # Check if packages directory exists and has files
@@ -28,15 +26,13 @@ copy_packages_to_router() {
   fi
 
   log_info "Found $pkg_count package file(s) to copy"
-  log_info "Router IP: $router_ip"
   log_info "Destination: $router_dest"
 
-  # Wait for SSH to be available (with timeout)
+  # Wait for SSH to be available
   log_info "Waiting for SSH connection to router..."
-  local max_attempts=30
+  local max_attempts=15
   local attempt=0
-  while ! ssh -o ConnectTimeout=2 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            "${router_user}@${router_ip}" "exit" 2>/dev/null; do
+  while ! router_ssh_test; do
     attempt=$((attempt + 1))
     if [[ $attempt -ge $max_attempts ]]; then
       log_error "Failed to connect to router via SSH after $max_attempts attempts"
@@ -48,21 +44,19 @@ copy_packages_to_router() {
 
   # Create destination directory on router
   log_info "Creating destination directory on router"
-  if ! ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-          "${router_user}@${router_ip}" "mkdir -p ${router_dest}" 2>/dev/null; then
+  if ! router_ssh "mkdir -p ${router_dest}"; then
     log_error "Failed to create directory on router"
     exit 1
   fi
 
-  # Copy packages using SCP
+  # Copy packages using SCP (glob expanded by shell before passing to function)
   log_info "Copying packages to router..."
-  if scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-         "$packages_dir"/*.ipk "${router_user}@${router_ip}:${router_dest}/" 2>/dev/null; then
+  if router_scp "${router_dest}/" "$packages_dir"/*.ipk; then
     log_success "Successfully copied $pkg_count package(s) to router"
 
     # Verify files on router
-    local remote_count=$(ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-                            "${router_user}@${router_ip}" "ls -1 ${router_dest}/*.ipk 2>/dev/null | wc -l" 2>/dev/null)
+    local remote_count
+    remote_count=$(router_ssh "ls -1 ${router_dest}/*.ipk 2>/dev/null | wc -l") || remote_count=0
     log_info "Verified $remote_count file(s) on router"
   else
     log_error "Failed to copy packages to router"

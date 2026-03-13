@@ -1,0 +1,44 @@
+{
+  "domains": {
+    "myapp.local": "myapp",
+    "webapp.local": "webapp"
+  },
+  "subdomains": {
+    "api.myapp.local": "myapp",
+    "web.myapp.local": "myapp",
+    "db.myapp.local": "myapp",
+    "frontend.webapp.local": "webapp",
+    "backend.webapp.local": "webapp"
+  },
+  "apps": {
+    "health": {
+      "domain": "health.local",
+      "services": [],
+      "modes": [],
+      "updated_at": ""
+    },
+    "myapp": {
+      "domain": "myapp.local",
+      "services": [
+        { "name": "api", "subdomain": "api", "container": "myapp-api-1", "port": 3000, "protocol": "http" },
+        { "name": "web", "subdomain": "web", "container": "myapp-web-1", "port": 8080, "protocol": "http" },
+        { "name": "db", "subdomain": "db", "container": "myapp-db-1", "port": 5432, "protocol": "http" }
+      ],
+      "modes": [
+        "local"
+      ],
+      "updated_at": "2025-12-19T10:30:45.123456"
+    },
+    "webapp": {
+      "domain": "webapp.local",
+      "services": [
+        { "name": "frontend", "subdomain": "frontend", "container": "webapp-frontend-1", "port": 3000, "protocol": "http" },
+        { "name": "backend", "subdomain": "backend", "container": "webapp-backend-1", "port": 8000, "protocol": "http" }
+      ],
+      "modes": [
+        "isle"
+      ],
+      "updated_at": "2025-12-19T11:15:22.789012"
+    }
+  }
+}

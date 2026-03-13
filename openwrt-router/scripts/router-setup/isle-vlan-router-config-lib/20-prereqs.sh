@@ -12,11 +12,18 @@ check_prerequisites_or_prompt(){
   fi
 
   info "Testing SSH to ${OPENWRT_USER}@${OPENWRT_IP}…"
-  if ! ssh $SSH_OPTS "${OPENWRT_USER}@${OPENWRT_IP}" "echo SSHOK" >/dev/null 2>&1; then
-    warn "SSH connection test failed (this is normal for password-protected routers)"
-    info "Attempting to continue with configured authentication..."
-  else
+  # Try key-based first (BatchMode prevents password prompt)
+  if ssh -o BatchMode=yes $SSH_OPTS "${OPENWRT_USER}@${OPENWRT_IP}" "echo SSHOK" >/dev/null 2>&1; then
     ok "SSH connectivity OK"
+  elif [[ -n "${OPENWRT_PASSWORD:-}" ]] && [[ "$HAS_SSHPASS" == "true" ]]; then
+    if sshpass -p "$OPENWRT_PASSWORD" ssh $SSH_OPTS "${OPENWRT_USER}@${OPENWRT_IP}" "echo SSHOK" >/dev/null 2>&1; then
+      ok "SSH connectivity OK"
+    else
+      warn "SSH connection test failed"
+      info "Attempting to continue with configured authentication..."
+    fi
+  else
+    warn "SSH key auth failed, will try password auth in next step..."
   fi
 
   # Optional config file check (only if CONFIG_FILE is defined)

@@ -12,7 +12,53 @@ source "$SCRIPT_DIR/../lib/template-engine.sh"
 # Configuration
 OPENWRT_IP="${OPENWRT_IP:-192.168.1.1}"
 OPENWRT_USER="${OPENWRT_USER:-root}"
-SSH_OPTS="-o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+
+# Source SSH key library for cached password and key-based auth
+if [[ -f "$SCRIPT_DIR/router-init-lib/15-ssh-key.sh" ]]; then
+  # Provide stub log functions if not already defined (15-ssh-key.sh may use them)
+  source "$SCRIPT_DIR/router-init-lib/00-log.sh" 2>/dev/null || true
+  source "$SCRIPT_DIR/router-init-lib/15-ssh-key.sh"
+fi
+
+# Build SSH_OPTS with key if available
+ISLE_SSH_KEY_PATH="${ISLE_SSH_KEY:-/etc/isle-mesh/router/ssh/isle_router_key}"
+if [[ -f "$ISLE_SSH_KEY_PATH" ]]; then
+  SSH_OPTS="-i $ISLE_SSH_KEY_PATH -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+else
+  SSH_OPTS="-o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+fi
+
+# Load cached password for sshpass fallback
+_CACHED_PASS=""
+_PASS_FILE="/etc/isle-mesh/router/ssh/.cached_password"
+if [[ -f "$_PASS_FILE" ]]; then
+  _CACHED_PASS="$(cat "$_PASS_FILE" 2>/dev/null)"
+fi
+
+# Wrapper: ssh with key-first, sshpass fallback
+_ssh_router() {
+  if ssh -o BatchMode=yes $SSH_OPTS "${OPENWRT_USER}@${OPENWRT_IP}" "$@" 2>/dev/null; then
+    return 0
+  fi
+  if [[ -n "$_CACHED_PASS" ]] && command -v sshpass >/dev/null 2>&1; then
+    sshpass -p "$_CACHED_PASS" ssh $SSH_OPTS "${OPENWRT_USER}@${OPENWRT_IP}" "$@"
+    return $?
+  fi
+  ssh $SSH_OPTS "${OPENWRT_USER}@${OPENWRT_IP}" "$@"
+}
+
+# Wrapper: scp with -O flag (Dropbear lacks sftp-server) and sshpass fallback
+_scp_router() {
+  local src="$1" dst="$2"
+  if scp -O -o BatchMode=yes $SSH_OPTS "$src" "${OPENWRT_USER}@${OPENWRT_IP}:${dst}" 2>/dev/null; then
+    return 0
+  fi
+  if [[ -n "$_CACHED_PASS" ]] && command -v sshpass >/dev/null 2>&1; then
+    sshpass -p "$_CACHED_PASS" scp -O $SSH_OPTS "$src" "${OPENWRT_USER}@${OPENWRT_IP}:${dst}"
+    return $?
+  fi
+  scp -O $SSH_OPTS "$src" "${OPENWRT_USER}@${OPENWRT_IP}:${dst}"
+}
 
 # Isle configuration
 ISLE_NAME="${ISLE_NAME:-my-isle}"
@@ -95,7 +141,7 @@ parse_args() {
 
 check_ssh_connectivity() {
     log_info "Testing SSH connectivity to ${OPENWRT_USER}@${OPENWRT_IP}..."
-    if ! ssh $SSH_OPTS "${OPENWRT_USER}@${OPENWRT_IP}" "echo SSHOK" >/dev/null 2>&1; then
+    if ! _ssh_router "echo SSHOK" >/dev/null 2>&1; then
         log_error "Cannot connect to OpenWRT via SSH"
         return 1
     fi
@@ -123,19 +169,14 @@ configure_dhcp() {
 
     # Copy to OpenWRT
     log_info "Copying DHCP configuration to OpenWRT..."
-    scp $SSH_OPTS "$tmp_dir/dhcp-config.sh" \
-        "${OPENWRT_USER}@${OPENWRT_IP}:/tmp/" || {
+    _scp_router "$tmp_dir/dhcp-config.sh" "/tmp/" || {
         log_error "Failed to copy DHCP config"
         return 1
     }
 
     # Execute on OpenWRT
     log_info "Applying DHCP configuration..."
-    ssh $SSH_OPTS "${OPENWRT_USER}@${OPENWRT_IP}" << 'DHCP_EOF'
-        chmod +x /tmp/dhcp-config.sh
-        /tmp/dhcp-config.sh
-        rm /tmp/dhcp-config.sh
-DHCP_EOF
+    _ssh_router "chmod +x /tmp/dhcp-config.sh && /tmp/dhcp-config.sh && rm /tmp/dhcp-config.sh"
 
     log_success "DHCP configuration applied"
 }

@@ -68,22 +68,6 @@ services:
       role: "reverse-proxy"
       vlan: "{{ vlan_id }}"
 
-  {% if isle_agent_mdns_enabled %}
-  isle-agent-mdns:
-    image: isle-agent-mdns:latest
-    container_name: {{ app_name }}-mdns-receiver
-    restart: unless-stopped
-    ports:
-      - "8888:8888"  # API for receiving mDNS data from host
-    networks:
-      - {{ app_name }}_net
-    labels:
-      app.type: "isle"
-      app.name: "{{ app_name }}"
-      service.name: "mdns-receiver"
-      role: "mdns-forwarder"
-  {% endif %}
-
 networks:
   {{ app_name }}_net:
     driver: bridge

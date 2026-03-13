@@ -1,73 +1,74 @@
 #!/usr/bin/env bash
 if [[ -n "${_SSH_SH:-}" ]]; then return; fi; _SSH_SH=1
 
-# Global variable to store password (if needed)
-OPENWRT_PASSWORD=""
-
 # Check if sshpass is available
 HAS_SSHPASS=false
 if command -v sshpass >/dev/null 2>&1; then
   HAS_SSHPASS=true
 fi
 
+# Load cached router password from initial setup (if available)
+ISLE_ROUTER_PASS_FILE="${ISLE_ROUTER_PASS_FILE:-/etc/isle-mesh/router/ssh/.cached_password}"
+if [[ -f "$ISLE_ROUTER_PASS_FILE" ]]; then
+  OPENWRT_PASSWORD="$(cat "$ISLE_ROUTER_PASS_FILE" 2>/dev/null)"
+else
+  OPENWRT_PASSWORD=""
+fi
+
 exec_ssh(){
+  # Use cached password via sshpass if available (key is already in SSH_OPTS -i)
   if [[ -n "$OPENWRT_PASSWORD" ]] && [[ "$HAS_SSHPASS" == "true" ]]; then
     sshpass -p "$OPENWRT_PASSWORD" ssh $SSH_OPTS "${OPENWRT_USER}@${OPENWRT_IP}" "$@"
   else
-    ssh $SSH_OPTS "${OPENWRT_USER}@${OPENWRT_IP}" "$@"
+    ssh -o BatchMode=yes $SSH_OPTS "${OPENWRT_USER}@${OPENWRT_IP}" "$@"
   fi
 }
 
 copy_to_openwrt(){
+  # -O: use legacy SCP protocol (OpenWRT Dropbear lacks sftp-server)
   if [[ -n "$OPENWRT_PASSWORD" ]] && [[ "$HAS_SSHPASS" == "true" ]]; then
-    sshpass -p "$OPENWRT_PASSWORD" scp $SSH_OPTS "$1" "${OPENWRT_USER}@${OPENWRT_IP}:$2"
+    sshpass -p "$OPENWRT_PASSWORD" scp -O $SSH_OPTS "$1" "${OPENWRT_USER}@${OPENWRT_IP}:$2"
   else
-    scp $SSH_OPTS "$1" "${OPENWRT_USER}@${OPENWRT_IP}:$2"
+    scp -O -o BatchMode=yes $SSH_OPTS "$1" "${OPENWRT_USER}@${OPENWRT_IP}:$2"
   fi
 }
 
 init_ssh_auth(){
   info "Testing SSH connection to ${OPENWRT_USER}@${OPENWRT_IP}…"
 
-  # First try passwordless SSH
-  if ssh $SSH_OPTS "${OPENWRT_USER}@${OPENWRT_IP}" "echo SSHOK" >/dev/null 2>&1; then
-    ok "SSH connection successful (passwordless auth)"
+  # First try key-based SSH (BatchMode prevents /dev/tty password prompt)
+  if ssh -o BatchMode=yes $SSH_OPTS "${OPENWRT_USER}@${OPENWRT_IP}" "echo SSHOK" >/dev/null 2>&1; then
+    ok "SSH connection successful (key-based auth)"
     return 0
   fi
 
-  # Passwordless failed - check if sshpass is available
+  # Try cached password (from router-init setup)
+  if [[ -n "$OPENWRT_PASSWORD" ]] && [[ "$HAS_SSHPASS" == "true" ]]; then
+    if sshpass -p "$OPENWRT_PASSWORD" ssh $SSH_OPTS "${OPENWRT_USER}@${OPENWRT_IP}" "echo SSHOK" >/dev/null 2>&1; then
+      ok "SSH connection successful (cached password)"
+      return 0
+    fi
+  fi
+
+  # Passwordless and cached both failed - need to prompt
   if [[ "$HAS_SSHPASS" != "true" ]]; then
     warn "SSH requires password but 'sshpass' is not installed"
-    warn "Install it with: sudo apt-get install sshpass"
-    warn "Or use passwordless SSH by connecting manually and pressing Enter at password prompt"
+    warn "Install with: sudo apt-get install sshpass"
     return 1
   fi
 
-  # Prompt for password
-  warn "Passwordless SSH failed - password required"
-  echo -n "Enter password for root@${OPENWRT_IP} (or press Enter if no password): "
+  warn "SSH key/cached password not working — password required"
+  echo -n "Enter password for root@${OPENWRT_IP}: "
   read -s OPENWRT_PASSWORD
   echo ""
 
-  # Test with password
-  if [[ -n "$OPENWRT_PASSWORD" ]]; then
-    if sshpass -p "$OPENWRT_PASSWORD" ssh $SSH_OPTS "${OPENWRT_USER}@${OPENWRT_IP}" "echo SSHOK" >/dev/null 2>&1; then
-      ok "SSH connection successful (password auth)"
-      return 0
-    else
-      err "SSH authentication failed with provided password"
-      OPENWRT_PASSWORD=""
-      return 1
-    fi
+  if sshpass -p "$OPENWRT_PASSWORD" ssh $SSH_OPTS "${OPENWRT_USER}@${OPENWRT_IP}" "echo SSHOK" >/dev/null 2>&1; then
+    ok "SSH connection successful (password auth)"
+    return 0
   else
-    # Empty password entered - try one more time
-    if ssh $SSH_OPTS "${OPENWRT_USER}@${OPENWRT_IP}" "echo SSHOK" >/dev/null 2>&1; then
-      ok "SSH connection successful (no password)"
-      return 0
-    else
-      err "SSH connection failed"
-      return 1
-    fi
+    err "SSH authentication failed with provided password"
+    OPENWRT_PASSWORD=""
+    return 1
   fi
 }
 

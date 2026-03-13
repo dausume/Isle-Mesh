@@ -1,12 +1,14 @@
 [Unit]
-Description=Isle Host Agent - mDNS Broadcaster/Relay for Agent
-After=network.target avahi-daemon.service mesh-mdns.service
+Description=Isle Host Agent - Consolidated mDNS Broadcaster, Registry Manager & Auto-Sync
+After=network.target avahi-daemon.service mesh-mdns.service docker.service
 Requires=avahi-daemon.service
-# Note: mesh-mdns.service is optional - only needed if not using isle-host-agent's broadcast mode
+Wants=mesh-mdns.service
+# Note: This service integrates mDNS broadcasting, registry updates, and automatic sync
 
 [Service]
 Type=simple
 EnvironmentFile=/etc/isle-mesh/agent/host-agent.conf
+ExecStartPre=/bin/mkdir -p /var/log/isle-mesh
 ExecStart=/usr/local/bin/isle-mesh/isle-host-agent-relay.sh
 Restart=always
 RestartSec=5
@@ -15,7 +17,8 @@ Nice=10
 # Security hardening
 ProtectSystem=strict
 ProtectHome=yes
-ReadWritePaths=/var/log/isle-mesh
+LogsDirectory=isle-mesh
+ReadWritePaths=/var/log/isle-mesh /etc/isle-mesh /usr/local/etc
 PrivateTmp=yes
 NoNewPrivileges=yes
 

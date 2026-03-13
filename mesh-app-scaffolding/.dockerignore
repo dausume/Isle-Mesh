@@ -1,0 +1,29 @@
+# .dockerignore for mesh-proxy builder
+
+# Output directory (will be created in container)
+output/
+
+# Git files
+.git/
+.gitignore
+
+# Documentation that's not needed in container
+examples/
+*.md
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -24,11 +24,11 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 def parse_docker_compose(compose_file: Path, script_dir: Path) -> dict:
     """
-    Parse docker-compose file using the mesh-proxy parse script.
+    Parse docker-compose file using the mesh-app-scaffolding parse script.
     Returns service information as a dictionary.
     """
-    # Use the parse script from mesh-proxy
-    parse_script = script_dir.parent.parent / "mesh-proxy" / "scripts" / "parse-docker-compose.sh"
+    # Use the parse script from mesh-app-scaffolding
+    parse_script = script_dir.parent.parent / "mesh-app-scaffolding" / "scripts" / "parse-docker-compose.sh"
 
     if not parse_script.exists():
         print(f"Error: Parse script not found: {parse_script}", file=sys.stderr)
@@ -111,11 +111,22 @@ def update_registry(app_name: str, domain: str, services: list, registry_file: P
     # Preserve existing modes if app already exists, otherwise set empty
     existing_modes = registry.get("apps", {}).get(app_name, {}).get("modes", [])
 
+    # Build services array with container-level detail
+    services_array = []
+    for svc in services:
+        container_name = svc.get('container_name', f"{app_name}-{svc['name']}-1")
+        services_array.append({
+            "name": svc['name'],
+            "subdomain": svc['subdomain'],
+            "container": container_name,
+            "port": svc.get('port', 80),
+            "protocol": svc.get('protocol', 'http')
+        })
+
     registry.setdefault("apps", {})[app_name] = {
         "domain": domain,
-        "services": len(services),
-        "subdomains": [f"{svc['subdomain']}.{domain}" for svc in services],
-        "modes": existing_modes if existing_modes else [],  # Will be set by app configuration
+        "services": services_array,
+        "modes": existing_modes if existing_modes else [],
         "updated_at": datetime.now().isoformat()
     }
 

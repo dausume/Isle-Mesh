@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Conflict Checker for OpenWRT + localhost-mdns + isle-agent-mdns
+# Conflict Checker for OpenWRT + localhost-mdns + isle-agent
 # Verifies that all components can run together without conflicts
 #
 
@@ -70,7 +70,7 @@ check_port 80 "localhost-mdns proxy HTTP"
 check_port 443 "localhost-mdns proxy HTTPS"
 check_port 8080 "localhost-mdns frontend (optional)"
 check_port 8100 "localhost-mdns backend (optional)"
-check_port 8888 "isle-agent-mdns API"
+check_port 8888 "isle-agent API (legacy)"
 echo ""
 
 echo -e "${BLUE}[2] Checking Network Interfaces${NC}"
@@ -87,10 +87,10 @@ else
     echo -e "${BLUE}ℹ Docker network 'meshnet' will be created${NC}"
 fi
 
-if docker network ls --format "{{.Name}}" 2>/dev/null | grep -q "^isle-mdns-net$"; then
-    echo -e "${GREEN}✓ Docker network 'isle-mdns-net' exists${NC} (isle-agent-mdns)"
+if docker network ls --format "{{.Name}}" 2>/dev/null | grep -q "^isle-agent-net$"; then
+    echo -e "${GREEN}✓ Docker network 'isle-agent-net' exists${NC} (isle-agent)"
 else
-    echo -e "${BLUE}ℹ Docker network 'isle-mdns-net' will be created${NC}"
+    echo -e "${BLUE}ℹ Docker network 'isle-agent-net' will be created${NC}"
 fi
 echo ""
 
@@ -120,13 +120,13 @@ else
     echo -e "${BLUE}ℹ localhost-mdns not started yet${NC}"
 fi
 
-# Check isle-agent-mdns
-if docker ps --format "{{.Names}}" 2>/dev/null | grep -q "isle-agent-mdns"; then
-    echo -e "${GREEN}✓ isle-agent-mdns is running${NC}"
-elif docker ps -a --format "{{.Names}}" 2>/dev/null | grep -q "isle-agent-mdns"; then
-    echo -e "${YELLOW}⚠ isle-agent-mdns exists but is not running${NC}"
+# Check isle-agent (vlan-agent)
+if docker ps --format "{{.Names}}" 2>/dev/null | grep -q "isle-vlan-agent"; then
+    echo -e "${GREEN}✓ isle-vlan-agent is running${NC}"
+elif docker ps -a --format "{{.Names}}" 2>/dev/null | grep -q "isle-vlan-agent"; then
+    echo -e "${YELLOW}⚠ isle-vlan-agent exists but is not running${NC}"
 else
-    echo -e "${BLUE}ℹ isle-agent-mdns not started yet${NC}"
+    echo -e "${BLUE}ℹ isle-vlan-agent not started yet${NC}"
 fi
 echo ""
 

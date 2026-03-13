@@ -206,14 +206,18 @@ case "$ACTION" in
       exit 1
     fi
 
-    bash "$SSL_DIR/generate_mesh_ssl.sh" "$SSL_ENV_FILE" "$MESH_DIR" "$SSL_DIR"
-
-    echo ""
-    echo "✓ SSL certificates generated successfully!"
-    echo ""
-    echo "Certificates location:"
-    echo "  Certs: $MESH_DIR/ssl/certs/"
-    echo "  Keys:  $MESH_DIR/ssl/keys/"
+    if bash "$SSL_DIR/generate_mesh_ssl.sh" "$SSL_ENV_FILE" "$MESH_DIR" "$SSL_DIR" 2>&1; then
+      echo ""
+      echo "✓ SSL certificates ready!"
+      echo ""
+      echo "Certificates location:"
+      echo "  Certs: $MESH_DIR/ssl/certs/"
+      echo "  Keys:  $MESH_DIR/ssl/keys/"
+    else
+      echo ""
+      echo "✗ SSL certificate generation failed"
+      exit 1
+    fi
     ;;
 
   # Create ssl.env.conf from docker-compose.mesh-app.yml and isle-mesh.yml

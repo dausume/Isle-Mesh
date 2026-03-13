@@ -1,0 +1,163 @@
+# Isle-Mesh .gitignore
+
+# ============================================================
+# Generated SSL Certificates and Keys (SECURITY SENSITIVE)
+# ============================================================
+ssl/certs/*.crt
+ssl/certs/*.pem
+ssl/keys/*.key
+ssl/keys/*.pem
+*.key
+*.crt
+*.pem
+
+# Keep example/sample files
+!ssl/certs/.gitkeep
+!ssl/keys/.gitkeep
+!**/*.example.crt
+!**/*.sample.crt
+
+# ============================================================
+# Runtime Configuration and Registry Files
+# ============================================================
+# Agent registry (runtime state)
+isle-agent/registry.json
+/etc/isle-mesh/agent/registry.json
+
+# Runtime config files
+setup.yml
+isle-mesh.yml
+docker-compose.mesh-app.yml
+
+# Keep templates/samples
+!setup.yml.example
+!isle-mesh.yml.template
+!docker-compose.mesh-app.yml.template
+!**/registry.sample.json
+
+# ============================================================
+# Generated Nginx Configurations
+# ============================================================
+# Agent-generated configs
+isle-agent/configs/*.conf
+/etc/isle-mesh/agent/configs/*.conf
+
+# Keep templates
+!isle-agent/configs/.gitkeep
+!isle-agent/segments/**/*.conf.j2
+
+# Mesh-proxy generated configs
+mesh-app-scaffolding/output/*.conf
+
+# ============================================================
+# Temporary and Working Files
+# ============================================================
+config/
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# ============================================================
+# Logs
+# ============================================================
+*.log
+logs/
+isle-agent/logs/
+/var/log/isle-mesh/
+
+# ============================================================
+# Docker & Container Runtime
+# ============================================================
+# Docker volumes (persistent data)
+**/volumes/
+**/data/
+
+# Docker build cache
+.docker/
+
+# ============================================================
+# Python
+# ============================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+env/
+.venv
+
+# ============================================================
+# Node.js (isle-cli)
+# ============================================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+
+# ============================================================
+# IDE and Editor Files
+# ============================================================
+.vscode/
+.idea/
+*.sublime-*
+.DS_Store
+
+# ============================================================
+# OS-specific
+# ============================================================
+Thumbs.db
+.DS_Store
+*.bak
+
+# ============================================================
+# Test and Development Files
+# ============================================================
+test-mesh-apps/*/ssl/
+test-mesh-apps/*/config/
+test-mesh-apps/*/.env
+
+# Keep structure
+!test-mesh-apps/**/.gitkeep
+
+# ============================================================
+# Build Artifacts
+# ============================================================
+*.o
+*.a
+*.so
+dist/
+build/
+
+# ============================================================
+# Environment Variables
+# ============================================================
+.env
+.env.local
+.env.*.local
+*.env
+
+# Keep examples
+!.env.example
+!**/*.env.example
+
+# ============================================================
+# Backup Files
+# ============================================================
+*.backup
+*.old
+*-backup
+*-old
+
+# ============================================================
+# Generated Documentation
+# ============================================================
+# Keep source docs, ignore generated
+docs/_build/
+docs/.doctrees/
+site/

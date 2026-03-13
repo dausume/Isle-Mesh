@@ -1,0 +1,13 @@
+{# Security headers for CORS and CSP #}
+    # Primary url
+    add_header Access-Control-Allow-Origin "https://{{ base_domain }}";
+    add_header Access-Control-Allow-Origin "wss://{{ base_domain }}";
+
+{% for subdomain in subdomains %}
+    # {{ subdomain }} Subdomain URL Origins for https and WebSockets
+    add_header Access-Control-Allow-Origin "https://{{ subdomain }}.{{ base_domain }}";
+    add_header Access-Control-Allow-Origin "wss://{{ subdomain }}.{{ base_domain }}";
+{% endfor %}
+
+    # Content Security Policy
+    add_header Content-Security-Policy "default-src 'self' https://{{ base_domain }} wss://{{ base_domain }}{% for subdomain in subdomains %} https://{{ subdomain }}.{{ base_domain }} wss://{{ subdomain }}.{{ base_domain }}{% endfor %} ; frame-src  'self'  https://{{ base_domain }} wss://{{ base_domain }}{% for subdomain in subdomains %} https://{{ subdomain }}.{{ base_domain }} wss://{{ subdomain }}.{{ base_domain }}{% endfor %} ; child-src 'self' https://{{ base_domain }} wss://{{ base_domain }}{% for subdomain in subdomains %} https://{{ subdomain }}.{{ base_domain }} wss://{{ subdomain }}.{{ base_domain }}{% endfor %} ; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://{{ base_domain }} wss://{{ base_domain }}{% for subdomain in subdomains %} https://{{ subdomain }}.{{ base_domain }} wss://{{ subdomain }}.{{ base_domain }}{% endfor %} ; style-src 'self' 'unsafe-inline' 'unsafe-eval' https://{{ base_domain }} wss://{{ base_domain }}{% for subdomain in subdomains %} https://{{ subdomain }}.{{ base_domain }} wss://{{ subdomain }}.{{ base_domain }}{% endfor %} ; img-src 'self' 'unsafe-inline' 'unsafe-eval' https://{{ base_domain }} wss://{{ base_domain }}{% for subdomain in subdomains %} https://{{ subdomain }}.{{ base_domain }} wss://{{ subdomain }}.{{ base_domain }}{% endfor %} ; font-src 'self' https://{{ base_domain }} wss://{{ base_domain }}{% for subdomain in subdomains %} https://{{ subdomain }}.{{ base_domain }} wss://{{ subdomain }}.{{ base_domain }}{% endfor %} ; object-src 'self' https://{{ base_domain }} wss://{{ base_domain }}{% for subdomain in subdomains %} https://{{ subdomain }}.{{ base_domain }} wss://{{ subdomain }}.{{ base_domain }}{% endfor %} ; connect-src 'self' https://{{ base_domain }} wss://{{ base_domain }}{% for subdomain in subdomains %} https://{{ subdomain }}.{{ base_domain }} wss://{{ subdomain }}.{{ base_domain }}{% endfor %} ; " always;

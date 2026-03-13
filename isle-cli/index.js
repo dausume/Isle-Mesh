@@ -76,41 +76,39 @@ const checkDockerGroupMembership = () => {
     // Check if user is in docker group
     const groups = execSync('groups', { encoding: 'utf8' });
     if (!groups.includes('docker')) {
-      console.error('\x1b[31m%s\x1b[0m', '═══════════════════════════════════════════════════════════════');
-      console.error('\x1b[31m%s\x1b[0m', '  ERROR: Docker Permission Denied');
-      console.error('\x1b[31m%s\x1b[0m', '═══════════════════════════════════════════════════════════════');
-      console.error('\x1b[33m%s\x1b[0m', '\nYour user is not in the "docker" group.');
-      console.error('\x1b[33m%s\x1b[0m', 'This is required to run Docker commands without sudo.\n');
-      console.error('To fix this, run the following commands:\n');
+      console.warn('\x1b[33m%s\x1b[0m', '═══════════════════════════════════════════════════════════════');
+      console.warn('\x1b[33m%s\x1b[0m', '  WARNING: Docker Permission Issue');
+      console.warn('\x1b[33m%s\x1b[0m', '═══════════════════════════════════════════════════════════════');
+      console.warn('\x1b[33m%s\x1b[0m', '\nYour user is not in the "docker" group.');
+      console.warn('\x1b[33m%s\x1b[0m', 'You may need to use sudo for Docker commands.\n');
+      console.warn('To fix this, run the following commands:\n');
       console.log('  \x1b[36m%s\x1b[0m', '1. sudo usermod -aG docker $USER');
       console.log('  \x1b[36m%s\x1b[0m', '2. newgrp docker');
       console.log('  \x1b[36m%s\x1b[0m', '   (or log out and log back in)\n');
-      console.error('\x1b[33m%s\x1b[0m', 'After adding yourself to the docker group, try again.');
-      console.error('\x1b[31m%s\x1b[0m', '═══════════════════════════════════════════════════════════════\n');
-      return false;
+      console.warn('\x1b[33m%s\x1b[0m', '═══════════════════════════════════════════════════════════════\n');
+      return true; // Changed to true - allow execution with warning
     }
 
     // Additional check: verify docker socket is accessible
     try {
       execSync('docker ps > /dev/null 2>&1');
     } catch (err) {
-      console.error('\x1b[31m%s\x1b[0m', '═══════════════════════════════════════════════════════════════');
-      console.error('\x1b[31m%s\x1b[0m', '  WARNING: Cannot access Docker daemon');
-      console.error('\x1b[31m%s\x1b[0m', '═══════════════════════════════════════════════════════════════');
-      console.error('\x1b[33m%s\x1b[0m', '\nYou may be in the docker group, but the group change hasn\'t');
-      console.error('\x1b[33m%s\x1b[0m', 'taken effect yet in this session.\n');
-      console.error('To apply the group change, run:\n');
+      console.warn('\x1b[33m%s\x1b[0m', '═══════════════════════════════════════════════════════════════');
+      console.warn('\x1b[33m%s\x1b[0m', '  WARNING: Cannot access Docker daemon');
+      console.warn('\x1b[33m%s\x1b[0m', '═══════════════════════════════════════════════════════════════');
+      console.warn('\x1b[33m%s\x1b[0m', '\nYou may be in the docker group, but the group change hasn\'t');
+      console.warn('\x1b[33m%s\x1b[0m', 'taken effect yet in this session.\n');
+      console.warn('To apply the group change, run:\n');
       console.log('  \x1b[36m%s\x1b[0m', 'newgrp docker');
       console.log('  \x1b[36m%s\x1b[0m', '(or log out and log back in)\n');
-      console.error('\x1b[33m%s\x1b[0m', 'Then try the command again.');
-      console.error('\x1b[31m%s\x1b[0m', '═══════════════════════════════════════════════════════════════\n');
-      return false;
+      console.warn('\x1b[33m%s\x1b[0m', '═══════════════════════════════════════════════════════════════\n');
+      return true; // Changed to true - allow execution with warning
     }
 
     return true;
   } catch (err) {
-    console.error('Error checking Docker group membership:', err.message);
-    return false;
+    console.warn('Warning: Error checking Docker group membership:', err.message);
+    return true; // Changed to true - allow execution even on check error
   }
 };
 
@@ -148,7 +146,7 @@ if (!validateScripts()) {
 // Check Docker group membership for Docker-related commands
 if (dockerCommands.includes(command)) {
   if (!checkDockerGroupMembership()) {
-    process.exit(1);
+    //process.exit(1);
   }
 }
 
@@ -380,6 +378,7 @@ https://github.com/yourusername/IsleMesh
   case 'config':
   case 'discover':
   case 'ssl':
+  case 'mesh-app-scaffolding':
   case 'mesh-proxy':
   case 'proxy':
   case 'embed-jinja':

@@ -1,0 +1,5 @@
+{# Template for upstream block #}
+upstream {{ service_name }} {
+    server {{ service_name }}:{{ service_port }};
+}
+

@@ -1,6 +1,6 @@
 version: '3.8'
 
-# Isle Agent - Unified nginx proxy container{% if enable_mdns %} with mDNS support{% endif %}
+# Isle Agent - Unified nginx proxy container
 
 # Generated: {{ timestamp }}
 # Mode: {{ mode }}
@@ -8,7 +8,7 @@ version: '3.8'
 
 services:
   isle-agent:
-    image: {% if enable_mdns %}isle-agent-mdns:latest{% else %}nginx:alpine{% endif %}
+    image: nginx:alpine
 
     container_name: isle-agent
     restart: unless-stopped
@@ -16,13 +16,6 @@ services:
     # Virtual MAC address for OpenWRT DHCP isolation
     # Format: 02:00:00:00:VLAN:XX (locally administered)
     mac_address: "02:00:00:00:0a:01"
-
-{% if enable_mdns %}
-    # mDNS mode requires additional capabilities
-    cap_add:
-      - NET_ADMIN
-      - NET_RAW
-{% endif %}
 
     ports:
       - "80:80"
@@ -45,12 +38,6 @@ services:
       # Agent registry
       - /etc/isle-mesh/agent/registry.json:/etc/isle-mesh/agent/registry.json:ro
 
-{% if enable_mdns %}
-      # mDNS-specific volumes
-      - /etc/isle-mesh/agent/mdns/services:/etc/avahi/services
-      - /var/run/dbus:/var/run/dbus
-{% endif %}
-
     networks:
       # Always include internal network
       isle-agent-net:
@@ -64,22 +51,15 @@ services:
 
     labels:
       isle.component: "agent"
-      isle.role: "proxy{% if enable_mdns %}-mdns{% endif %}"
+      isle.role: "proxy"
       isle.version: "1.0.0"
-{% if enable_mdns %}
-      isle.mdns: "enabled"
-{% endif %}
 
     healthcheck:
-{% if enable_mdns %}
-      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://127.0.0.1/health && pgrep avahi-daemon"]
-{% else %}
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1/health"]
-{% endif %}
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: {{ 15 if enable_mdns else 10 }}s
+      start_period: 10s
 
 networks:
   # Internal docker network for app containers to reach agent
