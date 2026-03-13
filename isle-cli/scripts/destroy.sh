@@ -182,15 +182,57 @@ if [ "$APPS_ONLY" = true ]; then
     exit 0
 fi
 
-# Step 2: Destroy agent
+# Step 2: Destroy agent (two-component: vlan-agent container + host-agent service)
 if [ "$KEEP_AGENT" = false ]; then
     echo -e "${BOLD}${CYAN}[2/3] Destroying isle-agent...${NC}"
+    AGENT_FOUND=false
+
+    # Stop and remove vlan-agent container
+    if container_exists "isle-vlan-agent"; then
+        echo -e "${YELLOW}  → Stopping isle-vlan-agent container...${NC}"
+        docker stop isle-vlan-agent 2>/dev/null || true
+        docker rm isle-vlan-agent 2>/dev/null || true
+        AGENT_FOUND=true
+    fi
+
+    # Also check for legacy isle-agent container
     if container_exists "isle-agent"; then
-        echo -e "${YELLOW}  → Agent container found, destroying...${NC}"
-        bash "$PROJECT_ROOT/isle-cli/scripts/agent.sh" destroy --full 2>/dev/null || true
-        echo -e "${GREEN}  ✓ Agent destroyed${NC}"
+        echo -e "${YELLOW}  → Stopping legacy isle-agent container...${NC}"
+        docker stop isle-agent 2>/dev/null || true
+        docker rm isle-agent 2>/dev/null || true
+        AGENT_FOUND=true
+    fi
+
+    # Also remove any leftover isle-agent-sync container
+    if container_exists "isle-agent-sync"; then
+        echo -e "${YELLOW}  → Removing leftover isle-agent-sync container...${NC}"
+        docker stop isle-agent-sync 2>/dev/null || true
+        docker rm isle-agent-sync 2>/dev/null || true
+    fi
+
+    # Stop and remove sample app container
+    if container_exists "isle-sample-app"; then
+        echo -e "${YELLOW}  → Stopping isle-sample-app container...${NC}"
+        docker stop isle-sample-app 2>/dev/null || true
+        docker rm isle-sample-app 2>/dev/null || true
+    fi
+
+    # Stop host-agent systemd service
+    if systemctl is-active --quiet isle-host-agent 2>/dev/null; then
+        echo -e "${YELLOW}  → Stopping isle-host-agent service...${NC}"
+        sudo systemctl stop isle-host-agent 2>/dev/null || true
+        sudo systemctl disable isle-host-agent 2>/dev/null || true
+        AGENT_FOUND=true
+    fi
+
+    # Clean up docker networks
+    docker network rm isle-agent-net 2>/dev/null || true
+    docker network rm isle-sample-app_default 2>/dev/null || true
+
+    if [ "$AGENT_FOUND" = true ]; then
+        echo -e "${GREEN}  ✓ Agent components destroyed${NC}"
     else
-        echo -e "${BLUE}  → No agent container found${NC}"
+        echo -e "${BLUE}  → No agent components found${NC}"
     fi
 else
     echo -e "${BOLD}${CYAN}[2/3] Skipping agent (--keep-agent specified)${NC}"

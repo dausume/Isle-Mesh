@@ -1,12 +1,11 @@
 #!/bin/bash
 
 # Isle-Mesh Agent Commands
-# Three-component agent architecture for mesh proxy and config management
+# Two-component agent architecture for mesh proxy and config management
 #
 # Components:
-#   1. isle-host-agent: Systemd service (mDNS broadcasting/relay)
-#   2. isle-agent-sync: Python container (config generation)
-#   3. isle-vlan-agent: Nginx container (reverse proxy)
+#   1. isle-host-agent: Systemd service (mDNS broadcasting, registry, auto-sync)
+#   2. isle-vlan-agent: Nginx container (reverse proxy with registry-watcher)
 
 set -e
 
@@ -28,26 +27,22 @@ BOLD='\033[1m'
 NC='\033[0m' # No Color
 
 show_help() {
-    echo -e "${BOLD}Isle Agent Commands${NC} - Three-Component Agent Architecture"
+    echo -e "${BOLD}Isle Agent Commands${NC} - Two-Component Agent Architecture"
     echo -e ""
     echo -e "╔═══════════════════════════════════════════════════════════════╗"
-    echo -e "║              THREE-COMPONENT ARCHITECTURE                     ║"
+    echo -e "║              TWO-COMPONENT ARCHITECTURE                       ║"
     echo -e "╚═══════════════════════════════════════════════════════════════╝"
     echo -e ""
-    echo -e "The Isle Agent consists of three independent components:"
+    echo -e "The Isle Agent consists of two independent components:"
     echo -e ""
     echo -e "1. ${GREEN}isle-host-agent${NC} (Systemd Service)"
     echo -e "   • Broadcasts mDNS for service discovery"
-    echo -e "   • Can relay to sync container"
-    echo -e "   • Optional component"
+    echo -e "   • Manages registry updates and auto-sync"
+    echo -e "   • Watches registry.json for changes"
     echo -e ""
-    echo -e "2. ${GREEN}isle-agent-sync${NC} (Python Container)"
-    echo -e "   • Receives mDNS service data via API"
-    echo -e "   • Generates nginx config fragments"
-    echo -e "   • HTTP API on port 8888"
-    echo -e ""
-    echo -e "3. ${GREEN}isle-vlan-agent${NC} (Nginx Container)"
+    echo -e "2. ${GREEN}isle-vlan-agent${NC} (Nginx Container)"
     echo -e "   • Reverse proxy for all mesh apps"
+    echo -e "   • Built-in registry-watcher auto-generates nginx configs"
     echo -e "   • Virtual MAC: 02:00:00:00:0a:01"
     echo -e "   • Ports: 80 (HTTP), 443 (HTTPS)"
     echo -e ""
@@ -58,17 +53,19 @@ show_help() {
     echo -e "  ${CYAN}isle agent start${NC}               Start all agent components (automated setup)"
     echo -e "  ${CYAN}isle agent stop${NC}                Stop all agent containers"
     echo -e "  ${CYAN}isle agent restart${NC}             Restart all agent components"
-    echo -e "  ${CYAN}isle agent status${NC}              Show status of all three components"
+    echo -e "  ${CYAN}isle agent status${NC}              Show status of all components"
     echo -e "  ${CYAN}isle agent reload${NC}              Reload nginx config (zero-downtime)"
     echo -e ""
     echo -e "╔═══════════════════════════════════════════════════════════════╗"
-    echo -e "║                SETUP & VERIFICATION                           ║"
+    echo -e "║             SETUP, REGISTRATION & VERIFICATION                ║"
     echo -e "╚═══════════════════════════════════════════════════════════════╝"
     echo -e ""
     echo -e "  ${CYAN}isle agent verify-setup${NC}        Verify all components are healthy"
     echo -e "  ${CYAN}isle agent setup-host${NC}          Setup host agent (systemd service)"
-    echo -e "  ${CYAN}isle agent setup-sync${NC}          Setup sync agent (build Python container)"
-    echo -e "  ${CYAN}isle agent setup-vlan${NC}          Setup VLAN agent (pull nginx image)"
+    echo -e "  ${CYAN}isle agent setup-vlan${NC}          Setup VLAN agent (build custom nginx image)"
+    echo -e "  ${CYAN}isle agent register${NC}            Register an app with the agent"
+    echo -e "      --name <name>  --domain <domain>  --container <container>"
+    echo -e "      [--port <port>]  [--protocol <protocol>]"
     echo -e ""
     echo -e "╔═══════════════════════════════════════════════════════════════╗"
     echo -e "║                    CONFIGURATION                              ║"
@@ -84,7 +81,6 @@ show_help() {
     echo -e "╚═══════════════════════════════════════════════════════════════╝"
     echo -e ""
     echo -e "  ${CYAN}isle agent logs${NC}                Show logs from all components"
-    echo -e "  ${CYAN}isle agent logs sync${NC}           Show sync agent logs"
     echo -e "  ${CYAN}isle agent logs vlan${NC}           Show VLAN agent logs"
     echo -e "  ${CYAN}isle agent logs host${NC}           Show host agent logs (systemd)"
     echo -e ""
@@ -92,15 +88,14 @@ show_help() {
     echo -e "║                    HOW IT WORKS                               ║"
     echo -e "╚═══════════════════════════════════════════════════════════════╝"
     echo -e ""
-    echo -e "1. ${GREEN}Component Architecture${NC}: Three independent services"
+    echo -e "1. ${GREEN}Component Architecture${NC}: Two independent services"
     echo -e "   • Modular design for flexibility"
     echo -e "   • Each component can be managed separately"
-    echo -e "   • Host agent is optional"
     echo -e ""
-    echo -e "2. ${GREEN}Config Fragments${NC}: Dynamic nginx configuration"
-    echo -e "   • Sync agent generates configs from service data"
-    echo -e "   • Stored in /etc/isle-mesh/agent/configs/{app}.conf"
-    echo -e "   • VLAN agent includes fragments dynamically"
+    echo -e "2. ${GREEN}Config Generation${NC}: Dynamic nginx configuration"
+    echo -e "   • Registry-watcher in vlan-agent watches registry.json"
+    echo -e "   • Auto-generates configs in /etc/isle-mesh/agent/nginx/configs/"
+    echo -e "   • Nginx reloads automatically on changes"
     echo -e ""
     echo -e "3. ${GREEN}Hot Reload${NC}: Zero-downtime config changes"
     echo -e "   • Apps register/deregister without affecting others"
@@ -117,14 +112,11 @@ show_help() {
     echo -e "# 2. Verify all components are healthy"
     echo -e "${CYAN}isle agent verify-setup${NC}"
     echo -e ""
-    echo -e "# 3. Deploy mesh apps (they auto-register with agent)"
-    echo -e "${CYAN}isle app up${NC}"
+    echo -e "# 3. Register an app"
+    echo -e "${CYAN}isle agent register --name myapp --domain myapp.local --container myapp-1 --port 8080${NC}"
     echo -e ""
     echo -e "# 4. View registered apps and component status"
     echo -e "${CYAN}isle agent status${NC}"
-    echo -e ""
-    echo -e "# 5. When app configs change, reload nginx"
-    echo -e "${CYAN}isle agent reload${NC}"
     echo -e ""
     echo -e "╔═══════════════════════════════════════════════════════════════╗"
     echo -e "║                    LOCATION                                   ║"
@@ -133,7 +125,7 @@ show_help() {
     echo -e "Configuration: ${YELLOW}/etc/isle-mesh/agent/${NC}"
     echo -e "  ├── docker-compose.yml          Container orchestration"
     echo -e "  ├── registry.json               Domain/subdomain registry"
-    echo -e "  ├── configs/                    Per-app nginx fragments"
+    echo -e "  ├── nginx/configs/              Auto-generated nginx fragments"
     echo -e "  ├── ssl/                        Shared SSL certificates"
     echo -e "  ├── logs/                       Nginx logs"
     echo -e "  └── sync-data/                  Sync agent persistence"
@@ -206,14 +198,14 @@ case $COMMAND in
         exec "${AGENT_MANAGER}" setup-host "$@"
         ;;
 
-    setup-sync)
-        check_agent_available
-        exec "${AGENT_MANAGER}" setup-sync "$@"
-        ;;
-
     setup-vlan)
         check_agent_available
         exec "${AGENT_MANAGER}" setup-vlan "$@"
+        ;;
+
+    register)
+        check_agent_available
+        exec "${AGENT_MANAGER}" register "$@"
         ;;
 
     # Config management commands - delegate to merge-configs.sh

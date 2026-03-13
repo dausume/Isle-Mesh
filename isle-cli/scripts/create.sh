@@ -113,15 +113,16 @@ check_prerequisites() {
 
     # Check if Docker daemon is running
     if ! docker ps &> /dev/null; then
-        log_error "Docker daemon is not running or user doesn't have permissions"
+        log_warning "Docker daemon is not accessible or user doesn't have permissions"
         echo ""
-        echo "Make sure:"
-        echo "  1. Docker daemon is running"
-        echo "  2. Your user is in the docker group: sudo usermod -aG docker \$USER"
+        echo "Note: You may need to use sudo for Docker commands, or:"
+        echo "  1. Ensure Docker daemon is running"
+        echo "  2. Add your user to the docker group: sudo usermod -aG docker \$USER"
         echo "  3. Log out and log back in to apply group changes"
-        exit 1
+        echo ""
+    else
+        log_success "Docker daemon is running"
     fi
-    log_success "Docker daemon is running"
 
     # Check for Docker systemd D-Bus issues (common in sandboxed environments)
     log_info "Checking Docker container creation..."
@@ -625,8 +626,6 @@ services:
   sample:
     build: .
     container_name: isle-sample-app
-    ports:
-      - "5000:5000"
     environment:
       - DOMAIN=${SAMPLE_DOMAIN}
       - APP_DIR=${SAMPLE_APP_DIR}
@@ -637,7 +636,11 @@ services:
       - "mesh.domain=${SAMPLE_DOMAIN}"
       - "isle.mesh.port=5000"
     networks:
-      - default
+      - isle-agent-net
+
+networks:
+  isle-agent-net:
+    external: true
 EOF
 
     log_success "Sample app files created"
@@ -664,18 +667,46 @@ EOF
         exit 1
     fi
 
-    # Register with isle-agent if it's running
+    # Register sample app with the agent
     log_info "Registering sample app with Isle Agent..."
-    if docker ps | grep -q isle-agent; then
-        # Agent will auto-detect the container via labels
-        sleep 2
-        if bash "$SCRIPT_DIR/agent.sh" reload 2>/dev/null; then
-            log_success "Sample app registered with agent"
+
+    # 1. Write sample app entry to registry.json
+    if bash "$SCRIPT_DIR/agent.sh" register \
+        --name "${SAMPLE_APP_NAME}" \
+        --domain "${SAMPLE_DOMAIN}" \
+        --container "isle-sample-app" \
+        --port 5000 \
+        --protocol http; then
+        log_success "Sample app registered in agent registry"
+    else
+        log_warning "Could not register sample app, but it is running"
+    fi
+
+    # 2. Add sample.local to mDNS broadcast list
+    if bash "$SCRIPT_DIR/mdns.sh" domain add "${SAMPLE_DOMAIN}" 2>/dev/null; then
+        log_success "Added ${SAMPLE_DOMAIN} to mDNS broadcast"
+    else
+        log_warning "Could not add ${SAMPLE_DOMAIN} to mDNS (may already exist)"
+    fi
+
+    # 3. Generate self-signed SSL cert for sample.local
+    local ssl_cert_dir="/etc/isle-mesh/agent/ssl/certs"
+    local ssl_key_dir="/etc/isle-mesh/agent/ssl/keys"
+    mkdir -p "$ssl_cert_dir" "$ssl_key_dir"
+
+    if [[ ! -f "${ssl_cert_dir}/${SAMPLE_DOMAIN}.crt" ]]; then
+        log_info "Generating self-signed SSL certificate for ${SAMPLE_DOMAIN}..."
+        if openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+            -keyout "${ssl_key_dir}/${SAMPLE_DOMAIN}.key" \
+            -out "${ssl_cert_dir}/${SAMPLE_DOMAIN}.crt" \
+            -subj "/CN=${SAMPLE_DOMAIN}" \
+            -addext "subjectAltName=DNS:${SAMPLE_DOMAIN}" 2>/dev/null; then
+            log_success "Generated SSL certificate for ${SAMPLE_DOMAIN}"
         else
-            log_warning "Could not reload agent, but sample app is running"
+            log_warning "Could not generate SSL cert for ${SAMPLE_DOMAIN}"
         fi
     else
-        log_warning "Agent not detected, sample app running standalone"
+        log_info "SSL certificate for ${SAMPLE_DOMAIN} already exists"
     fi
 
     echo ""
@@ -697,15 +728,15 @@ show_completion() {
     echo -e "  ✓ Sample Application"
     echo ""
     echo -e "${CYAN}Access Your Sample App:${NC}"
-    echo -e "  ${BOLD}http://${SAMPLE_DOMAIN}${NC} (mDNS)"
-    echo -e "  ${BOLD}http://sample.vlan${NC} (after join protocol completes)"
+    echo -e "  ${BOLD}https://${SAMPLE_DOMAIN}${NC} (mDNS, HTTPS)"
+    echo -e "  ${BOLD}https://sample.vlan${NC} (after join protocol completes)"
     echo ""
     echo -e "${CYAN}View Status:${NC}"
     echo -e "  isle agent status        View agent and registered apps"
     echo -e "  isle router status       View router and network info"
     echo ""
     echo -e "${CYAN}Next Steps:${NC}"
-    echo -e "  1. Visit ${BOLD}http://${SAMPLE_DOMAIN}${NC} for detailed instructions"
+    echo -e "  1. Visit ${BOLD}https://${SAMPLE_DOMAIN}${NC} for detailed instructions"
     echo -e "  2. When ready, remove the sample app and deploy your own"
     echo -e "  3. Run ${BOLD}isle help${NC} to see all available commands"
     echo ""

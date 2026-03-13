@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
 #
-# Isle Agent Manager - Lifecycle management for three-component agent architecture
+# Isle Agent Manager - Lifecycle management for two-component agent architecture
 #
-# Manages the three-component isle-agent system:
-#   1. isle-host-agent: Systemd service for mDNS broadcasting/relaying
-#   2. isle-agent-sync: Python container for receiving mDNS and generating configs
-#   3. isle-vlan-agent: Nginx container for reverse proxy
+# Manages the two-component isle-agent system:
+#   1. isle-host-agent: Consolidated systemd service (mDNS, registry, auto-sync)
+#   2. isle-vlan-agent: Nginx container for reverse proxy
+#
+# The host agent consolidates:
+#   - mDNS broadcasting
+#   - Registry updates
+#   - Registry watching (inotify/polling)
+#   - Auto-sync of .local domains to mDNS list
 
 set -euo pipefail
 
@@ -26,13 +31,11 @@ COMPOSE_FILE="${ISLE_AGENT_DIR}/docker-compose.yml"
 REGISTRY_FILE="${ISLE_AGENT_DIR}/registry.json"
 
 # Component names
-SYNC_CONTAINER="isle-agent-sync"
 VLAN_CONTAINER="isle-vlan-agent"
 HOST_SERVICE="isle-host-agent"
 
 # Component paths
 HOST_AGENT_DIR="${PROJECT_ROOT}/isle-agent/isle-host-agent"
-SYNC_AGENT_DIR="${PROJECT_ROOT}/isle-agent/isle-agent-sync"
 VLAN_AGENT_DIR="${PROJECT_ROOT}/isle-agent/isle-vlan-agent"
 
 # Detect which docker compose command to use
@@ -210,12 +213,80 @@ init_agent_dir() {
     check_permissions || true  # Continue even if check fails
 
     # Create directory structure in /etc/isle-mesh/agent
-    mkdir -p "${ISLE_AGENT_DIR}"/{configs,ssl/{certs,keys},logs,sync-data}
+    mkdir -p "${ISLE_AGENT_DIR}"/{configs,ssl/{certs,keys},logs,sync-data,nginx/configs}
 
-    # Initialize empty registry if doesn't exist
+    # Pre-seed nginx.conf on host if it doesn't exist (required for Docker bind mount)
+    if [[ ! -f "${ISLE_AGENT_DIR}/nginx/nginx.conf" ]]; then
+        local nginx_conf_src="${VLAN_AGENT_DIR}/nginx.conf"
+        if [[ -f "$nginx_conf_src" ]]; then
+            cp "$nginx_conf_src" "${ISLE_AGENT_DIR}/nginx/nginx.conf"
+            log_info "Pre-seeded nginx.conf from source"
+        else
+            # Create a minimal nginx.conf so Docker bind mount works
+            touch "${ISLE_AGENT_DIR}/nginx/nginx.conf"
+            log_warn "Created empty nginx.conf placeholder (source not found)"
+        fi
+    fi
+
+    # Create host-agent log directory (required by isle-host-agent.service ReadWritePaths)
+    mkdir -p /var/log/isle-mesh
+
+    # Initialize registry with default health app if doesn't exist
     if [[ ! -f "${REGISTRY_FILE}" ]]; then
-        log_info "Creating domain registry..."
-        echo '{"domains": {}, "subdomains": {}, "apps": {}}' > "${REGISTRY_FILE}"
+        log_info "Creating domain registry with default health app..."
+        cat > "${REGISTRY_FILE}" <<'EOF'
+{
+  "domains": {},
+  "subdomains": {},
+  "apps": {
+    "health": {
+      "domain": "health.local",
+      "services": [],
+      "modes": [],
+      "updated_at": ""
+    }
+  }
+}
+EOF
+        # Ensure registry is group-readable (isle-mesh group)
+        chmod 664 "${REGISTRY_FILE}"
+        chgrp isle-mesh "${REGISTRY_FILE}" 2>/dev/null || true
+
+        # Update timestamp if jq is available
+        if command -v jq &>/dev/null; then
+            local now
+            now=$(date -Iseconds)
+            local temp_file=$(mktemp)
+            jq --arg now "$now" \
+               '.apps.health.updated_at = $now' \
+               "${REGISTRY_FILE}" > "$temp_file"
+            cp "$temp_file" "${REGISTRY_FILE}"
+            rm -f "$temp_file"
+        fi
+        log_success "Registry created with health.local app"
+    else
+        # Ensure health app exists in existing registry
+        if command -v jq &>/dev/null; then
+            local has_health
+            has_health=$(jq -r '.apps.health // empty' "${REGISTRY_FILE}" 2>/dev/null)
+
+            if [[ -z "$has_health" ]]; then
+                log_info "Adding default health app to existing registry..."
+                local now
+                now=$(date -Iseconds)
+                local temp_file=$(mktemp)
+                jq --arg now "$now" \
+                   '.apps.health = {
+                     "domain": "health.local",
+                     "services": [],
+                     "modes": [],
+                     "updated_at": $now
+                   }' "${REGISTRY_FILE}" > "$temp_file"
+                cp "$temp_file" "${REGISTRY_FILE}"
+            rm -f "$temp_file"
+                log_success "Added health.local app to registry"
+            fi
+        fi
     fi
 
     log_success "Agent directory initialized at ${ISLE_AGENT_DIR}"
@@ -390,11 +461,6 @@ setup_isle_bridge() {
     fi
 }
 
-# Check if sync agent is running
-is_sync_running() {
-    docker ps --filter "name=${SYNC_CONTAINER}" --filter "status=running" --format '{{.Names}}' | grep -q "^${SYNC_CONTAINER}$"
-}
-
 # Check if vlan agent is running
 is_vlan_running() {
     docker ps --filter "name=${VLAN_CONTAINER}" --filter "status=running" --format '{{.Names}}' | grep -q "^${VLAN_CONTAINER}$"
@@ -407,19 +473,17 @@ is_host_running() {
 
 # Check if all agents are running
 is_running() {
-    is_sync_running && is_vlan_running
+    is_host_running && is_vlan_running
 }
 
 # Check if stale containers exist (stopped/exited/created)
 has_stale_containers() {
     # Check for containers in exited, created, or dead status
-    for container in "${SYNC_CONTAINER}" "${VLAN_CONTAINER}"; do
-        if docker ps -a --filter "name=${container}" --format '{{.Names}} {{.Status}}' | \
-            grep "^${container}" | \
-            grep -qE "(Exited|Created|Dead)"; then
-            return 0
-        fi
-    done
+    if docker ps -a --filter "name=${VLAN_CONTAINER}" --format '{{.Names}} {{.Status}}' | \
+        grep "^${VLAN_CONTAINER}" | \
+        grep -qE "(Exited|Created|Dead)"; then
+        return 0
+    fi
     return 1
 }
 
@@ -648,13 +712,31 @@ setup_host_agent() {
 
     # Check if host agent files exist
     if [[ ! -d "${HOST_AGENT_DIR}" ]]; then
-        log_warn "Host agent directory not found: ${HOST_AGENT_DIR}"
-        echo "  Host agent is optional. Skipping..."
-        return 0
+        log_error "Host agent directory not found: ${HOST_AGENT_DIR}"
+        return 1
     fi
 
-    # Install host agent files
+    # Ensure avahi-daemon is installed (required by isle-host-agent.service)
+    if ! command -v avahi-daemon &>/dev/null; then
+        log_info "avahi-daemon not found, installing..."
+        if sudo apt-get install -y avahi-daemon avahi-utils &>/dev/null; then
+            sudo systemctl enable avahi-daemon 2>/dev/null || true
+            sudo systemctl start avahi-daemon 2>/dev/null || true
+            log_success "avahi-daemon installed and started"
+        else
+            log_error "Failed to install avahi-daemon (required for host agent)"
+            return 1
+        fi
+    elif ! systemctl is-active --quiet avahi-daemon 2>/dev/null; then
+        log_info "Starting avahi-daemon..."
+        sudo systemctl start avahi-daemon 2>/dev/null || true
+    fi
+
+    # Create required directories
     sudo mkdir -p /usr/local/bin/isle-mesh
+    sudo mkdir -p /var/log/isle-mesh
+
+    # Install host agent files
     sudo cp "${HOST_AGENT_DIR}/isle-host-agent-relay.sh" /usr/local/bin/isle-mesh/
     sudo chmod +x /usr/local/bin/isle-mesh/isle-host-agent-relay.sh
 
@@ -666,45 +748,35 @@ setup_host_agent() {
         log_info "Host agent config already exists, skipping"
     fi
 
-    # Copy systemd service
+    # Copy systemd service (always overwrite to pick up fixes)
     sudo cp "${HOST_AGENT_DIR}/isle-host-agent.service" /etc/systemd/system/
     sudo systemctl daemon-reload
 
-    log_success "Host agent files installed"
+    # Clear any prior failed state before starting
+    sudo systemctl stop isle-host-agent 2>/dev/null || true
+    sudo systemctl reset-failed isle-host-agent 2>/dev/null || true
 
-    # Ask if user wants to enable it
-    echo ""
-    log_info "Host agent is installed but not started (optional component)"
-    echo "  To enable and start: sudo systemctl enable --now isle-host-agent"
-    echo "  To check status: sudo systemctl status isle-host-agent"
-    echo ""
+    # Enable and start the service
+    log_info "Enabling and starting isle-host-agent service..."
+    sudo systemctl enable isle-host-agent 2>/dev/null || true
+    sudo systemctl start isle-host-agent
+
+    # Wait a moment and check if it started
+    sleep 2
+
+    if systemctl is-active --quiet isle-host-agent; then
+        log_success "Host agent service is running"
+    else
+        log_error "Host agent service failed to start"
+        echo "  Check logs: sudo journalctl -u isle-host-agent -n 50"
+        return 1
+    fi
 
     return 0
 }
 
-# Setup Component 2: Sync Agent (Python container)
-setup_sync_agent() {
-    log_info "Setting up sync agent (isle-agent-sync container)..."
 
-    # Check if sync agent directory exists
-    if [[ ! -d "${SYNC_AGENT_DIR}" ]]; then
-        log_error "Sync agent directory not found: ${SYNC_AGENT_DIR}"
-        return 1
-    fi
-
-    # Build sync agent image
-    log_info "Building sync agent image..."
-    cd "${PROJECT_ROOT}/isle-agent"
-    if ! $DOCKER_COMPOSE_CMD build isle-agent-sync 2>&1; then
-        log_error "Failed to build sync agent image"
-        return 1
-    fi
-
-    log_success "Sync agent image built"
-    return 0
-}
-
-# Setup Component 3: VLAN Agent (nginx container)
+# Setup Component 2: VLAN Agent (nginx container with registry-watcher)
 setup_vlan_agent() {
     log_info "Setting up VLAN agent (isle-vlan-agent container)..."
 
@@ -714,15 +786,24 @@ setup_vlan_agent() {
         return 1
     fi
 
-    # VLAN agent uses official nginx:alpine image, no build needed
-    log_info "VLAN agent uses nginx:alpine image (official)"
-
-    # Pull nginx image
-    if ! docker pull nginx:alpine; then
-        log_warn "Failed to pull nginx:alpine image, will try to use cached version"
+    # Verify Dockerfile and required scripts exist
+    if [[ ! -f "${VLAN_AGENT_DIR}/Dockerfile" ]]; then
+        log_error "VLAN agent Dockerfile not found: ${VLAN_AGENT_DIR}/Dockerfile"
+        return 1
     fi
 
-    log_success "VLAN agent image ready"
+    # Build the custom image (includes registry-watcher + generate-nginx-configs)
+    log_info "Building isle-vlan-agent image..."
+    if ! docker build -t isle-vlan-agent "${VLAN_AGENT_DIR}"; then
+        log_error "Failed to build isle-vlan-agent image"
+        return 1
+    fi
+
+    # Ensure host directories exist for volume mounts
+    mkdir -p "${ISLE_AGENT_DIR}/nginx/configs"
+    mkdir -p "${ISLE_AGENT_DIR}/nginx"
+
+    log_success "VLAN agent image built"
     return 0
 }
 
@@ -743,10 +824,10 @@ copy_compose_file() {
     return 0
 }
 
-# Start all three agent components
+# Start all agent components
 start_agent() {
     echo ""
-    log_info "=== Starting Isle Agent (Three-Component Architecture) ==="
+    log_info "=== Starting Isle Agent (Two-Component Architecture) ==="
     echo ""
 
     # Initialize directories if needed
@@ -764,7 +845,7 @@ start_agent() {
     fi
 
     # Step 1: Setup all components (if not already done)
-    echo "Step 1/4: Setting up components..."
+    echo "Step 1/3: Setting up components..."
     echo ""
 
     # Copy compose file if it doesn't exist
@@ -772,27 +853,27 @@ start_agent() {
         copy_compose_file || return 1
     fi
 
-    # Setup sync agent (build image)
-    setup_sync_agent || return 1
-    echo ""
-
-    # Setup vlan agent (pull nginx image)
+    # Setup vlan agent (build custom image)
     setup_vlan_agent || return 1
     echo ""
 
-    # Setup host agent (optional)
-    setup_host_agent || true  # Don't fail if host agent setup fails
-    echo ""
+    # Setup host agent (required)
+    if ! is_host_running; then
+        setup_host_agent || return 1
+        echo ""
+    else
+        log_info "Host agent already running, skipping setup"
+        echo ""
+    fi
 
     # Step 2: Start containers
-    echo "Step 2/4: Starting containers..."
+    echo "Step 2/3: Starting containers..."
     cd "${PROJECT_ROOT}/isle-agent"
 
     if ! $DOCKER_COMPOSE_CMD up -d; then
         log_error "Failed to start agent containers"
         echo ""
-        echo "Check logs with: docker logs isle-agent-sync"
-        echo "                 docker logs isle-vlan-agent"
+        echo "Check logs with: docker logs isle-vlan-agent"
         return 1
     fi
 
@@ -800,26 +881,7 @@ start_agent() {
     echo ""
 
     # Step 3: Wait for health checks
-    echo "Step 3/4: Waiting for health checks..."
-    echo ""
-
-    # Wait for sync agent health
-    log_info "Checking isle-agent-sync..."
-    local sync_healthy=false
-    for i in {1..30}; do
-        if curl -sf http://localhost:8888/health >/dev/null 2>&1; then
-            sync_healthy=true
-            break
-        fi
-        sleep 1
-    done
-
-    if ! $sync_healthy; then
-        log_error "isle-agent-sync failed to become healthy"
-        echo "Check logs: docker logs isle-agent-sync"
-        return 1
-    fi
-    log_success "isle-agent-sync is healthy"
+    echo "Step 3/3: Waiting for health checks..."
     echo ""
 
     # Wait for vlan agent health
@@ -841,9 +903,6 @@ start_agent() {
     log_success "isle-vlan-agent is healthy"
     echo ""
 
-    # Step 4: Summary
-    echo "Step 4/4: Verification"
-    echo ""
     log_success "All agent components are running!"
     echo ""
 
@@ -851,7 +910,6 @@ start_agent() {
 
     echo ""
     log_info "Next steps:"
-    echo "  - View sync API: http://localhost:8888/services"
     echo "  - View vlan agent: http://localhost/"
     echo "  - Test health endpoint: http://health.local (if mdns is running)"
     echo "  - Check status: isle agent status"
@@ -860,15 +918,30 @@ start_agent() {
     return 0
 }
 
-# Stop all agent containers
+# Stop all agent components
 stop_agent() {
     log_info "Stopping isle-agent components..."
 
-    if ! is_running; then
-        log_warn "Agent containers are not running"
+    local any_running=false
+
+    # Check if any components are running
+    if is_host_running || is_vlan_running; then
+        any_running=true
+    fi
+
+    if ! $any_running; then
+        log_warn "No agent components are running"
         return 0
     fi
 
+    # Stop host agent (systemd service)
+    if is_host_running; then
+        log_info "Stopping host agent..."
+        sudo systemctl stop isle-host-agent 2>/dev/null || true
+        log_success "Host agent stopped"
+    fi
+
+    # Stop containers
     cd "${PROJECT_ROOT}/isle-agent"
 
     # Stop containers using docker-compose
@@ -877,21 +950,12 @@ stop_agent() {
     fi
 
     # Force remove any remaining containers
-    for container in "${SYNC_CONTAINER}" "${VLAN_CONTAINER}"; do
-        if docker ps -a --filter "name=${container}" --format '{{.Names}}' | grep -q "^${container}$"; then
-            log_info "Force removing ${container}..."
-            docker rm -f "${container}" 2>/dev/null || true
-        fi
-    done
-
-    log_success "Agent containers stopped"
-
-    # Note about host agent
-    if is_host_running; then
-        echo ""
-        log_info "Host agent (systemd service) is still running"
-        echo "  To stop: sudo systemctl stop isle-host-agent"
+    if docker ps -a --filter "name=${VLAN_CONTAINER}" --format '{{.Names}}' | grep -q "^${VLAN_CONTAINER}$"; then
+        log_info "Force removing ${VLAN_CONTAINER}..."
+        docker rm -f "${VLAN_CONTAINER}" 2>/dev/null || true
     fi
+
+    log_success "All agent components stopped"
 }
 
 # Restart the isle-agent container
@@ -926,37 +990,53 @@ reload_config() {
 # Show agent status
 show_status() {
     echo ""
-    echo "=== Isle Agent Status (Three Components) ==="
+    echo "=== Isle Agent Status (Two Components) ==="
     echo ""
 
-    # Component 1: Host Agent (Systemd Service)
-    echo "Component 1: isle-host-agent (systemd service)"
+    # Component 1: Host Agent (Systemd Service) - REQUIRED
+    echo "Component 1: isle-host-agent (systemd service - mDNS, registry, auto-sync)"
     if is_host_running; then
         log_success "  Status: RUNNING"
-        echo "  Mode: $(grep ISLE_AGENT_MODE /etc/isle-mesh/agent/host-agent.conf 2>/dev/null | cut -d= -f2 || echo 'unknown')"
+        local agent_mode
+        agent_mode=$(grep ISLE_AGENT_MODE /etc/isle-mesh/agent/host-agent.conf 2>/dev/null | cut -d= -f2 || echo 'unknown')
+        echo "  Mode: ${agent_mode}"
+
+        # Show what the host agent is doing
+        echo "  Functions:"
+        case "${agent_mode}" in
+            broadcast)
+                echo "    - mDNS broadcasting"
+                echo "    - Registry watching & auto-sync"
+                ;;
+            registry)
+                echo "    - Registry updates"
+                echo "    - Registry watching & auto-sync"
+                ;;
+            both)
+                echo "    - mDNS broadcasting"
+                echo "    - Registry updates"
+                echo "    - Registry watching & auto-sync"
+                ;;
+            *)
+                echo "    - Unknown mode"
+                ;;
+        esac
+
+        # Check uptime
+        local uptime_info
+        uptime_info=$(systemctl show isle-host-agent -p ActiveEnterTimestamp --value 2>/dev/null)
+        if [[ -n "${uptime_info}" ]]; then
+            echo "  Started: ${uptime_info}"
+        fi
     else
-        echo "  Status: NOT RUNNING (optional)"
+        log_error "  Status: NOT RUNNING (REQUIRED)"
+        echo "  The host agent is required for proper agent operation"
+        echo "  Start with: isle agent start"
     fi
     echo ""
 
-    # Component 2: Sync Agent (Python Container)
-    echo "Component 2: isle-agent-sync (Python API)"
-    if is_sync_running; then
-        log_success "  Status: RUNNING"
-        docker ps --filter "name=${SYNC_CONTAINER}" --format "  ID: {{.ID}}\n  Uptime: {{.Status}}"
-        echo "  API: http://localhost:8888"
-
-        # Get service count from sync agent
-        local service_count
-        service_count=$(curl -sf http://localhost:8888/services 2>/dev/null | jq '. | length' 2>/dev/null || echo "0")
-        echo "  Services: ${service_count}"
-    else
-        log_warn "  Status: STOPPED"
-    fi
-    echo ""
-
-    # Component 3: VLAN Agent (Nginx Container)
-    echo "Component 3: isle-vlan-agent (nginx proxy)"
+    # Component 2: VLAN Agent (Nginx Container)
+    echo "Component 2: isle-vlan-agent (nginx proxy)"
     if is_vlan_running; then
         log_success "  Status: RUNNING"
         docker ps --filter "name=${VLAN_CONTAINER}" --format "  ID: {{.ID}}\n  Uptime: {{.Status}}"
@@ -974,7 +1054,7 @@ show_status() {
     fi
     echo ""
 
-    # Registered apps
+    # Registered apps and mDNS broadcast status
     echo "Registered Mesh Apps:"
     if [[ -f "${REGISTRY_FILE}" ]]; then
         local app_count
@@ -989,16 +1069,48 @@ show_status() {
     fi
     echo ""
 
-    # Overall status
-    local host_status=""
-    if is_host_running; then
-        host_status=" (including optional host agent)"
+    # mDNS Broadcast List
+    echo "mDNS Broadcast List:"
+    local mdns_list_file="/usr/local/etc/mesh-mdns-domains.list"
+    if [[ -f "${mdns_list_file}" ]]; then
+        local domain_count
+        domain_count=$(grep -v '^[[:space:]]*$' "${mdns_list_file}" 2>/dev/null | grep -v '^#' | wc -l)
+        if [[ "${domain_count}" -eq 0 ]]; then
+            echo "  (none)"
+        else
+            echo "  Domains being broadcast:"
+            grep -v '^[[:space:]]*$' "${mdns_list_file}" 2>/dev/null | grep -v '^#' | while read -r domain; do
+                # Check if this domain is in the registry
+                local in_registry=""
+                if [[ -f "${REGISTRY_FILE}" ]]; then
+                    if jq -e --arg domain "$domain" '.apps[] | select(.domain == $domain)' "${REGISTRY_FILE}" >/dev/null 2>&1; then
+                        in_registry=" [in registry]"
+                    elif jq -e --arg domain "$domain" '.domains[$domain]' "${REGISTRY_FILE}" >/dev/null 2>&1; then
+                        in_registry=" [in registry]"
+                    fi
+                fi
+                echo "  - ${domain}${in_registry}"
+            done
+        fi
+    else
+        echo "  (mdns list file not found at ${mdns_list_file})"
+        echo "  Note: mDNS broadcasting may not be configured"
     fi
+    echo ""
 
+    # Overall status
     if is_running; then
-        log_success "Overall: All required components running${host_status}"
+        log_success "Overall: All required components are running"
     else
         log_warn "Overall: Some required components are stopped"
+        echo ""
+        if ! is_host_running; then
+            echo "  - Host agent (isle-host-agent) is not running"
+        fi
+        if ! is_vlan_running; then
+            echo "  - VLAN agent (isle-vlan-agent) is not running"
+        fi
+        echo ""
         echo "  Start with: isle agent start"
     fi
 
@@ -1012,17 +1124,6 @@ show_logs() {
 
     # Determine which logs to show
     case "${component}" in
-        sync)
-            if ! is_sync_running; then
-                log_error "isle-agent-sync is not running"
-                return 1
-            fi
-            if [[ "${follow}" == "true" ]]; then
-                docker logs -f "${SYNC_CONTAINER}"
-            else
-                docker logs --tail 50 "${SYNC_CONTAINER}"
-            fi
-            ;;
         vlan)
             if ! is_vlan_running; then
                 log_error "isle-vlan-agent is not running"
@@ -1039,13 +1140,6 @@ show_logs() {
             sudo journalctl -u "${HOST_SERVICE}" -n 50 ${follow:+-f}
             ;;
         all|*)
-            echo "=== Sync Agent Logs ==="
-            if is_sync_running; then
-                docker logs --tail 20 "${SYNC_CONTAINER}"
-            else
-                echo "(not running)"
-            fi
-            echo ""
             echo "=== VLAN Agent Logs ==="
             if is_vlan_running; then
                 docker logs --tail 20 "${VLAN_CONTAINER}"
@@ -1053,7 +1147,10 @@ show_logs() {
                 echo "(not running)"
             fi
             echo ""
-            echo "Use 'isle agent logs sync' or 'isle agent logs vlan' for detailed logs"
+            echo "=== Host Agent Logs ==="
+            sudo journalctl -u "${HOST_SERVICE}" -n 20 --no-pager 2>/dev/null || echo "(not available)"
+            echo ""
+            echo "Use 'isle agent logs vlan' or 'isle agent logs host' for detailed logs"
             ;;
     esac
 }
@@ -1074,27 +1171,39 @@ test_config() {
     log_success "nginx configuration is valid"
 }
 
-# Verify all three components are healthy
+# Verify all components are healthy
 verify_setup() {
     log_info "Verifying agent setup..."
     echo ""
 
     local all_checks_passed=true
 
-    # Check 1: Sync agent health
-    echo "=== Check 1: Sync Agent (isle-agent-sync) ==="
-    if is_sync_running; then
-        if curl -sf http://localhost:8888/health >/dev/null 2>&1; then
-            log_success "Sync agent is healthy"
-            local health_data
-            health_data=$(curl -sf http://localhost:8888/health)
-            echo "  ${health_data}"
-        else
-            log_error "Sync agent is not responding to health checks"
-            all_checks_passed=false
+    # Check 1: Host Agent (Required)
+    echo "=== Check 1: Host Agent (isle-host-agent - REQUIRED) ==="
+    if is_host_running; then
+        log_success "Host agent is running"
+        local agent_mode
+        agent_mode=$(grep ISLE_AGENT_MODE /etc/isle-mesh/agent/host-agent.conf 2>/dev/null | cut -d= -f2 || echo 'unknown')
+        echo "  Mode: ${agent_mode}"
+
+        # Check if it's been running for a bit (should be stable)
+        local uptime_seconds
+        uptime_seconds=$(systemctl show isle-host-agent -p ActiveEnterTimestampMonotonic --value 2>/dev/null)
+        if [[ -n "${uptime_seconds}" ]] && [[ "${uptime_seconds}" != "0" ]]; then
+            log_success "Service is stable"
+        fi
+
+        # Check logs for errors
+        local recent_errors
+        recent_errors=$(sudo journalctl -u isle-host-agent -n 20 --no-pager 2>/dev/null | grep -i "error" | wc -l)
+        if [[ "${recent_errors}" -gt 0 ]]; then
+            log_warn "Found ${recent_errors} recent error(s) in logs"
+            echo "  Check logs: sudo journalctl -u isle-host-agent -n 50"
         fi
     else
-        log_error "Sync agent is not running"
+        log_error "Host agent is not running (REQUIRED)"
+        echo "  The host agent manages mDNS, registry updates, and auto-sync"
+        echo "  Start with: isle agent start"
         all_checks_passed=false
     fi
     echo ""
@@ -1119,29 +1228,126 @@ verify_setup() {
     fi
     echo ""
 
-    # Check 3: Host agent (optional)
-    echo "=== Check 3: Host Agent (isle-host-agent - optional) ==="
-    if is_host_running; then
-        log_success "Host agent is running"
-        echo "  Mode: $(grep ISLE_AGENT_MODE /etc/isle-mesh/agent/host-agent.conf 2>/dev/null | cut -d= -f2 || echo 'unknown')"
-    else
-        log_info "Host agent is not running (optional component)"
-    fi
-    echo ""
-
     # Summary
     echo "=== Summary ==="
     if $all_checks_passed; then
         log_success "All required components are healthy!"
         echo ""
+        echo "The agent system is fully operational:"
+        echo "  - Host agent: Managing mDNS, registry, and auto-sync"
+        echo "  - VLAN agent: Reverse proxy for mesh apps"
+        echo ""
         echo "Next steps:"
         echo "  - Deploy mesh apps: isle app up"
         echo "  - View registered apps: isle agent status"
-        echo "  - Check sync API: curl http://localhost:8888/services"
+        echo "  - Check logs: isle agent logs"
     else
         log_error "Some checks failed. Review the output above."
         return 1
     fi
+    echo ""
+}
+
+# Register an app with the agent
+register_app() {
+    local app_name="" domain="" container="" port="80" protocol="http"
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --name) app_name="$2"; shift 2 ;;
+            --domain) domain="$2"; shift 2 ;;
+            --container) container="$2"; shift 2 ;;
+            --port) port="$2"; shift 2 ;;
+            --protocol) protocol="$2"; shift 2 ;;
+            *) log_error "Unknown option: $1"; return 1 ;;
+        esac
+    done
+
+    # Validate required args
+    if [[ -z "$app_name" ]]; then
+        log_error "Missing required --name argument"
+        echo "Usage: register --name <name> --domain <domain> --container <container> [--port <port>] [--protocol <protocol>]"
+        return 1
+    fi
+    if [[ -z "$domain" ]]; then
+        log_error "Missing required --domain argument"
+        return 1
+    fi
+    if [[ -z "$container" ]]; then
+        log_error "Missing required --container argument"
+        return 1
+    fi
+
+    # Ensure jq is available
+    if ! command -v jq &>/dev/null; then
+        log_error "jq is required for registry management"
+        return 1
+    fi
+
+    # Ensure registry file exists
+    if [[ ! -f "${REGISTRY_FILE}" ]]; then
+        log_warn "Registry file not found, initializing..."
+        init_agent_dir
+    fi
+
+    local now
+    now=$(date -Iseconds)
+
+    log_info "Registering app '${app_name}' (${domain})..."
+
+    # Write entry to registry.json using jq
+    # IMPORTANT: Use cp+rm instead of mv to preserve the file's inode.
+    # Docker bind mounts are inode-based — mv creates a new inode and the
+    # container would keep seeing the old file.
+    local temp_file
+    temp_file=$(mktemp)
+    jq --arg name "$app_name" \
+       --arg domain "$domain" \
+       --arg container "$container" \
+       --argjson port "$port" \
+       --arg protocol "$protocol" \
+       --arg now "$now" \
+       '.apps[$name] = {
+         "domain": $domain,
+         "services": [
+           { "name": $name, "subdomain": "", "container": $container, "port": $port, "protocol": $protocol }
+         ],
+         "modes": ["local"],
+         "updated_at": $now
+       }' "${REGISTRY_FILE}" > "$temp_file"
+    cp "$temp_file" "${REGISTRY_FILE}"
+    rm -f "$temp_file"
+    chmod 664 "${REGISTRY_FILE}" 2>/dev/null || true
+
+    log_success "App '${app_name}' registered in registry.json"
+
+    # Add domain to mDNS broadcast list
+    local mdns_list="/usr/local/etc/mesh-mdns-domains.list"
+    if [[ -f "$mdns_list" ]]; then
+        if ! grep -Fxq "$domain" "$mdns_list" 2>/dev/null; then
+            echo "$domain" | sudo tee -a "$mdns_list" > /dev/null
+            log_success "Added ${domain} to mDNS broadcast list"
+            # Reload mDNS service
+            sudo systemctl restart mesh-mdns.service 2>/dev/null || true
+        else
+            log_info "${domain} already in mDNS broadcast list"
+        fi
+    else
+        log_warn "mDNS domain list not found at ${mdns_list}"
+        log_info "Add domain manually with: isle mdns domain add ${domain}"
+    fi
+
+    # Touch registry.json to trigger the registry-watcher in the vlan-agent
+    touch "${REGISTRY_FILE}"
+    log_success "Registry updated — vlan-agent will regenerate nginx configs"
+
+    echo ""
+    log_info "Registered app details:"
+    echo "  Name:      ${app_name}"
+    echo "  Domain:    ${domain}"
+    echo "  Container: ${container}"
+    echo "  Port:      ${port}"
+    echo "  Protocol:  ${protocol}"
     echo ""
 }
 
@@ -1151,7 +1357,7 @@ main() {
 
     # Commands that don't require Docker
     case "${command}" in
-        help|--help|-h|init)
+        help|--help|-h|init|register)
             ;;
         *)
             # All other commands require Docker
@@ -1187,11 +1393,12 @@ main() {
         setup-host)
             setup_host_agent
             ;;
-        setup-sync)
-            setup_sync_agent
-            ;;
         setup-vlan)
             setup_vlan_agent
+            ;;
+        register)
+            shift  # remove 'register' from $@
+            register_app "$@"
             ;;
         cleanup-cache|clean-cache|cleanup)
             cleanup_network_cache
@@ -1201,16 +1408,23 @@ main() {
             ;;
         help|--help|-h)
             cat <<EOF
-Isle Agent Manager - Manage the three-component agent architecture
+Isle Agent Manager - Manage the two-component agent architecture
 
 Usage: $(basename "$0") <command>
 
-=== THREE-COMPONENT ARCHITECTURE ===
+=== TWO-COMPONENT ARCHITECTURE ===
 
-The Isle Agent consists of three independent components:
-  1. isle-host-agent  : Systemd service (mDNS broadcasting/relay)
-  2. isle-agent-sync  : Python container (config generation)
-  3. isle-vlan-agent  : Nginx container (reverse proxy)
+The Isle Agent consists of two independent components:
+  1. isle-host-agent  : Systemd service (mDNS broadcasting, registry updates, auto-sync)
+  2. isle-vlan-agent  : Nginx container (reverse proxy with registry-watcher)
+
+The host agent is a consolidated service that handles:
+  - mDNS broadcasting for .local domains
+  - Registry updates from domain list
+  - Automatic watching of registry.json for changes
+  - Auto-sync of .local domains to mDNS broadcast list
+
+The VLAN agent watches registry.json and auto-generates nginx configs.
 
 Commands:
   Lifecycle:
@@ -1218,17 +1432,20 @@ Commands:
     stop                    Stop all agent containers
     restart                 Restart all agent components
     reload                  Reload nginx config without restarting
-    status                  Show status of all three components
+    status                  Show status of all components
 
   Setup (Individual Components):
     setup-host              Setup host agent (systemd service)
-    setup-sync              Setup sync agent (build Python container)
-    setup-vlan              Setup VLAN agent (pull nginx image)
+    setup-vlan              Setup VLAN agent (build custom nginx image)
+
+  App Registration:
+    register                Register an app with the agent
+                            Options: --name, --domain, --container, --port, --protocol
 
   Verification:
     verify-setup            Verify all components are healthy
     test                    Test nginx configuration validity
-    logs [follow] [component]  Show logs (component: sync|vlan|host|all)
+    logs [follow] [component]  Show logs (component: vlan|host|all)
 
   Configuration:
     init                    Initialize agent directory structure
@@ -1248,9 +1465,9 @@ Examples:
   $(basename "$0") start                      # Start all components (auto-setup)
   $(basename "$0") verify-setup               # Check all components are healthy
   $(basename "$0") status                     # Show status of all components
-  $(basename "$0") logs sync                  # View sync agent logs
+  $(basename "$0") register --name myapp --domain myapp.local --container myapp-1 --port 8080
   $(basename "$0") logs vlan                  # View VLAN agent logs
-  $(basename "$0") setup-host                 # Setup host agent only
+  $(basename "$0") logs host                  # View host agent logs
 
 The 'start' command orchestrates setup and health checks for all components.
 
