@@ -1,0 +1,29 @@
+# Isle Remote Agent - Nginx Reverse Proxy with mDNS + DHCP (Remote Mode)
+# Build context must be isle-agent/ (parent) to access both vlan-agent and remote-agent files
+FROM nginx:alpine
+
+# Install utilities: jq, avahi (mDNS), dbus (required by avahi), dhcp client
+RUN apk add --no-cache \
+    bash \
+    curl \
+    jq \
+    avahi \
+    avahi-tools \
+    dbus \
+    && mkdir -p /run/dbus \
+    && mkdir -p /etc/nginx/configs
+
+# Copy shared scripts from isle-vlan-agent
+COPY isle-vlan-agent/registry-watcher.sh /usr/local/bin/registry-watcher.sh
+COPY isle-vlan-agent/generate-nginx-configs.sh /usr/local/bin/generate-nginx-configs.sh
+
+# Copy remote-specific entrypoint
+COPY isle-remote-agent/remote-entrypoint.sh /usr/local/bin/entrypoint.sh
+
+# Make scripts executable
+RUN chmod +x /usr/local/bin/registry-watcher.sh \
+    /usr/local/bin/generate-nginx-configs.sh \
+    /usr/local/bin/entrypoint.sh
+
+# Use remote entrypoint
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

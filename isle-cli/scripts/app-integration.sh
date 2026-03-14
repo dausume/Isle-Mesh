@@ -215,8 +215,8 @@ upstream ${app_name}_backend {
 server {
     listen 80;
 
-    # Dual-domain support: .local and .vlan
-    server_name ${domain} ${domain%.local}.vlan;
+    # Dual-domain support: .local and .isle
+    server_name ${domain} ${domain%.local}.isle;
 
     location / {
         proxy_pass http://${app_name}_backend;
@@ -246,7 +246,7 @@ server {
 # Uncomment after generating SSL certificates
 # server {
 #     listen 443 ssl;
-#     server_name ${domain} ${domain%.local}.vlan;
+#     server_name ${domain} ${domain%.local}.isle;
 #
 #     ssl_certificate /etc/nginx/ssl/certs/${app_name}.crt;
 #     ssl_certificate_key /etc/nginx/ssl/keys/${app_name}.key;
@@ -396,7 +396,7 @@ integrate_app() {
         echo ""
         log_info "Once running, app will be accessible at:"
         log_info "  ${CYAN}http://${domain}${NC}"
-        log_info "  ${CYAN}http://${domain%.local}.vlan${NC} (after router join)"
+        log_info "  ${CYAN}http://${domain%.local}.isle${NC} (after router join)"
     else
         echo ""
         log_step "Agent Not Running"

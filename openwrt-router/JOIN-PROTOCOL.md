@@ -1,6 +1,6 @@
 # Isle Mesh Join Protocol
 
-The Isle Join Protocol enables automatic discovery and dual-domain access for devices in the mesh network. Devices advertise themselves via mDNS (`.local` domains) and are automatically mapped to `.vlan` domains for mesh-wide DNS resolution.
+The Isle Join Protocol enables automatic discovery and dual-domain access for devices in the mesh network. Devices advertise themselves via mDNS (`.local` domains) and are automatically mapped to `.isle` domains for mesh-wide DNS resolution.
 
 ## Architecture Overview
 
@@ -17,13 +17,13 @@ The Isle Join Protocol enables automatic discovery and dual-domain access for de
 
 3. Join Protocol creates DNS mapping
    └─> myserver.local  -> 10.10.0.50
-   └─> myserver.vlan   -> 10.10.0.50
+   └─> myserver.isle   -> 10.10.0.50
 
 4. dnsmasq serves both domains
-   └─> DNS queries resolve both .local and .vlan
+   └─> DNS queries resolve both .local and .isle
 
 5. Agent responds to both domains
-   └─> nginx server_name: myserver.local myserver.vlan
+   └─> nginx server_name: myserver.local myserver.isle
 ```
 
 ## Components
@@ -37,7 +37,7 @@ The Isle Join Protocol enables automatic discovery and dual-domain access for de
 - Scans for mDNS `.local` domains every 30 seconds using `avahi-browse`
 - Extracts hostname and IP address from mDNS advertisements
 - Automatically creates DNS entries in `/etc/dnsmasq.d/isle-vlan-domains.conf`
-- Maps `hostname.local` → `hostname.vlan` (same IP)
+- Maps `hostname.local` → `hostname.isle` (same IP)
 - Reloads dnsmasq when mappings change
 
 **Installation:**
@@ -66,7 +66,7 @@ ssh root@192.168.1.1 'cat /etc/dnsmasq.d/isle-vlan-domains.conf'
 **Location:** `/home/dustin/Desktop/IsleMesh/isle-agent-mdns/scripts/configure-dual-domain.sh`
 
 **What it does:**
-- Configures nginx to respond to both `.local` and `.vlan` domains
+- Configures nginx to respond to both `.local` and `.isle` domains
 - Sets up container hostname
 - Updates Avahi hostname configuration
 - Creates example nginx vhost configurations
@@ -85,7 +85,7 @@ docker exec isle-agent-mdns /usr/local/bin/configure-dual-domain myserver
 ```nginx
 server {
     listen 80;
-    server_name myserver.local myserver.vlan;
+    server_name myserver.local myserver.isle;
 
     location / {
         # Your application
@@ -155,11 +155,11 @@ cd /home/dustin/Desktop/IsleMesh/openwrt-router/scripts/router-setup
    - Updates `/etc/dnsmasq.d/isle-vlan-domains.conf`:
    ```
    address=/myserver.local/10.10.0.50
-   address=/myserver.vlan/10.10.0.50
+   address=/myserver.isle/10.10.0.50
    ```
 
 4. **dnsmasq reloads** configuration:
-   - Both `.local` and `.vlan` now resolve
+   - Both `.local` and `.isle` now resolve
    - DNS queries return the same IP
    - Available to all mesh members
 
@@ -167,7 +167,7 @@ cd /home/dustin/Desktop/IsleMesh/openwrt-router/scripts/router-setup
 
 5. **nginx accepts both domains**:
    ```nginx
-   server_name myserver.local myserver.vlan;
+   server_name myserver.local myserver.isle;
    ```
    - HTTP Host header matches either domain
    - Same backend serves both
@@ -191,8 +191,8 @@ ssh root@192.168.1.1 'avahi-browse -a -t'
 # Test .local domain
 nslookup myserver.local 192.168.1.1
 
-# Test .vlan domain
-nslookup myserver.vlan 192.168.1.1
+# Test .isle domain
+nslookup myserver.isle 192.168.1.1
 
 # Both should return same IP
 ```
@@ -203,8 +203,8 @@ nslookup myserver.vlan 192.168.1.1
 # Via .local domain
 curl http://myserver.local
 
-# Via .vlan domain
-curl http://myserver.vlan
+# Via .isle domain
+curl http://myserver.isle
 
 # Both should work identically
 ```
@@ -249,7 +249,7 @@ This runs:
    # Should have IP in 10.X.0.0/24 range
    ```
 
-### .vlan domains not created
+### .isle domains not created
 
 **Problem:** No entries in `/etc/dnsmasq.d/isle-vlan-domains.conf`
 
@@ -271,9 +271,9 @@ This runs:
    ssh root@192.168.1.1 '/etc/init.d/isle-join-protocol restart'
    ```
 
-### DNS doesn't resolve .vlan
+### DNS doesn't resolve .isle
 
-**Problem:** `nslookup myserver.vlan` fails
+**Problem:** `nslookup myserver.isle` fails
 
 **Solutions:**
 1. Check dnsmasq is reading config:
@@ -289,12 +289,12 @@ This runs:
 
 3. Test from router itself:
    ```bash
-   ssh root@192.168.1.1 'nslookup myserver.vlan localhost'
+   ssh root@192.168.1.1 'nslookup myserver.isle localhost'
    ```
 
-### nginx not responding to .vlan domain
+### nginx not responding to .isle domain
 
-**Problem:** `.local` works but `.vlan` gives 404
+**Problem:** `.local` works but `.isle` gives 404
 
 **Solutions:**
 1. Check nginx server_name includes both:
@@ -330,10 +330,10 @@ avahi-browse _http._tcp -t -r
 
 ### Add Custom Domain Suffixes
 
-Instead of just `.vlan`, support multiple:
+Instead of just `.isle`, support multiple:
 ```bash
 # In dnsmasq config
-address=/myserver.vlan/10.10.0.50
+address=/myserver.isle/10.10.0.50
 address=/myserver.mesh/10.10.0.50
 address=/myserver.isle/10.10.0.50
 ```
@@ -368,7 +368,7 @@ fi
 ## Benefits
 
 1. **Automatic Discovery**: No manual DNS configuration needed
-2. **Dual-Domain Access**: Same service accessible via `.local` and `.vlan`
+2. **Dual-Domain Access**: Same service accessible via `.local` and `.isle`
 3. **mDNS + DNS**: Combines benefits of both protocols
 4. **Self-Healing**: Automatically updates when IPs change
 5. **Scalable**: Handles multiple agents without manual intervention
@@ -376,7 +376,7 @@ fi
 ## Next Steps
 
 - [ ] Test with multiple agents
-- [ ] Configure HTTPS certificates for `.vlan` domains
+- [ ] Configure HTTPS certificates for `.isle` domains
 - [ ] Set up nginx reverse proxies to backend services
 - [ ] Test mDNS reflection across physical network segments
 - [ ] Implement health checks and auto-removal of stale entries

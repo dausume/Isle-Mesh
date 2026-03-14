@@ -21,7 +21,7 @@ NC='\033[0m' # No Color
 
 # Configuration
 SAMPLE_APP_NAME="sample"
-SAMPLE_DOMAIN="sample.local"  # Using .local for mDNS; nginx will auto-add .vlan variant
+SAMPLE_DOMAIN="sample.local"  # Using .local for mDNS; nginx will auto-add .isle variant
 SAMPLE_APP_DIR="/tmp/isle-sample-app"
 
 show_help() {
@@ -38,7 +38,7 @@ show_help() {
     echo -e "  ${GREEN}2.${NC} Install mDNS system (service discovery infrastructure)"
     echo -e "  ${GREEN}3.${NC} Initialize and start the OpenWRT Router"
     echo -e "  ${GREEN}4.${NC} Deploy a sample Python app at ${CYAN}${SAMPLE_DOMAIN}${NC}"
-    echo -e "      (also accessible via ${CYAN}sample.vlan${NC} after join protocol)"
+    echo -e "      (also accessible via ${CYAN}sample.isle${NC} after join protocol)"
     echo -e ""
     echo -e "The sample app demonstrates how Isle Mesh dual-domain support works"
     echo -e "and provides instructions for removing it and deploying your own apps."
@@ -196,6 +196,48 @@ check_prerequisites() {
     echo ""
 }
 
+# Ensure .isle DNS resolution is configured on the host
+# On the host, .isle resolves locally (same as .local) — the nginx agent handles both.
+# On other VLAN devices, .isle resolves via the OpenWRT router's dnsmasq.
+ensure_isle_dns() {
+    local SPLIT_DNS="/etc/dnsmasq.d/split-dns.conf"
+    local RESOLVED_CONF="/etc/systemd/resolved.conf.d/split-mdns.conf"
+    local changed=false
+
+    # Get the listen-address from split-dns.conf (should be 127.0.0.6)
+    local LISTEN_ADDR
+    LISTEN_ADDR=$(grep '^listen-address=' "$SPLIT_DNS" 2>/dev/null | head -1 | cut -d= -f2)
+    LISTEN_ADDR="${LISTEN_ADDR:-127.0.0.6}"
+
+    # Remove any stale server=/.isle/ forwarding (from previous setup)
+    if grep -q 'server=/.isle/' "$SPLIT_DNS" 2>/dev/null; then
+        sed -i '/server=\/.isle\//d' "$SPLIT_DNS"
+        changed=true
+    fi
+
+    # Add .isle wildcard resolution to dnsmasq (same pattern as .local)
+    if ! grep -q 'address=/.isle/' "$SPLIT_DNS" 2>/dev/null; then
+        log_info "Adding .isle DNS resolution to dnsmasq..."
+        echo "address=/.isle/${LISTEN_ADDR}" >> "$SPLIT_DNS"
+        changed=true
+    fi
+
+    # Add ~isle to systemd-resolved domains if not already present
+    if ! grep -q '~isle' "$RESOLVED_CONF" 2>/dev/null; then
+        log_info "Adding ~isle to systemd-resolved split-DNS domains..."
+        sed -i 's/Domains=\(.*\)/Domains=\1 ~isle/' "$RESOLVED_CONF"
+        changed=true
+    fi
+
+    if [ "$changed" = true ]; then
+        systemctl restart dnsmasq 2>/dev/null || true
+        systemctl restart systemd-resolved 2>/dev/null || true
+        log_success ".isle DNS resolution configured"
+    else
+        log_success ".isle DNS resolution already configured"
+    fi
+}
+
 # Step 1: Create/Start Isle Agent
 setup_agent() {
     log_step "Step 1: Setting up Isle Agent"
@@ -207,6 +249,14 @@ setup_agent() {
     fi
 
     log_info "Starting Isle Agent..."
+
+    # Clear stale registry from previous runs so nginx doesn't try to proxy
+    # to containers that don't exist yet (sample app gets registered later)
+    local REGISTRY="/etc/isle-mesh/agent/registry.json"
+    if [[ -f "$REGISTRY" ]]; then
+        log_info "Clearing stale app registry..."
+        echo '{"domains": {}, "subdomains": {}, "apps": {}}' > "$REGISTRY"
+    fi
 
     # Check if agent scripts exist
     if [[ ! -d "$PROJECT_ROOT/isle-agent" ]]; then
@@ -514,18 +564,18 @@ rm -rf {{ app_dir }}
                 <p>You can either initialize a new app or convert an existing docker-compose project:</p>
                 <div class="code-block">
 # Option A: Initialize a new mesh app<br>
-isle app init -d myapp.vlan<br>
-cd mesh-myapp.vlan<br>
+isle app init -d myapp.isle<br>
+cd mesh-myapp.isle<br>
 isle app up --build<br>
 <br>
 # Option B: Convert existing docker-compose<br>
-isle app scaffold docker-compose.yml -d myapp.vlan<br>
-cd mesh-myapp.vlan<br>
+isle app scaffold docker-compose.yml -d myapp.isle<br>
+cd mesh-myapp.isle<br>
 isle app up
 </div>
 
                 <h3>Step 3: Access Your App</h3>
-                <p>Your app will be available at the domain you specified (e.g., <code>https://myapp.vlan</code>).</p>
+                <p>Your app will be available at the domain you specified (e.g., <code>https://myapp.isle</code>).</p>
             </div>
 
             <div class="section">
@@ -572,7 +622,7 @@ isle router help
 def index():
     return render_template_string(
         HTML_TEMPLATE,
-        domain=os.getenv('DOMAIN', 'sample.vlan'),
+        domain=os.getenv('DOMAIN', 'sample.isle'),
         timestamp=datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         app_dir=os.getenv('APP_DIR', '/tmp/isle-sample-app')
     )
@@ -604,7 +654,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app.py .
 
 ENV PORT=5000
-ENV DOMAIN=sample.vlan
+ENV DOMAIN=sample.isle
 
 EXPOSE 5000
 
@@ -700,7 +750,7 @@ EOF
             -keyout "${ssl_key_dir}/${SAMPLE_DOMAIN}.key" \
             -out "${ssl_cert_dir}/${SAMPLE_DOMAIN}.crt" \
             -subj "/CN=${SAMPLE_DOMAIN}" \
-            -addext "subjectAltName=DNS:${SAMPLE_DOMAIN}" 2>/dev/null; then
+            -addext "subjectAltName=DNS:${SAMPLE_DOMAIN},DNS:${SAMPLE_DOMAIN%.local}.isle" 2>/dev/null; then
             log_success "Generated SSL certificate for ${SAMPLE_DOMAIN}"
         else
             log_warning "Could not generate SSL cert for ${SAMPLE_DOMAIN}"
@@ -729,7 +779,7 @@ show_completion() {
     echo ""
     echo -e "${CYAN}Access Your Sample App:${NC}"
     echo -e "  ${BOLD}https://${SAMPLE_DOMAIN}${NC} (mDNS, HTTPS)"
-    echo -e "  ${BOLD}https://sample.vlan${NC} (after join protocol completes)"
+    echo -e "  ${BOLD}https://sample.isle${NC} (after join protocol completes)"
     echo ""
     echo -e "${CYAN}View Status:${NC}"
     echo -e "  isle agent status        View agent and registered apps"
@@ -759,6 +809,7 @@ main() {
             echo ""
 
             check_prerequisites
+            ensure_isle_dns
             setup_agent
             setup_mdns_system
             setup_router

@@ -1,0 +1,80 @@
+version: '3.8'
+
+# Isle Remote Agent - Remote Mode Compose
+# Used when a machine joins an existing isle via `isle join`.
+# The remote agent gets a VLAN IP via DHCP through a macvlan network
+# on the host's physical interface.
+
+services:
+  isle-remote-agent:
+    build:
+      context: .  # isle-agent/ directory (parent of both vlan-agent and remote-agent)
+      dockerfile: isle-remote-agent/Dockerfile.remote
+    container_name: isle-remote-agent
+    restart: unless-stopped
+
+    # Virtual MAC address for DHCP isolation
+    # Generated during `isle join` — format: 02:00:00:00:VLAN_HEX:RANDOM
+    mac_address: "${VIRTUAL_MAC}"
+
+    cap_add:
+      - NET_ADMIN  # Required for udhcpc (DHCP client inside container)
+
+    environment:
+      - ISLE_NAME=${ISLE_NAME}
+      - VLAN_ID=${VLAN_ID}
+      - ROUTER_IP=${ROUTER_IP}
+
+    volumes:
+      # Initial/template nginx config (read-only source)
+      - ./isle-vlan-agent/nginx.conf:/etc/nginx/nginx-initial.conf:ro
+
+      # Read-only access to host registry (watched for changes)
+      - /etc/isle-mesh/agent/registry.json:/etc/nginx/registry.json:ro
+
+      # Active nginx main config (observable on host)
+      - /etc/isle-mesh/agent/nginx/nginx.conf:/etc/nginx/nginx.conf:rw
+
+      # Generated app configs (observable on host)
+      - /etc/isle-mesh/agent/nginx/configs:/etc/nginx/configs:rw
+
+      # SSL certificates (shared across all apps)
+      - /etc/isle-mesh/agent/ssl/certs:/etc/nginx/ssl/certs:ro
+      - /etc/isle-mesh/agent/ssl/keys:/etc/nginx/ssl/keys:ro
+
+      # Agent logs
+      - /etc/isle-mesh/agent/logs:/var/log/nginx
+
+    networks:
+      isle-agent-net:
+        priority: 100
+      isle-remote-macvlan:
+        priority: 200
+
+    # No ports: section — traffic arrives via macvlan, not host network
+    labels:
+      isle.component: "remote-agent"
+      isle.role: "remote-proxy"
+      isle.version: "1.0.0"
+
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+networks:
+  # Internal docker network for app containers to reach agent
+  isle-agent-net:
+    driver: bridge
+    name: isle-agent-net
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+  # Macvlan network on physical interface for VLAN connectivity
+  # Created by macvlan-setup.sh before docker compose up
+  isle-remote-macvlan:
+    external: true
+    name: isle-remote-macvlan

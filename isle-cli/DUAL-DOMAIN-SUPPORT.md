@@ -1,12 +1,12 @@
 # Dual-Domain Support in Isle CLI
 
-The Isle CLI (`isle app init` and `isle app scaffold`) now automatically generates nginx configurations that respond to both `.local` and `.vlan` domains for seamless integration with the Isle Mesh join protocol.
+The Isle CLI (`isle app init` and `isle app scaffold`) now automatically generates nginx configurations that respond to both `.local` and `.isle` domains for seamless integration with the Isle Mesh join protocol.
 
 ## What Changed
 
 ### Automatic Dual-Domain nginx Configs
 
-When you use `isle app init` or `isle app scaffold` with a `.local` domain, the generated nginx configurations will automatically include both the `.local` and `.vlan` variants in `server_name` directives.
+When you use `isle app init` or `isle app scaffold` with a `.local` domain, the generated nginx configurations will automatically include both the `.local` and `.isle` variants in `server_name` directives.
 
 **Example:**
 ```bash
@@ -17,8 +17,8 @@ isle app init -d myapp.local
 ```nginx
 server {
     listen 80;
-    # Dual-domain support: mDNS (.local) and mesh DNS (.vlan)
-    server_name myapp.local myapp.vlan;
+    # Dual-domain support: mDNS (.local) and mesh DNS (.isle)
+    server_name myapp.local myapp.isle;
 
     location / {
         # Your configuration
@@ -27,8 +27,8 @@ server {
 
 server {
     listen 443 ssl;
-    # Dual-domain support: mDNS (.local) and mesh DNS (.vlan)
-    server_name frontend.myapp.local frontend.myapp.vlan;
+    # Dual-domain support: mDNS (.local) and mesh DNS (.isle)
+    server_name frontend.myapp.local frontend.myapp.isle;
 
     ssl_certificate /ssl/certs/myapp.crt;
     ssl_certificate_key /ssl/keys/myapp.key;
@@ -71,14 +71,14 @@ isle app scaffold ./app/docker-compose.yml -n myapp -d myapp.local
 
 ### Template System
 
-The CLI uses Jinja2 templates located in `/mesh-proxy/segments/` to generate nginx configurations. Each template now includes conditional logic to add `.vlan` domains when the base domain ends with `.local`:
+The CLI uses Jinja2 templates located in `/mesh-proxy/segments/` to generate nginx configurations. Each template now includes conditional logic to add `.isle` domains when the base domain ends with `.local`:
 
 **HTTP Subdomain Template** (`server-http-subdomain.conf.j2`):
 ```jinja
 server {
     listen 80;
-    # Dual-domain support: mDNS (.local) and mesh DNS (.vlan)
-    server_name {{ subdomain }}.{{ base_domain }} {% if base_domain.endswith('.local') %}{{ subdomain }}.{{ base_domain.replace('.local', '.vlan') }}{% endif %};
+    # Dual-domain support: mDNS (.local) and mesh DNS (.isle)
+    server_name {{ subdomain }}.{{ base_domain }} {% if base_domain.endswith('.local') %}{{ subdomain }}.{{ base_domain.replace('.local', '.isle') }}{% endif %};
 
     location / {
         proxy_pass http://{{ upstream_name }};
@@ -93,13 +93,13 @@ For a service `backend` with domain `mesh-app.local`, the CLI generates:
 ```nginx
 server {
     listen 80;
-    server_name backend.mesh-app.local backend.mesh-app.vlan;
+    server_name backend.mesh-app.local backend.mesh-app.isle;
     # ...
 }
 
 server {
     listen 443 ssl;
-    server_name backend.mesh-app.local backend.mesh-app.vlan;
+    server_name backend.mesh-app.local backend.mesh-app.isle;
     # ...
 }
 ```
@@ -109,11 +109,11 @@ server {
 The dual-domain nginx configs work seamlessly with the Isle Mesh join protocol:
 
 1. **Agent advertises** `myserver.local` via mDNS
-2. **Join protocol discovers** and creates DNS mapping for `myserver.vlan`
+2. **Join protocol discovers** and creates DNS mapping for `myserver.isle`
 3. **nginx responds** to both domains with the same configuration
 4. **Users can access** via either:
    - `http://myserver.local` (mDNS)
-   - `http://myserver.vlan` (Mesh DNS)
+   - `http://myserver.isle` (Mesh DNS)
 
 ## Updated Templates
 
@@ -140,7 +140,7 @@ isle app up --build
 ```
 
 **Result:**
-- Services accessible via both `frontend.webapp.local` and `frontend.webapp.vlan`
+- Services accessible via both `frontend.webapp.local` and `frontend.webapp.isle`
 - Automatic SSL support for both domains
 - Join protocol auto-discovers and maps domains
 
@@ -151,9 +151,9 @@ isle app up --build
 isle app scaffold docker-compose.yml -d myapp.local -o ./mesh-app
 
 # Generated nginx config includes:
-# - myapp.local / myapp.vlan
-# - frontend.myapp.local / frontend.myapp.vlan
-# - backend.myapp.local / backend.myapp.vlan
+# - myapp.local / myapp.isle
+# - frontend.myapp.local / frontend.myapp.isle
+# - backend.myapp.local / backend.myapp.isle
 ```
 
 ### Example 3: Multi-Service Mesh
@@ -168,7 +168,7 @@ isle app init -d services.local -n my-microservices
 # - auth-service
 # - database
 
-# All services will be accessible via both .local and .vlan
+# All services will be accessible via both .local and .isle
 ```
 
 ## Testing Dual-Domain Support
@@ -178,7 +178,7 @@ After running `isle app init` or `isle app scaffold`:
 1. **Check generated nginx config:**
    ```bash
    cat proxy/nginx-mesh-proxy.conf
-   # Look for server_name directives with both .local and .vlan
+   # Look for server_name directives with both .local and .isle
    ```
 
 2. **Start the mesh app:**
@@ -193,9 +193,9 @@ After running `isle app init` or `isle app scaffold`:
 
 4. **Wait for join protocol** (30 seconds max)
 
-5. **Test .vlan domain:**
+5. **Test .isle domain:**
    ```bash
-   curl http://frontend.myapp.vlan
+   curl http://frontend.myapp.isle
    ```
 
 Both should return the same content!
@@ -209,10 +209,10 @@ If you use a domain that doesn't end in `.local`, the CLI will only generate sin
 isle app init -d myapp.com
 
 # Generated nginx config:
-# server_name myapp.com (no .vlan variant)
+# server_name myapp.com (no .isle variant)
 ```
 
-This is intentional - the `.vlan` suffix is only added for mDNS-compatible `.local` domains that integrate with the join protocol.
+This is intentional - the `.isle` suffix is only added for mDNS-compatible `.local` domains that integrate with the join protocol.
 
 ## Troubleshooting
 
@@ -234,9 +234,9 @@ If generated configs only show `.local` domains:
 
 3. Check template files in `/mesh-proxy/segments/` for dual-domain logic
 
-### .vlan Domain Not Resolving
+### .isle Domain Not Resolving
 
-If `.local` works but `.vlan` doesn't:
+If `.local` works but `.isle` doesn't:
 
 1. Ensure join protocol is running on router:
    ```bash
@@ -257,13 +257,13 @@ If `.local` works but `.vlan` doesn't:
 
 ### Custom Domain Suffix
 
-To use a different suffix than `.vlan`, modify the template files:
+To use a different suffix than `.isle`, modify the template files:
 
 1. Edit `/mesh-proxy/segments/server-http-subdomain.conf.j2`
-2. Change `.replace('.local', '.vlan')` to `.replace('.local', '.mesh')`
-3. Update join protocol to use `.mesh` instead of `.vlan`
+2. Change `.replace('.local', '.isle')` to `.replace('.local', '.mesh')`
+3. Update join protocol to use `.mesh` instead of `.isle`
 
-### SSL Certificates for .vlan Domains
+### SSL Certificates for .isle Domains
 
 The same SSL certificates work for both domains:
 
@@ -280,7 +280,7 @@ isle app ssl generate-mesh config/ssl.env.conf
 
 This creates a certificate valid for:
 - `*.myapp.local`
-- `*.myapp.vlan` (if SAN is configured)
+- `*.myapp.isle` (if SAN is configured)
 
 ## Related Documentation
 
@@ -290,10 +290,10 @@ This creates a certificate valid for:
 
 ## Summary
 
-The Isle CLI now automatically configures nginx to respond to both `.local` and `.vlan` domains when you use a `.local` base domain. This enables:
+The Isle CLI now automatically configures nginx to respond to both `.local` and `.isle` domains when you use a `.local` base domain. This enables:
 
 - **Seamless mDNS integration** - Services advertise via `.local`
-- **Mesh DNS fallback** - Same services accessible via `.vlan`
+- **Mesh DNS fallback** - Same services accessible via `.isle`
 - **Automatic discovery** - Join protocol handles domain mapping
 - **Zero configuration** - Works out of the box with `isle app init`
 

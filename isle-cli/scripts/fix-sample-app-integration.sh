@@ -101,7 +101,7 @@ log_step "Step 3: Create Nginx Config Fragment for Sample App"
 log_info "Creating nginx config fragment..."
 sudo tee "${AGENT_CONFIGS_DIR}/sample.conf" > /dev/null << 'NGINX_CONF'
 # Configuration for sample app
-# Domain: sample.local / sample.vlan
+# Domain: sample.local / sample.isle
 
 # Upstream definition
 upstream sample_backend {
@@ -112,7 +112,7 @@ upstream sample_backend {
 # HTTP server
 server {
     listen 80;
-    server_name sample.local sample.vlan;
+    server_name sample.local sample.isle;
 
     location / {
         proxy_pass http://sample_backend;
@@ -136,7 +136,7 @@ server {
 # HTTPS server
 server {
     listen 443 ssl;
-    server_name sample.local sample.vlan;
+    server_name sample.local sample.isle;
 
     # SSL configuration (self-signed for now)
     # TODO: Add SSL cert generation

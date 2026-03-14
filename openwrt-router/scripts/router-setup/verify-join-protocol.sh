@@ -5,7 +5,7 @@
 #
 # Tests the complete join protocol flow:
 #   1. mDNS discovery (.local domains)
-#   2. DNS mapping (.vlan domains)
+#   2. DNS mapping (.isle domains)
 #   3. DHCP functionality
 #   4. HTTP/HTTPS connectivity
 #   5. Service accessibility
@@ -227,7 +227,7 @@ test_mdns_discovery() {
 
 # Test 5: DNS mapping configuration
 test_dns_mapping() {
-    log_step "Test 5: DNS Mapping (.vlan domains)"
+    log_step "Test 5: DNS Mapping (.isle domains)"
 
     # Check if dnsmasq config file exists
     local dns_conf
@@ -242,10 +242,10 @@ test_dns_mapping() {
 
     test_pass "DNS mapping configuration file exists"
 
-    # Count .vlan domain entries
-    local vlan_count=$(echo "$dns_conf" | grep -c "\.vlan" || echo 0)
+    # Count .isle domain entries
+    local vlan_count=$(echo "$dns_conf" | grep -c "\.isle" || echo 0)
     if [[ $vlan_count -gt 0 ]]; then
-        test_pass "Found $vlan_count .vlan domain mapping(s)"
+        test_pass "Found $vlan_count .isle domain mapping(s)"
 
         # Display mappings
         log_info "DNS mappings:"
@@ -253,7 +253,7 @@ test_dns_mapping() {
             echo "  $line"
         done
     else
-        test_fail "vlan domain mappings" "No .vlan domains in configuration"
+        test_fail "vlan domain mappings" "No .isle domains in configuration"
         return 1
     fi
 
@@ -280,22 +280,22 @@ test_dns_resolution_router() {
         test_fail ".local DNS resolution" "Could not resolve ${TEST_HOSTNAME}.local"
     fi
 
-    # Test .vlan resolution
+    # Test .isle resolution
     local vlan_ip
     vlan_ip=$(sudo ssh $SSH_OPTS "${ROUTER_USER}@${ROUTER_IP}" \
-        "nslookup ${TEST_HOSTNAME}.vlan localhost 2>/dev/null | grep 'Address:' | tail -1 | awk '{print \$2}'" || echo "")
+        "nslookup ${TEST_HOSTNAME}.isle localhost 2>/dev/null | grep 'Address:' | tail -1 | awk '{print \$2}'" || echo "")
 
     if [[ -n "$vlan_ip" ]] && [[ "$vlan_ip" =~ ^10\. ]]; then
-        test_pass "${TEST_HOSTNAME}.vlan resolves to $vlan_ip"
+        test_pass "${TEST_HOSTNAME}.isle resolves to $vlan_ip"
     else
-        test_fail ".vlan DNS resolution" "Could not resolve ${TEST_HOSTNAME}.vlan"
+        test_fail ".isle DNS resolution" "Could not resolve ${TEST_HOSTNAME}.isle"
     fi
 
     # Verify both resolve to same IP
     if [[ -n "$local_ip" ]] && [[ -n "$vlan_ip" ]] && [[ "$local_ip" == "$vlan_ip" ]]; then
         test_pass "Both domains resolve to same IP ($local_ip)"
     else
-        test_fail "Domain consistency" ".local and .vlan resolve to different IPs"
+        test_fail "Domain consistency" ".local and .isle resolve to different IPs"
     fi
 
     return 0
@@ -356,12 +356,12 @@ test_http_connectivity() {
         test_fail "HTTP .local access" "Cannot reach http://${TEST_HOSTNAME}.local"
     fi
 
-    # Test .vlan domain
-    if curl -f -s -m 5 "http://${TEST_HOSTNAME}.vlan/health" &> /dev/null || \
-       curl -f -s -m 5 "http://${TEST_HOSTNAME}.vlan/" &> /dev/null; then
-        test_pass "HTTP accessible via ${TEST_HOSTNAME}.vlan"
+    # Test .isle domain
+    if curl -f -s -m 5 "http://${TEST_HOSTNAME}.isle/health" &> /dev/null || \
+       curl -f -s -m 5 "http://${TEST_HOSTNAME}.isle/" &> /dev/null; then
+        test_pass "HTTP accessible via ${TEST_HOSTNAME}.isle"
     else
-        test_fail "HTTP .vlan access" "Cannot reach http://${TEST_HOSTNAME}.vlan"
+        test_fail "HTTP .isle access" "Cannot reach http://${TEST_HOSTNAME}.isle"
     fi
 
     return 0
@@ -423,7 +423,7 @@ ${GREEN}╔═══════════════════════
 ║                                                               ║
 ║  The join protocol is working correctly!                     ║
 ║  • Agents are discoverable via mDNS                          ║
-║  • DNS mappings are created for .vlan domains                ║
+║  • DNS mappings are created for .isle domains                ║
 ║  • DHCP is assigning IPs correctly                           ║
 ║  • HTTP connectivity works for both domains                  ║
 ╚═══════════════════════════════════════════════════════════════╝${NC}

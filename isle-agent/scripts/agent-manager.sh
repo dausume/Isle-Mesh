@@ -32,6 +32,7 @@ REGISTRY_FILE="${ISLE_AGENT_DIR}/registry.json"
 
 # Component names
 VLAN_CONTAINER="isle-vlan-agent"
+REMOTE_CONTAINER="isle-remote-agent"
 HOST_SERVICE="isle-host-agent"
 
 # Component paths
@@ -73,6 +74,16 @@ log_warn() {
 
 log_error() {
     echo -e "${RED}[ERROR]${NC} $*" >&2
+}
+
+# Get agent mode (core or remote)
+get_agent_mode() {
+    local mode_file="${ISLE_AGENT_DIR}/agent.mode"
+    if [[ -f "$mode_file" ]]; then
+        cat "$mode_file" 2>/dev/null
+    else
+        echo "core"
+    fi
 }
 
 # Check if user has proper permissions for /etc/isle-mesh
@@ -461,9 +472,15 @@ setup_isle_bridge() {
     fi
 }
 
-# Check if vlan agent is running
+# Check if vlan agent is running (core or remote)
 is_vlan_running() {
-    docker ps --filter "name=${VLAN_CONTAINER}" --filter "status=running" --format '{{.Names}}' | grep -q "^${VLAN_CONTAINER}$"
+    local mode
+    mode=$(get_agent_mode)
+    if [[ "$mode" == "remote" ]]; then
+        docker ps --filter "name=${REMOTE_CONTAINER}" --filter "status=running" --format '{{.Names}}' | grep -q "^${REMOTE_CONTAINER}$"
+    else
+        docker ps --filter "name=${VLAN_CONTAINER}" --filter "status=running" --format '{{.Names}}' | grep -q "^${VLAN_CONTAINER}$"
+    fi
 }
 
 # Check if host agent is running
@@ -922,10 +939,17 @@ start_agent() {
 stop_agent() {
     log_info "Stopping isle-agent components..."
 
+    local mode
+    mode=$(get_agent_mode)
     local any_running=false
 
     # Check if any components are running
     if is_host_running || is_vlan_running; then
+        any_running=true
+    fi
+
+    # Also check remote container directly
+    if docker ps --filter "name=${REMOTE_CONTAINER}" --filter "status=running" --format '{{.Names}}' | grep -q "^${REMOTE_CONTAINER}$"; then
         any_running=true
     fi
 
@@ -944,15 +968,31 @@ stop_agent() {
     # Stop containers
     cd "${PROJECT_ROOT}/isle-agent"
 
-    # Stop containers using docker-compose
-    if [[ -f "${COMPOSE_FILE}" ]]; then
-        $DOCKER_COMPOSE_CMD down 2>/dev/null || true
-    fi
+    if [[ "$mode" == "remote" ]]; then
+        # Remote mode: stop remote container and clean up macvlan
+        if docker ps -a --filter "name=${REMOTE_CONTAINER}" --format '{{.Names}}' | grep -q "^${REMOTE_CONTAINER}$"; then
+            log_info "Stopping ${REMOTE_CONTAINER}..."
+            docker stop "${REMOTE_CONTAINER}" 2>/dev/null || true
+            docker rm -f "${REMOTE_CONTAINER}" 2>/dev/null || true
+            log_success "Remote agent stopped"
+        fi
 
-    # Force remove any remaining containers
-    if docker ps -a --filter "name=${VLAN_CONTAINER}" --format '{{.Names}}' | grep -q "^${VLAN_CONTAINER}$"; then
-        log_info "Force removing ${VLAN_CONTAINER}..."
-        docker rm -f "${VLAN_CONTAINER}" 2>/dev/null || true
+        # Remove macvlan network
+        if docker network inspect isle-remote-macvlan &>/dev/null; then
+            log_info "Removing isle-remote-macvlan network..."
+            docker network rm isle-remote-macvlan 2>/dev/null || true
+        fi
+    else
+        # Core mode: stop vlan container using compose
+        if [[ -f "${COMPOSE_FILE}" ]]; then
+            $DOCKER_COMPOSE_CMD down 2>/dev/null || true
+        fi
+
+        # Force remove any remaining containers
+        if docker ps -a --filter "name=${VLAN_CONTAINER}" --format '{{.Names}}' | grep -q "^${VLAN_CONTAINER}$"; then
+            log_info "Force removing ${VLAN_CONTAINER}..."
+            docker rm -f "${VLAN_CONTAINER}" 2>/dev/null || true
+        fi
     fi
 
     log_success "All agent components stopped"
@@ -990,10 +1030,12 @@ reload_config() {
 # Show agent status
 show_status() {
     echo ""
-    echo "=== Isle Agent Status (Two Components) ==="
+    local mode
+    mode=$(get_agent_mode)
+    echo "=== Isle Agent Status (Mode: ${mode}) ==="
     echo ""
 
-    # Component 1: Host Agent (Systemd Service) - REQUIRED
+    # Component 1: Host Agent (Systemd Service) - REQUIRED in core mode
     echo "Component 1: isle-host-agent (systemd service - mDNS, registry, auto-sync)"
     if is_host_running; then
         log_success "  Status: RUNNING"
@@ -1035,22 +1077,53 @@ show_status() {
     fi
     echo ""
 
-    # Component 2: VLAN Agent (Nginx Container)
-    echo "Component 2: isle-vlan-agent (nginx proxy)"
-    if is_vlan_running; then
-        log_success "  Status: RUNNING"
-        docker ps --filter "name=${VLAN_CONTAINER}" --format "  ID: {{.ID}}\n  Uptime: {{.Status}}"
+    # Component 2: VLAN/Remote Agent (Nginx Container)
+    if [[ "$mode" == "remote" ]]; then
+        echo "Component 2: isle-remote-agent (nginx proxy - remote mode)"
+        if docker ps --filter "name=${REMOTE_CONTAINER}" --filter "status=running" --format '{{.Names}}' | grep -q "^${REMOTE_CONTAINER}$"; then
+            log_success "  Status: RUNNING"
+            docker ps --filter "name=${REMOTE_CONTAINER}" --format "  ID: {{.ID}}\n  Uptime: {{.Status}}"
 
-        # Get MAC and IP
-        local mac_addr
-        mac_addr=$(docker inspect "${VLAN_CONTAINER}" --format '{{range .NetworkSettings.Networks}}{{.MacAddress}}{{end}}' | head -n1)
-        local ip_addr
-        ip_addr=$(docker inspect "${VLAN_CONTAINER}" --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' | head -n1)
-        echo "  MAC: ${mac_addr}"
-        echo "  IP: ${ip_addr}"
-        echo "  HTTP: http://localhost/"
+            local mac_addr
+            mac_addr=$(docker inspect "${REMOTE_CONTAINER}" --format '{{range .NetworkSettings.Networks}}{{.MacAddress}}{{end}}' | head -n1)
+            local ip_addr
+            ip_addr=$(docker exec "${REMOTE_CONTAINER}" ip -4 addr show eth0 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || echo "pending")
+            echo "  MAC: ${mac_addr}"
+            echo "  VLAN IP: ${ip_addr}"
+
+            # Show isle info from discovery.json
+            local remote_dir="${ISLE_AGENT_DIR}/remote"
+            if [[ -f "${remote_dir}/discovery.json" ]]; then
+                local isle_name
+                isle_name=$(jq -r '.isle_name // "unknown"' "${remote_dir}/discovery.json" 2>/dev/null)
+                local router_ip
+                router_ip=$(jq -r '.router_ip // "unknown"' "${remote_dir}/discovery.json" 2>/dev/null)
+                echo "  Isle: ${isle_name}"
+                echo "  Router: ${router_ip}"
+            fi
+            if [[ -f "${remote_dir}/interface.conf" ]]; then
+                echo "  Interface: $(cat "${remote_dir}/interface.conf")"
+            fi
+        else
+            log_warn "  Status: STOPPED"
+        fi
     else
-        log_warn "  Status: STOPPED"
+        echo "Component 2: isle-vlan-agent (nginx proxy)"
+        if is_vlan_running; then
+            log_success "  Status: RUNNING"
+            docker ps --filter "name=${VLAN_CONTAINER}" --format "  ID: {{.ID}}\n  Uptime: {{.Status}}"
+
+            # Get MAC and IP
+            local mac_addr
+            mac_addr=$(docker inspect "${VLAN_CONTAINER}" --format '{{range .NetworkSettings.Networks}}{{.MacAddress}}{{end}}' | head -n1)
+            local ip_addr
+            ip_addr=$(docker inspect "${VLAN_CONTAINER}" --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' | head -n1)
+            echo "  MAC: ${mac_addr}"
+            echo "  IP: ${ip_addr}"
+            echo "  HTTP: http://localhost/"
+        else
+            log_warn "  Status: STOPPED"
+        fi
     fi
     echo ""
 
@@ -1337,6 +1410,38 @@ register_app() {
         log_info "Add domain manually with: isle mdns domain add ${domain}"
     fi
 
+    # Auto-generate self-signed SSL certificate if not present
+    local ssl_cert_dir="${ISLE_AGENT_DIR}/ssl/certs"
+    local ssl_key_dir="${ISLE_AGENT_DIR}/ssl/keys"
+    mkdir -p "$ssl_cert_dir" "$ssl_key_dir"
+
+    if [[ ! -f "${ssl_cert_dir}/${domain}.crt" ]]; then
+        log_info "Generating self-signed SSL certificate for ${domain}..."
+
+        # Build SAN list: always include the domain itself
+        local san_list="DNS:${domain}"
+
+        # If domain ends in .local, also add the .isle variant
+        local isle_domain="${domain%.local}"
+        if [[ "$isle_domain" != "$domain" ]]; then
+            isle_domain="${isle_domain}.isle"
+            san_list="${san_list},DNS:${isle_domain}"
+        fi
+
+        if openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+            -keyout "${ssl_key_dir}/${domain}.key" \
+            -out "${ssl_cert_dir}/${domain}.crt" \
+            -subj "/CN=${domain}" \
+            -addext "subjectAltName=${san_list}" 2>/dev/null; then
+            log_success "Generated SSL certificate for ${domain}"
+        else
+            log_warn "Could not generate SSL cert for ${domain}"
+            log_info "Generate manually: openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout ${ssl_key_dir}/${domain}.key -out ${ssl_cert_dir}/${domain}.crt -subj '/CN=${domain}'"
+        fi
+    else
+        log_info "SSL certificate for ${domain} already exists"
+    fi
+
     # Touch registry.json to trigger the registry-watcher in the vlan-agent
     touch "${REGISTRY_FILE}"
     log_success "Registry updated — vlan-agent will regenerate nginx configs"
@@ -1351,13 +1456,117 @@ register_app() {
     echo ""
 }
 
+# Unregister an app from the agent
+unregister_app() {
+    local app_name=""
+    local remove_ssl=false
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --name) app_name="$2"; shift 2 ;;
+            --remove-ssl) remove_ssl=true; shift ;;
+            *) log_error "Unknown option: $1"; return 1 ;;
+        esac
+    done
+
+    if [[ -z "$app_name" ]]; then
+        log_error "Missing required --name argument"
+        echo "Usage: unregister --name <name> [--remove-ssl]"
+        echo ""
+        echo "Options:"
+        echo "  --name <name>    App name as it appears in the registry"
+        echo "  --remove-ssl     Also remove SSL certificates for the app's domain"
+        echo ""
+        # Show registered apps for convenience
+        if [[ -f "${REGISTRY_FILE}" ]] && command -v jq &>/dev/null; then
+            echo "Currently registered apps:"
+            jq -r '.apps | to_entries[] | "  \(.key): \(.value.domain)"' "${REGISTRY_FILE}" 2>/dev/null || echo "  (could not read registry)"
+        fi
+        return 1
+    fi
+
+    if ! command -v jq &>/dev/null; then
+        log_error "jq is required for registry management"
+        return 1
+    fi
+
+    if [[ ! -f "${REGISTRY_FILE}" ]]; then
+        log_error "Registry file not found: ${REGISTRY_FILE}"
+        return 1
+    fi
+
+    # Check if app exists in registry
+    local app_exists
+    app_exists=$(jq -r --arg name "$app_name" '.apps[$name] // empty' "${REGISTRY_FILE}" 2>/dev/null)
+    if [[ -z "$app_exists" ]]; then
+        log_error "App '${app_name}' not found in registry"
+        echo ""
+        echo "Registered apps:"
+        jq -r '.apps | to_entries[] | "  \(.key): \(.value.domain)"' "${REGISTRY_FILE}" 2>/dev/null
+        return 1
+    fi
+
+    # Get domain before removing (for mDNS + SSL cleanup)
+    local domain
+    domain=$(jq -r --arg name "$app_name" '.apps[$name].domain // ""' "${REGISTRY_FILE}" 2>/dev/null)
+
+    log_info "Unregistering app '${app_name}' (${domain})..."
+
+    # Remove from registry.json
+    local temp_file
+    temp_file=$(mktemp)
+    jq --arg name "$app_name" 'del(.apps[$name])' "${REGISTRY_FILE}" > "$temp_file"
+    cp "$temp_file" "${REGISTRY_FILE}"
+    rm -f "$temp_file"
+    chmod 664 "${REGISTRY_FILE}" 2>/dev/null || true
+    log_success "Removed '${app_name}' from registry"
+
+    # Remove domain from mDNS broadcast list
+    if [[ -n "$domain" ]]; then
+        local mdns_list="/usr/local/etc/mesh-mdns-domains.list"
+        if [[ -f "$mdns_list" ]] && grep -Fxq "$domain" "$mdns_list" 2>/dev/null; then
+            # Check that no other app uses this domain
+            local other_uses
+            other_uses=$(jq -r --arg domain "$domain" '[.apps[] | select(.domain == $domain)] | length' "${REGISTRY_FILE}" 2>/dev/null || echo "0")
+            if [[ "$other_uses" -eq 0 ]]; then
+                sed -i "\|^${domain}$|d" "$mdns_list"
+                log_success "Removed ${domain} from mDNS broadcast list"
+                sudo systemctl restart mesh-mdns.service 2>/dev/null || true
+            else
+                log_info "Keeping ${domain} in mDNS list (still used by another app)"
+            fi
+        fi
+    fi
+
+    # Optionally remove SSL certificates
+    if $remove_ssl && [[ -n "$domain" ]]; then
+        local ssl_cert="${ISLE_AGENT_DIR}/ssl/certs/${domain}.crt"
+        local ssl_key="${ISLE_AGENT_DIR}/ssl/keys/${domain}.key"
+        if [[ -f "$ssl_cert" ]] || [[ -f "$ssl_key" ]]; then
+            rm -f "$ssl_cert" "$ssl_key"
+            log_success "Removed SSL certificate for ${domain}"
+        fi
+    fi
+
+    # Touch registry to trigger nginx config regeneration
+    touch "${REGISTRY_FILE}"
+    log_success "Registry updated — vlan-agent will regenerate nginx configs"
+
+    echo ""
+    log_info "App '${app_name}' has been unregistered"
+    if [[ -n "$domain" ]] && ! $remove_ssl; then
+        log_info "SSL certificates for ${domain} were kept (use --remove-ssl to delete)"
+    fi
+    echo ""
+}
+
 # Main command handler
 main() {
     local command="${1:-help}"
 
     # Commands that don't require Docker
     case "${command}" in
-        help|--help|-h|init|register)
+        help|--help|-h|init|register|unregister)
             ;;
         *)
             # All other commands require Docker
@@ -1400,6 +1609,10 @@ main() {
             shift  # remove 'register' from $@
             register_app "$@"
             ;;
+        unregister)
+            shift  # remove 'unregister' from $@
+            unregister_app "$@"
+            ;;
         cleanup-cache|clean-cache|cleanup)
             cleanup_network_cache
             ;;
@@ -1441,6 +1654,8 @@ Commands:
   App Registration:
     register                Register an app with the agent
                             Options: --name, --domain, --container, --port, --protocol
+    unregister              Unregister an app from the agent
+                            Options: --name [--remove-ssl]
 
   Verification:
     verify-setup            Verify all components are healthy

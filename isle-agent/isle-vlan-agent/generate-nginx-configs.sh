@@ -105,10 +105,18 @@ EOF
             SERVER_NAME="${APP_DOMAIN}"
         fi
 
+        # If domain ends in .local, also add .isle variant for dual-domain support
+        ISLE_DOMAIN=$(echo "$SERVER_NAME" | sed 's/\.local$/.isle/')
+        if [ "$ISLE_DOMAIN" != "$SERVER_NAME" ]; then
+            SERVER_NAME_DIRECTIVE="${SERVER_NAME} ${ISLE_DOMAIN}"
+        else
+            SERVER_NAME_DIRECTIVE="${SERVER_NAME}"
+        fi
+
         # Sanitize upstream name
         SAFE_UPSTREAM=$(echo "${SAFE_APP_NAME}_${SVC_NAME}" | sed 's/[^a-zA-Z0-9_]/_/g')
 
-        echo "    Service: $SVC_NAME -> ${SVC_CONTAINER}:${SVC_PORT} (${SERVER_NAME})"
+        echo "    Service: $SVC_NAME -> ${SVC_CONTAINER}:${SVC_PORT} (${SERVER_NAME_DIRECTIVE})"
 
         cat >> "$CONFIG_FILE" <<EOF
 
@@ -121,7 +129,7 @@ upstream ${SAFE_UPSTREAM}_backend {
 server {
     listen 80;
     listen [::]:80;
-    server_name ${SERVER_NAME};
+    server_name ${SERVER_NAME_DIRECTIVE};
 
     # Redirect HTTP to HTTPS
     location / {
@@ -132,7 +140,7 @@ server {
 server {
     listen 443 ssl http2;
     listen [::]:443 ssl http2;
-    server_name ${SERVER_NAME};
+    server_name ${SERVER_NAME_DIRECTIVE};
 
     # SSL certificates
     ssl_certificate /etc/nginx/ssl/certs/${APP_DOMAIN}.crt;

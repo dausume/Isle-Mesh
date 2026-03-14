@@ -3,8 +3,8 @@
     # {{ base_domain }} https server
     server {
         listen 443 ssl{% if is_default %} default_server{% endif %};
-        # Dual-domain support: mDNS (.local) and mesh DNS (.vlan)
-        server_name {{ base_domain }} {% if base_domain.endswith('.local') %}{{ base_domain.replace('.local', '.vlan') }}{% endif %};
+        # Dual-domain support: mDNS (.local) and mesh DNS (.isle)
+        server_name {{ base_domain }} {% if base_domain.endswith('.local') %}{{ base_domain.replace('.local', '.isle') }}{% endif %};
 
         # SSL Configuration for the base mDNS server name
         ssl_certificate /ssl/certs/{{ base_cert }};

@@ -66,6 +66,8 @@ show_help() {
     echo -e "  ${CYAN}isle agent register${NC}            Register an app with the agent"
     echo -e "      --name <name>  --domain <domain>  --container <container>"
     echo -e "      [--port <port>]  [--protocol <protocol>]"
+    echo -e "  ${CYAN}isle agent unregister${NC}          Unregister an app from the agent"
+    echo -e "      --name <name>  [--remove-ssl]"
     echo -e ""
     echo -e "╔═══════════════════════════════════════════════════════════════╗"
     echo -e "║                    CONFIGURATION                              ║"
@@ -206,6 +208,11 @@ case $COMMAND in
     register)
         check_agent_available
         exec "${AGENT_MANAGER}" register "$@"
+        ;;
+
+    unregister)
+        check_agent_available
+        exec "${AGENT_MANAGER}" unregister "$@"
         ;;
 
     # Config management commands - delegate to merge-configs.sh

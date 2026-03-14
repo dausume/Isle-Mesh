@@ -1,6 +1,6 @@
 #!/bin/bash
 # Isle DNS Namespace Router
-# Routes DNS-related commands (router-managed .vlan domains)
+# Routes DNS-related commands (router-managed .isle domains)
 
 set -e
 
@@ -19,41 +19,41 @@ NC='\033[0m'
 show_help() {
     echo -e "${BOLD}Isle DNS Namespace${NC}"
     echo ""
-    echo "Manage router DNS infrastructure (.vlan domain resolution via dnsmasq)."
+    echo "Manage router DNS infrastructure (.isle domain resolution via dnsmasq)."
     echo ""
     echo "╔═══════════════════════════════════════════════════════════════╗"
     echo "║                   DNS LAYER OVERVIEW                          ║"
     echo "╚═══════════════════════════════════════════════════════════════╝"
     echo ""
     echo "The DNS layer runs ${BOLD}ON THE OPENWRT ROUTER${NC} and provides:"
-    echo "  • ${GREEN}.vlan${NC} domain resolution via dnsmasq"
-    echo "  • Join protocol: discovers .local (mDNS) → creates .vlan (DNS)"
+    echo "  • ${GREEN}.isle${NC} domain resolution via dnsmasq"
+    echo "  • Join protocol: discovers .local (mDNS) → creates .isle (DNS)"
     echo "  • Centralized DNS server for the entire mesh network"
     echo ""
     echo -e "${BOLD}How it works:${NC}"
     echo "  1. Router runs dnsmasq as authoritative DNS server"
     echo "  2. Other devices point their DNS to the router's IP"
-    echo "  3. Router resolves .vlan domains → returns IP addresses"
-    echo "  4. All mesh devices can resolve all .vlan domains"
+    echo "  3. Router resolves .isle domains → returns IP addresses"
+    echo "  4. All mesh devices can resolve all .isle domains"
     echo ""
     echo "╔═══════════════════════════════════════════════════════════════╗"
     echo "║                       COMMANDS                                ║"
     echo "╚═══════════════════════════════════════════════════════════════╝"
     echo ""
     echo -e "${CYAN}isle dns discover${NC}      Discover services from router perspective"
-    echo "                       Shows both .local (mDNS) and .vlan (DNS) domains"
+    echo "                       Shows both .local (mDNS) and .isle (DNS) domains"
     echo ""
     echo -e "${CYAN}isle dns status${NC}        Show DNS configuration and status"
-    echo "                       Displays dnsmasq config and active .vlan mappings"
+    echo "                       Displays dnsmasq config and active .isle mappings"
     echo ""
     echo -e "${CYAN}isle dns sync${NC}          Force join protocol to update DNS immediately"
-    echo "                       Manually trigger .local → .vlan synchronization"
+    echo "                       Manually trigger .local → .isle synchronization"
     echo ""
-    echo -e "${CYAN}isle dns list${NC}          List all .vlan DNS entries"
+    echo -e "${CYAN}isle dns list${NC}          List all .isle DNS entries"
     echo "                       Show current DNS mappings from dnsmasq"
     echo ""
     echo -e "${CYAN}isle dns verify${NC}        Test DNS resolution from router"
-    echo "                       Verify .vlan domains are resolving correctly"
+    echo "                       Verify .isle domains are resolving correctly"
     echo ""
     echo -e "${CYAN}isle dns get-ip${NC}        Get router IP address for DNS configuration"
     echo "                       Shows the IP to use as DNS server on other devices"
@@ -64,14 +64,14 @@ show_help() {
     echo ""
     echo -e "${BOLD}mDNS vs DNS:${NC}"
     echo "  • ${GREEN}.local domains${NC} = mDNS (Avahi broadcasts, peer-to-peer)"
-    echo "  • ${GREEN}.vlan domains${NC}  = DNS (dnsmasq on router, centralized)"
+    echo "  • ${GREEN}.isle domains${NC}  = DNS (dnsmasq on router, centralized)"
     echo ""
     echo -e "${BOLD}Join Protocol Workflow:${NC}"
     echo "  1. Physical machines broadcast myserver.local via mDNS (Avahi)"
     echo "  2. Router's join protocol discovers via avahi-browse every 30s"
-    echo "  3. Creates DNS mapping: myserver.local → myserver.vlan (same IP)"
+    echo "  3. Creates DNS mapping: myserver.local → myserver.isle (same IP)"
     echo "  4. Writes to /etc/dnsmasq.d/isle-vlan-domains.conf"
-    echo "  5. dnsmasq serves DNS queries for .vlan domains"
+    echo "  5. dnsmasq serves DNS queries for .isle domains"
     echo ""
     echo "╔═══════════════════════════════════════════════════════════════╗"
     echo "║                    QUICK START                                ║"
@@ -146,7 +146,7 @@ case $COMMAND in
         ;;
 
     discover)
-        # Discover services from router perspective (both .local and .vlan)
+        # Discover services from router perspective (both .local and .isle)
         echo -e "${BOLD}Discovering services from router perspective...${NC}"
         echo ""
 
@@ -194,10 +194,10 @@ else
 fi
 
 echo ""
-echo -e "${CYAN}▸ DNS Mappings (.vlan)${NC}"
+echo -e "${CYAN}▸ DNS Mappings (.isle)${NC}"
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
-# Read dnsmasq .vlan domains
+# Read dnsmasq .isle domains
 if [ -f /etc/dnsmasq.d/isle-vlan-domains.conf ]; then
     grep "^address=" /etc/dnsmasq.d/isle-vlan-domains.conf 2>/dev/null | while read -r line; do
         domain=$(echo "$line" | sed 's/address=\/\([^/]*\)\/.*/\1/')
@@ -207,9 +207,9 @@ if [ -f /etc/dnsmasq.d/isle-vlan-domains.conf ]; then
 
     count=$(grep -c "^address=" /etc/dnsmasq.d/isle-vlan-domains.conf 2>/dev/null || echo 0)
     echo ""
-    echo -e "  ${CYAN}ℹ${NC} Total .vlan domains: ${count}"
+    echo -e "  ${CYAN}ℹ${NC} Total .isle domains: ${count}"
 else
-    echo -e "  ${YELLOW}⚠${NC} No .vlan domains configured yet"
+    echo -e "  ${YELLOW}⚠${NC} No .isle domains configured yet"
     echo -e "  ${CYAN}ℹ${NC} The join protocol will create these automatically"
 fi
 
@@ -269,7 +269,7 @@ echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━�
 
 if pgrep -f "join-protocol.sh" >/dev/null 2>&1; then
     echo -e "  ${GREEN}✓${NC} Join protocol is running"
-    echo -e "  ${CYAN}ℹ${NC} Syncs .local → .vlan every 30 seconds"
+    echo -e "  ${CYAN}ℹ${NC} Syncs .local → .isle every 30 seconds"
 else
     echo -e "  ${RED}✗${NC} Join protocol is not running"
 fi
@@ -281,7 +281,7 @@ echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━�
 if [ -f /etc/dnsmasq.d/isle-vlan-domains.conf ]; then
     count=$(grep -c "^address=" /etc/dnsmasq.d/isle-vlan-domains.conf 2>/dev/null || echo 0)
     echo -e "  ${GREEN}✓${NC} /etc/dnsmasq.d/isle-vlan-domains.conf"
-    echo -e "    ${CYAN}ℹ${NC} ${count} .vlan domain(s) configured"
+    echo -e "    ${CYAN}ℹ${NC} ${count} .isle domain(s) configured"
 else
     echo -e "  ${YELLOW}⚠${NC} /etc/dnsmasq.d/isle-vlan-domains.conf not found"
 fi
@@ -328,8 +328,8 @@ EOFSSH
         ;;
 
     list)
-        # List all .vlan DNS entries
-        echo -e "${BOLD}Current .vlan DNS Entries${NC}"
+        # List all .isle DNS entries
+        echo -e "${BOLD}Current .isle DNS Entries${NC}"
         echo ""
 
         if ! virsh list --all 2>/dev/null | grep -q "openwrt-isle-router.*running"; then
@@ -351,7 +351,7 @@ if [ -f /etc/dnsmasq.d/isle-vlan-domains.conf ]; then
         printf "%-30s  %s\n" "$domain" "$ip"
     done
 else
-    echo "No .vlan domains configured"
+    echo "No .isle domains configured"
 fi
 
 EOFSSH
@@ -378,15 +378,15 @@ RED='\033[0;31m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-echo -e "${CYAN}Testing .vlan domain resolution...${NC}"
+echo -e "${CYAN}Testing .isle domain resolution...${NC}"
 echo ""
 
 if [ ! -f /etc/dnsmasq.d/isle-vlan-domains.conf ]; then
-    echo -e "${RED}✗ No .vlan domains configured${NC}"
+    echo -e "${RED}✗ No .isle domains configured${NC}"
     exit 1
 fi
 
-# Test each .vlan domain
+# Test each .isle domain
 grep "^address=" /etc/dnsmasq.d/isle-vlan-domains.conf 2>/dev/null | while read -r line; do
     domain=$(echo "$line" | sed 's/address=\/\([^/]*\)\/.*/\1/')
     expected_ip=$(echo "$line" | sed 's/.*\/\([0-9.]*\)/\1/')

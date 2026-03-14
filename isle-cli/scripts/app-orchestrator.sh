@@ -131,7 +131,7 @@ detect_proxy_config() {
 
     if [[ $fragment_count -gt 0 ]]; then
         # Check for common template patterns in existing configs
-        if grep -rq "server_name.*\.vlan" "$AGENT_CONFIGS_DIR" 2>/dev/null; then
+        if grep -rq "server_name.*\.isle" "$AGENT_CONFIGS_DIR" 2>/dev/null; then
             templates_used+=("subdomain-vlan")
         fi
         if grep -rq "ssl_certificate" "$AGENT_CONFIGS_DIR" 2>/dev/null; then
@@ -208,8 +208,8 @@ server {
     listen 80;
     server_name ${app_domain};
 
-    # Dual-domain support: .local and .vlan
-    server_name ${app_domain} ${app_domain%.local}.vlan;
+    # Dual-domain support: .local and .isle
+    server_name ${app_domain} ${app_domain%.local}.isle;
 
     location / {
         proxy_pass http://${app_name}_backend;
@@ -235,8 +235,8 @@ server {
     listen 443 ssl;
     server_name ${app_domain};
 
-    # Dual-domain support: .local and .vlan
-    server_name ${app_domain} ${app_domain%.local}.vlan;
+    # Dual-domain support: .local and .isle
+    server_name ${app_domain} ${app_domain%.local}.isle;
 
     # SSL configuration
     ssl_certificate /etc/nginx/ssl/certs/selfsigned.crt;
@@ -444,8 +444,8 @@ orchestrate_app_deployment() {
     log_success "App $app_name is now accessible at:"
     log_success "  http://$app_domain"
     log_success "  https://$app_domain"
-    log_success "  http://${app_domain%.local}.vlan (after join protocol)"
-    log_success "  https://${app_domain%.local}.vlan (after join protocol)"
+    log_success "  http://${app_domain%.local}.isle (after join protocol)"
+    log_success "  https://${app_domain%.local}.isle (after join protocol)"
     echo ""
 
     return 0

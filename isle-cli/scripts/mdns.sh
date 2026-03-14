@@ -152,7 +152,7 @@ case $SCOPE in
         done
 
         echo ""
-        echo -e "${YELLOW}ℹ${NC}  For router DNS perspective (.vlan domains), use: ${CYAN}isle dns discover${NC}"
+        echo -e "${YELLOW}ℹ${NC}  For router DNS perspective (.isle domains), use: ${CYAN}isle dns discover${NC}"
         ;;
     help|*)
         show_help

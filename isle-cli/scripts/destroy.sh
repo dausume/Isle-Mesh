@@ -195,6 +195,14 @@ if [ "$KEEP_AGENT" = false ]; then
         AGENT_FOUND=true
     fi
 
+    # Stop and remove remote-agent container (remote mode)
+    if container_exists "isle-remote-agent"; then
+        echo -e "${YELLOW}  → Stopping isle-remote-agent container...${NC}"
+        docker stop isle-remote-agent 2>/dev/null || true
+        docker rm isle-remote-agent 2>/dev/null || true
+        AGENT_FOUND=true
+    fi
+
     # Also check for legacy isle-agent container
     if container_exists "isle-agent"; then
         echo -e "${YELLOW}  → Stopping legacy isle-agent container...${NC}"
@@ -227,7 +235,20 @@ if [ "$KEEP_AGENT" = false ]; then
 
     # Clean up docker networks
     docker network rm isle-agent-net 2>/dev/null || true
+    docker network rm isle-remote-macvlan 2>/dev/null || true
     docker network rm isle-sample-app_default 2>/dev/null || true
+
+    # Clean up remote state
+    if [ -d "/etc/isle-mesh/agent/remote" ]; then
+        rm -rf /etc/isle-mesh/agent/remote
+        echo -e "${BLUE}  → Cleaned up remote agent state${NC}"
+    fi
+
+    # Clear agent mode file
+    if [ -f "/etc/isle-mesh/agent/agent.mode" ]; then
+        rm -f /etc/isle-mesh/agent/agent.mode
+        echo -e "${BLUE}  → Cleared agent mode${NC}"
+    fi
 
     if [ "$AGENT_FOUND" = true ]; then
         echo -e "${GREEN}  ✓ Agent components destroyed${NC}"

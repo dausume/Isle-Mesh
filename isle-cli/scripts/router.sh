@@ -509,7 +509,7 @@ cmd_discover_mdns() {
     bash "$ROUTER_DIR/scripts/utilities/discover-mdns-domains.sh" "$ROUTER_IP" "$@"
 }
 
-# Domains - Manage .vlan domain mappings
+# Domains - Manage .isle domain mappings
 cmd_domains() {
     check_router_dir
 
@@ -1320,8 +1320,8 @@ cmd_help() {
     echo -e "                           Options: --show-command, --raw"
     echo -e "                           Aliases: discover-mdns"
     echo ""
-    echo -e "  ${CYAN}domains${NC}                 Manage .vlan domain mappings"
-    echo -e "                           - Discovers .local domains and creates .vlan mappings"
+    echo -e "  ${CYAN}domains${NC}                 Manage .isle domain mappings"
+    echo -e "                           - Discovers .local domains and creates .isle mappings"
     echo -e "                           - Interactive selection of domains to add"
     echo -e "                           - Auto-add all discovered domains with --auto"
     echo -e "                           - List configured domains with --list"
@@ -1372,17 +1372,17 @@ cmd_help() {
     echo -e "  ${YELLOW}# Show SSH command to manually discover domains${NC}"
     echo -e "  isle router discover --show-command"
     echo ""
-    echo -e "  ${YELLOW}# Manage .vlan domain mappings (interactive)${NC}"
+    echo -e "  ${YELLOW}# Manage .isle domain mappings (interactive)${NC}"
     echo -e "  isle router domains"
     echo ""
-    echo -e "  ${YELLOW}# Auto-add all discovered .local domains as .vlan${NC}"
+    echo -e "  ${YELLOW}# Auto-add all discovered .local domains as .isle${NC}"
     echo -e "  isle router domains --auto"
     echo ""
-    echo -e "  ${YELLOW}# List currently configured .vlan domains${NC}"
+    echo -e "  ${YELLOW}# List currently configured .isle domains${NC}"
     echo -e "  isle router domains --list"
     echo ""
-    echo -e "  ${YELLOW}# Remove a .vlan domain${NC}"
-    echo -e "  isle router domains --remove sample.vlan"
+    echo -e "  ${YELLOW}# Remove a .isle domain${NC}"
+    echo -e "  isle router domains --remove sample.isle"
     echo ""
     echo -e "${GREEN}TROUBLESHOOTING:${NC}"
     echo ""
@@ -1402,7 +1402,7 @@ cmd_help() {
     echo -e "     └─> Discover .local domains from router"
     echo ""
     echo -e "  4. ${CYAN}isle router domains --auto${NC}"
-    echo -e "     └─> Auto-add discovered domains as .vlan mappings"
+    echo -e "     └─> Auto-add discovered domains as .isle mappings"
     echo ""
     echo -e "${GREEN}DOCUMENTATION:${NC}"
     echo -e "  Main docs:        $ROUTER_DIR/README.md"

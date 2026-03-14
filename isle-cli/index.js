@@ -22,6 +22,8 @@ const scriptPaths = {
     'status': path.join(__dirname, 'scripts', 'status.sh'),
     'create': path.join(__dirname, 'scripts', 'create.sh'),
     'destroy': path.join(__dirname, 'scripts', 'destroy.sh'),
+    'join': path.join(__dirname, 'scripts', 'join.sh'),
+    'leave': path.join(__dirname, 'scripts', 'leave.sh'),
     'install': path.join(__dirname, 'scripts', 'install.sh'),
     'uninstall': path.join(__dirname, 'scripts', 'uninstall.sh'),
     'permissions': path.join(__dirname, 'scripts', 'permissions.sh'),
@@ -125,7 +127,7 @@ const showNamespaceError = (attemptedCommand) => {
   console.log('Isle CLI commands are organized into five categories:\n');
   console.log('  \x1b[36m%s\x1b[0m', '• isle app <command>       - Mesh application management');
   console.log('  \x1b[36m%s\x1b[0m', '• isle mdns <scope> <cmd>  - mDNS infrastructure (.local)');
-  console.log('  \x1b[36m%s\x1b[0m', '• isle dns <command>       - Router DNS management (.vlan)');
+  console.log('  \x1b[36m%s\x1b[0m', '• isle dns <command>       - Router DNS management (.isle)');
   console.log('  \x1b[36m%s\x1b[0m', '• isle router <command>    - Router and network management');
   console.log('  \x1b[36m%s\x1b[0m', '• isle agent <command>     - Agent and bridge management\n');
   console.log('Examples:');
@@ -186,7 +188,7 @@ switch (command) {
     break;
 
   case 'dns':
-    // DNS namespace (router DNS management - .vlan domains)
+    // DNS namespace (router DNS management - .isle domains)
     const dnsArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
     try {
       execSync(`bash ${scriptPaths['dns']} ${dnsArgs}`, { stdio: 'inherit', cwd: projectRoot });
@@ -215,6 +217,26 @@ switch (command) {
     const destroyArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
     try {
       execSync(`bash ${scriptPaths['destroy']} ${destroyArgs}`, { stdio: 'inherit', cwd: projectRoot });
+    } catch (error) {
+      process.exit(error.status || 1);
+    }
+    break;
+
+  case 'join':
+    // Join an existing isle from a remote machine
+    const joinArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
+    try {
+      execSync(`bash ${scriptPaths['join']} ${joinArgs}`, { stdio: 'inherit', cwd: projectRoot });
+    } catch (error) {
+      process.exit(error.status || 1);
+    }
+    break;
+
+  case 'leave':
+    // Leave an isle (tear down remote agent)
+    const leaveArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
+    try {
+      execSync(`bash ${scriptPaths['leave']} ${leaveArgs}`, { stdio: 'inherit', cwd: projectRoot });
     } catch (error) {
       process.exit(error.status || 1);
     }
@@ -297,9 +319,9 @@ Isle commands are organized into five main categories:
                           • Localhost app management (up/down/logs)
                           • Sample environments and discovery
 
-  \x1b[36misle dns <command>\x1b[0m      DNS management (router .vlan domains)
+  \x1b[36misle dns <command>\x1b[0m      DNS management (router .isle domains)
                           • Router DNS discovery and status
-                          • .vlan domain mappings via dnsmasq
+                          • .isle domain mappings via dnsmasq
                           • Join protocol synchronization
                           • DNS verification and testing
 
@@ -320,6 +342,8 @@ Isle commands are organized into five main categories:
   isle status             Show comprehensive system status (all components)
   isle create             Complete setup (agent + router + sample app)
   isle destroy            Complete teardown (apps + agent + router)
+  isle join               Join an existing isle from a remote machine
+  isle leave              Leave an isle (tear down remote agent)
   isle install [target]   Install dependencies (app/router/agent/all)
   isle uninstall [target] Uninstall components (app/router/all)
   isle dependencies       Manage system dependencies (check/install)
@@ -335,7 +359,7 @@ For detailed command information:
 
   \x1b[32misle app help\x1b[0m           Show all mesh application commands
   \x1b[32misle mdns help\x1b[0m          Show all mDNS infrastructure commands (.local)
-  \x1b[32misle dns help\x1b[0m           Show all DNS management commands (.vlan)
+  \x1b[32misle dns help\x1b[0m           Show all DNS management commands (.isle)
   \x1b[32misle router help\x1b[0m        Show all router management commands
   \x1b[32misle agent help\x1b[0m         Show all agent commands
 

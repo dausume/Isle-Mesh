@@ -4,15 +4,15 @@
 # Manage VLAN Domains - Interactive domain management for Isle Mesh
 #
 # This script discovers mDNS .local domains and helps you add them to the
-# router's DNS configuration as .vlan domains.
+# router's DNS configuration as .isle domains.
 #
 # Usage: ./manage-vlan-domains.sh [router-ip] [options]
 #
 # Default router IP: 192.168.1.1
 # Options:
 #   --auto                Automatically add all discovered domains
-#   --list                List currently configured .vlan domains
-#   --remove <domain>     Remove a .vlan domain from router
+#   --list                List currently configured .isle domains
+#   --remove <domain>     Remove a .isle domain from router
 #   --help                Show this help message
 #############################################################################
 
@@ -105,16 +105,16 @@ show_help() {
     cat <<EOF
 ${BOLD}Isle Mesh - VLAN Domain Management${NC}
 
-This script helps you manage .vlan domain mappings on your Isle Mesh router.
-It discovers .local domains via mDNS and creates corresponding .vlan DNS entries.
+This script helps you manage .isle domain mappings on your Isle Mesh router.
+It discovers .local domains via mDNS and creates corresponding .isle DNS entries.
 
 ${BOLD}Usage:${NC}
   $0 [router-ip] [options]
 
 ${BOLD}Options:${NC}
   --auto                Automatically add all discovered domains
-  --list                List currently configured .vlan domains
-  --remove <domain>     Remove a .vlan domain from router
+  --list                List currently configured .isle domains
+  --remove <domain>     Remove a .isle domain from router
   --help, -h            Show this help message
 
 ${BOLD}Examples:${NC}
@@ -124,16 +124,16 @@ ${BOLD}Examples:${NC}
   # Auto mode - add all discovered domains
   $0 192.168.1.1 --auto
 
-  # List current .vlan domains
+  # List current .isle domains
   $0 192.168.1.1 --list
 
   # Remove a specific domain
-  $0 192.168.1.1 --remove sample.vlan
+  $0 192.168.1.1 --remove sample.isle
 
 ${BOLD}How It Works:${NC}
   1. Discovers .local domains via mDNS (avahi-browse)
   2. Resolves their IP addresses
-  3. Creates .vlan domain mappings in dnsmasq
+  3. Creates .isle domain mappings in dnsmasq
   4. Reloads dnsmasq to apply changes
 
 ${BOLD}Requirements:${NC}
@@ -239,15 +239,15 @@ discover_domains() {
     return 0
 }
 
-# List currently configured .vlan domains
+# List currently configured .isle domains
 list_vlan_domains() {
-    print_header "Currently Configured .vlan Domains"
+    print_header "Currently Configured .isle Domains"
     echo ""
 
     local domains=$(router_exec "cat $DNSMASQ_CONF 2>/dev/null || echo ''" || echo "")
 
     if [[ -z "$domains" ]]; then
-        log_warning "No .vlan domains configured"
+        log_warning "No .isle domains configured"
         echo ""
         return 0
     fi
@@ -269,8 +269,8 @@ add_domain_to_router() {
     local local_domain="$1"
     local ip_address="$2"
 
-    # Convert .local to .vlan
-    local vlan_domain="${local_domain/.local/.vlan}"
+    # Convert .local to .isle
+    local vlan_domain="${local_domain/.local/.isle}"
 
     log_info "Adding $vlan_domain → $ip_address"
 
@@ -328,7 +328,7 @@ interactive_mode() {
         if [[ "$line" =~ \"([^\"]+)\":\ \"([^\"]+)\" ]]; then
             local domain="${BASH_REMATCH[1]}"
             local ip="${BASH_REMATCH[2]}"
-            local vlan_domain="${domain/.local/.vlan}"
+            local vlan_domain="${domain/.local/.isle}"
 
             domains+=("$domain")
             ips+=("$ip")
@@ -341,8 +341,8 @@ interactive_mode() {
         fi
     done <<< "$discovered_json"
 
-    # Show current .vlan domains
-    print_section "Currently Configured .vlan Domains"
+    # Show current .isle domains
+    print_section "Currently Configured .isle Domains"
     list_vlan_domains
 
     # Prompt user

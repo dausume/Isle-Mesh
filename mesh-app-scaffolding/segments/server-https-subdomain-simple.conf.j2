@@ -3,8 +3,8 @@
     # No re-encryption or mTLS here, we just use https.
     server {
         listen 443 ssl;
-        # Dual-domain support: mDNS (.local) and mesh DNS (.vlan)
-        server_name {{ subdomain }}.{{ base_domain }} {% if base_domain.endswith('.local') %}{{ subdomain }}.{{ base_domain.replace('.local', '.vlan') }}{% endif %};
+        # Dual-domain support: mDNS (.local) and mesh DNS (.isle)
+        server_name {{ subdomain }}.{{ base_domain }} {% if base_domain.endswith('.local') %}{{ subdomain }}.{{ base_domain.replace('.local', '.isle') }}{% endif %};
 
         # For the proxy level we still use the base {{ base_domain }} cert for communicating to sub-domains,
         # for the case of the frontend we perform no re-encrypt step since we are emulating this being 'hosted on the same network'.
