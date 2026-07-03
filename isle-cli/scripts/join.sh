@@ -27,6 +27,7 @@ DISCOVERY_FILE="${REMOTE_DIR}/discovery.json"
 INTERFACE=""
 TIMEOUT=60
 DISCOVERY_PORT=7878
+DETECT=false
 
 # Color codes
 RED='\033[0;31m'
@@ -99,6 +100,10 @@ parse_args() {
             --timeout|-t)
                 TIMEOUT="$2"
                 shift 2
+                ;;
+            --detect)
+                DETECT=true
+                shift
                 ;;
             --help|-h)
                 show_help
@@ -304,6 +309,29 @@ find_linkup_no_ip_interfaces() {
     done < <(ip -br link show)
 
     echo "$result" | xargs  # trim whitespace
+}
+
+# Non-destructive probe: is an isle reachable on this network segment?
+# Uses mDNS (openwrt.local) — instant, unprivileged, and only visible on the
+# isle's own L2 segment, so it respects the isle/normal-network isolation.
+# Prints a machine-readable line; never changes anything. Used by the app to
+# decide whether to SUGGEST joining (the device joins itself).
+detect_isle_probe() {
+    local ip=""
+    # Prefer avahi-resolve (mDNS-specific, fails fast). Bound every lookup with a
+    # short timeout so a missing isle returns in ~2s instead of the resolver's
+    # full timeout — this gets polled by the UI.
+    if command -v avahi-resolve &>/dev/null; then
+        ip=$(timeout 2 avahi-resolve -4 -n openwrt.local 2>/dev/null | awk '{print $2}' | head -1)
+    elif command -v getent &>/dev/null; then
+        ip=$(timeout 2 getent hosts openwrt.local 2>/dev/null | awk '{print $1}' | head -1)
+    fi
+    if [[ -n "$ip" ]]; then
+        echo "isle found=true router=${ip} name=openwrt"
+        return 0
+    fi
+    echo "isle found=false"
+    return 1
 }
 
 # Listen for discovery beacon with settle period
@@ -700,6 +728,13 @@ show_completion() {
 # Main
 main() {
     parse_args "$@"
+
+    # Non-destructive detection mode: report whether an isle is present, then exit.
+    # (Unprivileged, no setup — safe for the app to poll.)
+    if [[ "$DETECT" == true ]]; then
+        detect_isle_probe
+        exit $?
+    fi
 
     echo ""
     echo -e "${BOLD}╔═══════════════════════════════════════════════════════════════╗${NC}"

@@ -291,6 +291,77 @@ install_agent() {
     echo ""
 }
 
+# Install device detection, discovery mode, and the relay receiver.
+install_detection() {
+    log_step "Installing Device Detection & Discovery"
+    check_root
+
+    local PROJECT_ROOT="$(cd "$ISLE_CLI_ROOT/.." && pwd)"
+    local PKG_MANAGER; PKG_MANAGER=$(detect_package_manager)
+
+    # Tools used by scan/relay/onboard (best effort; scan degrades without them).
+    log_info "Installing detection tools (socat, netcat, jq, ethtool, nmap)..."
+    case "$PKG_MANAGER" in
+        apt)      apt-get install -y socat netcat-openbsd jq ethtool nmap 2>/dev/null \
+                    || apt-get install -y socat jq ethtool || true ;;
+        yum|dnf)  $PKG_MANAGER install -y socat nmap-ncat jq ethtool nmap || true ;;
+        pacman)   pacman -S --noconfirm socat gnu-netcat jq ethtool nmap || true ;;
+    esac
+
+    # State dirs + defaults (group-writable for the isle-mesh group, like the rest).
+    install -d -m 0775 /etc/isle-mesh/agent /etc/isle-mesh/agent/relay-outbox 2>/dev/null || true
+    [[ -f /etc/isle-mesh/agent/discovery-mode.json ]] \
+        || echo '{"active":false}' > /etc/isle-mesh/agent/discovery-mode.json
+
+    # Cable-plug detection (udev event handler) — reuse the existing installer.
+    local PORT_INSTALL="$PROJECT_ROOT/openwrt-router/scripts/hotplug-handlers/install-port-detection.sh"
+    if [[ -f "$PORT_INSTALL" ]]; then
+        log_info "Installing cable-plug detection (udev rules + event handler)..."
+        bash "$PORT_INSTALL" || log_warning "port-detection installer reported an issue (continuing)"
+    else
+        log_warning "Port-detection installer not found: $PORT_INSTALL"
+    fi
+
+    # Core node: run the relay receiver so remotes can report devices to us.
+    local role; role=$(cat /etc/isle-mesh/agent/agent.mode 2>/dev/null | tr -d '[:space:]')
+    if [[ "$role" == "core" || -z "$role" ]]; then
+        local ISLE_BIN EXEC
+        ISLE_BIN="$(command -v isle || true)"
+        if [[ -n "$ISLE_BIN" ]]; then
+            EXEC="$ISLE_BIN devices serve-relay"
+        else
+            EXEC="/usr/bin/env node $PROJECT_ROOT/isle-cli/index.js devices serve-relay"
+        fi
+        log_info "Installing device-relay receiver service (core)..."
+        cat > /etc/systemd/system/isle-device-relay.service <<UNIT
+[Unit]
+Description=Isle-Mesh device relay receiver (remote nodes report discovered devices)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=$EXEC
+Restart=on-failure
+RestartSec=5
+SyslogIdentifier=isle-device-relay
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+        systemctl daemon-reload 2>/dev/null || true
+        if systemctl enable --now isle-device-relay.service 2>/dev/null; then
+            log_success "isle-device-relay service enabled and running"
+        else
+            log_warning "Could not start isle-device-relay (enable later with: systemctl enable --now isle-device-relay)"
+        fi
+    fi
+
+    echo ""
+    log_success "Device detection & discovery installed."
+    log_info "Workflow: ${CYAN}isle discovery start${NC} → plug in a device → ${CYAN}isle devices${NC} → ${CYAN}isle onboard <ip>${NC}"
+    echo ""
+}
+
 # Install all dependencies
 install_all() {
     log_info "Installing all Isle dependencies..."
@@ -299,6 +370,7 @@ install_all() {
     install_app
     install_router
     install_agent
+    install_detection
 }
 
 # Show help
@@ -327,6 +399,11 @@ show_help() {
     echo ""
     echo -e "  ${CYAN}agent${NC}               Install agent dependencies"
     echo -e "                       - agent-registry-sync service (domain sync automation)"
+    echo ""
+    echo -e "  ${CYAN}detection${NC}           Install device detection & discovery"
+    echo -e "                       - scan/relay tools (socat, nmap, jq, ethtool)"
+    echo -e "                       - cable-plug detection (udev event handler)"
+    echo -e "                       - discovery-mode state + relay receiver (core)"
     echo ""
     echo -e "  ${CYAN}all${NC}                 Install/check all dependencies"
     echo ""
@@ -378,6 +455,11 @@ case "$FEATURE" in
         install_agent
         ;;
 
+    detection|discovery)
+        check_root
+        install_detection
+        ;;
+
     all)
         check_root
         install_all
@@ -393,8 +475,9 @@ case "$FEATURE" in
         echo "Usage: isle install <feature>"
         echo ""
         echo "Available features:"
-        echo "  app      - Check mesh application dependencies"
-        echo "  router   - Install router virtualization dependencies"
+        echo "  app       - Check mesh application dependencies"
+        echo "  router    - Install router virtualization dependencies"
+        echo "  detection - Install device detection & discovery"
         echo "  agent    - Install agent dependencies"
         echo "  all      - Install/check all dependencies"
         echo ""

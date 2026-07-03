@@ -21,6 +21,12 @@ const scriptPaths = {
 
     // Top-level utilities
     'test': path.join(__dirname, 'scripts', 'test.sh'),
+    'scan': path.join(__dirname, 'scripts', 'scan.sh'),
+    'devices': path.join(__dirname, 'scripts', 'devices.sh'),
+    'discovery': path.join(__dirname, 'scripts', 'discovery.sh'),
+    'onboard': path.join(__dirname, 'scripts', 'onboard.sh'),
+    'usb': path.join(__dirname, 'scripts', 'usb.sh'),
+    'ports': path.join(__dirname, 'scripts', 'ports.sh'),
     'status': path.join(__dirname, 'scripts', 'status.sh'),
     'create': path.join(__dirname, 'scripts', 'create.sh'),
     'destroy': path.join(__dirname, 'scripts', 'destroy.sh'),
@@ -313,6 +319,66 @@ switch (command) {
     }
     break;
 
+  case 'scan':
+    // Discover hosts on the isle and classify onboarded vs un-onboarded
+    const scanArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
+    try {
+      execSync(`bash ${scriptPaths['scan']} ${scanArgs}`, { stdio: 'inherit', cwd: projectRoot });
+    } catch (error) {
+      process.exit(error.status || 1);
+    }
+    break;
+
+  case 'devices':
+    // Known-devices ledger (onboarded vs candidate, with decisions)
+    const devicesArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
+    try {
+      execSync(`bash ${scriptPaths['devices']} ${devicesArgs}`, { stdio: 'inherit', cwd: projectRoot });
+    } catch (error) {
+      process.exit(error.status || 1);
+    }
+    break;
+
+  case 'discovery':
+    // Discovery mode (gate detection/onboarding on an explicit session)
+    const discoveryArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
+    try {
+      execSync(`bash ${scriptPaths['discovery']} ${discoveryArgs}`, { stdio: 'inherit', cwd: projectRoot });
+    } catch (error) {
+      process.exit(error.status || 1);
+    }
+    break;
+
+  case 'onboard':
+    // Guided walkthrough to bring a discovered device onto the mesh
+    const onboardArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
+    try {
+      execSync(`bash ${scriptPaths['onboard']} ${onboardArgs}`, { stdio: 'inherit', cwd: projectRoot });
+    } catch (error) {
+      process.exit(error.status || 1);
+    }
+    break;
+
+  case 'usb':
+    // Make a USB drive into a portable isle-mesh installer
+    const usbArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
+    try {
+      execSync(`bash ${scriptPaths['usb']} ${usbArgs}`, { stdio: 'inherit', cwd: projectRoot });
+    } catch (error) {
+      process.exit(error.status || 1);
+    }
+    break;
+
+  case 'ports':
+    // See/switch physical ethernet ports onto the isle
+    const portsArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
+    try {
+      execSync(`bash ${scriptPaths['ports']} ${portsArgs}`, { stdio: 'inherit', cwd: projectRoot });
+    } catch (error) {
+      process.exit(error.status || 1);
+    }
+    break;
+
   case 'status':
     // Show unified system status
     const statusArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
@@ -367,6 +433,11 @@ Isle commands are organized into six main categories:
 ╚═══════════════════════════════════════════════════════════════╝
 
   isle status             Show comprehensive system status (all components)
+  isle discovery          Turn node-discovery mode on/off (gates detection)
+  isle scan               Discover hosts on the isle; flag ones without the agent
+  isle devices            Known-devices ledger + onboarding decisions
+  isle onboard <ip|mac>   Guided walkthrough to add a device to the mesh
+  isle usb                Make a USB drive into a portable isle-mesh installer
   isle test [suite]       Run diagnostic tests (isle/mdns/all/check)
   isle create             Complete setup (agent + router + sample app)
   isle destroy            Complete teardown (apps + agent + router)

@@ -32,6 +32,9 @@ ${CYAN}USAGE:${NC}
 
 ${CYAN}OPTIONS:${NC}
   --force, -f           Skip confirmation prompts
+  --purge               Wipe the ENTIRE isle-mesh footprint (configs, DNS,
+                        services, networks, state) — everything EXCEPT the
+                        isle CLI itself. This is the full "Wipe Island".
   --keep-agent          Keep agent running (only destroy apps and router)
   --keep-router         Keep router running (only destroy apps and agent)
   --apps-only           Only destroy mesh applications
@@ -69,11 +72,16 @@ FORCE=false
 KEEP_AGENT=false
 KEEP_ROUTER=false
 APPS_ONLY=false
+PURGE=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
         --force|-f)
             FORCE=true
+            shift
+            ;;
+        --purge)
+            PURGE=true
             shift
             ;;
         --keep-agent)
@@ -124,6 +132,12 @@ if [ "$APPS_ONLY" = false ]; then
     fi
 else
     echo -e "  ${YELLOW}✓${NC} All mesh applications only"
+fi
+if [ "$PURGE" = true ]; then
+    echo -e "  ${YELLOW}✓${NC} ${BOLD}PURGE:${NC} all configs (/etc/isle-mesh), DNS split files, isle"
+    echo -e "      services (host-agent, mesh-mdns, registry-sync, device-relay,"
+    echo -e "      port-detection), udev rules, leftover networks, state & logs"
+    echo -e "      ${GREEN}(the isle CLI itself is kept)${NC}"
 fi
 echo ""
 
@@ -286,6 +300,54 @@ else
     echo -e "${BOLD}${CYAN}[3/3] Skipping router (--keep-router specified)${NC}"
 fi
 echo ""
+
+# Step 4: Purge the rest of the installed footprint (keep the CLI)
+if [ "$PURGE" = true ]; then
+    echo -e "${BOLD}${CYAN}[4/4] Purging isle-mesh footprint (keeping the CLI)...${NC}"
+
+    # Leftover docker networks (destroy leaves isle-br-0 behind)
+    for net in isle-br-0 isle-agent-net isle-remote-macvlan; do
+        if docker network ls --format '{{.Name}}' 2>/dev/null | grep -q "^${net}$"; then
+            docker network rm "$net" 2>/dev/null && echo -e "${BLUE}  → removed network ${net}${NC}" || true
+        fi
+    done
+
+    # Systemd services we install — stop, disable, remove unit files
+    for svc in isle-host-agent mesh-mdns agent-registry-sync isle-device-relay isle-port-detection; do
+        sudo systemctl stop "$svc" 2>/dev/null || true
+        sudo systemctl disable "$svc" 2>/dev/null || true
+        sudo rm -f "/etc/systemd/system/${svc}.service" 2>/dev/null || true
+    done
+    sudo systemctl daemon-reload 2>/dev/null || true
+    echo -e "${BLUE}  → removed isle systemd services${NC}"
+
+    # Cable-plug detection (udev rules + helper binaries)
+    sudo rm -f /etc/udev/rules.d/99-isle-mesh-ports.rules /etc/udev/rules.d/99-isle-mesh-usb.rules 2>/dev/null || true
+    sudo rm -f /usr/local/bin/isle-port-event /usr/local/bin/isle-port-event-handler \
+               /usr/local/bin/isle-port-init /usr/local/bin/isle-add-connection 2>/dev/null || true
+    command -v udevadm >/dev/null 2>&1 && sudo udevadm control --reload-rules 2>/dev/null || true
+
+    # DNS split configuration
+    sudo rm -f /etc/dnsmasq.d/split-dns.conf /etc/systemd/resolved.conf.d/split-mdns.conf 2>/dev/null || true
+    sudo systemctl restart dnsmasq 2>/dev/null || true
+    sudo systemctl restart systemd-resolved 2>/dev/null || true
+    echo -e "${BLUE}  → removed DNS split config${NC}"
+
+    # mDNS broadcast + host-agent runtime scripts and domain list
+    # (NOTE: /usr/local/bin/isle-mesh holds installed scripts; /usr/local/bin/isle
+    #  is the CLI symlink and is intentionally NOT touched.)
+    sudo rm -rf /usr/local/bin/isle-mesh /usr/local/etc/mesh-mdns-domains.list 2>/dev/null || true
+
+    # Runtime state + logs
+    sudo rm -rf /var/lib/isle-mesh /var/log/isle-mesh 2>/dev/null || true
+
+    # Configuration tree (last)
+    sudo rm -rf /etc/isle-mesh 2>/dev/null || true
+    echo -e "${BLUE}  → removed /etc/isle-mesh and runtime state${NC}"
+
+    echo -e "${GREEN}  ✓ Footprint purged — the isle CLI was kept${NC}"
+    echo ""
+fi
 
 # Final summary
 echo -e "${BOLD}${GREEN}╔═══════════════════════════════════════════════════════════════╗${NC}"
