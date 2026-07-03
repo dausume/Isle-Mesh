@@ -19,6 +19,23 @@ ISLE_CLI_BUNDLE="/usr/share/isle-mesh/isle-cli/index.js"
 # Older / alternate locations any route should clean up to avoid duplicates:
 ISLE_CLI_LEGACY="/usr/bin/isle"
 
+# _isle_priv <cmd...>
+#   Run a command with elevation ONLY when the affected path needs it. Plain
+#   (non-sudo) execution keeps user-space installs (ISLE_CLI_LINK under $HOME)
+#   working over headless SSH, where sudo has no terminal to prompt on.
+#   Last argument must be the filesystem path the command writes to.
+_isle_priv() {
+    local path="${@: -1}"
+    local dir; dir="$(dirname "$path")"
+    if [ -w "$dir" ] && { [ ! -e "$path" ] || [ -w "$path" ] || [ -L "$path" ]; }; then
+        "$@"
+    else
+        # -n: never prompt (headless ssh has no tty); fall back to interactive
+        # sudo only when a terminal exists.
+        sudo -n "$@" 2>/dev/null || { [ -t 0 ] && sudo "$@"; }
+    fi
+}
+
 # link_isle <source-index.js>
 #   Point the canonical symlink at <source>, after removing legacy duplicates.
 #   Reports if it is repointing an existing install (so switching patterns is
@@ -33,7 +50,7 @@ link_isle() {
     for legacy in $ISLE_CLI_LEGACY; do
         [ "$legacy" = "$ISLE_CLI_LINK" ] && continue
         if [ -e "$legacy" ] || [ -L "$legacy" ]; then
-            sudo rm -f "$legacy" 2>/dev/null && echo "  removed duplicate: $legacy" || true
+            _isle_priv rm -f "$legacy" 2>/dev/null && echo "  removed duplicate: $legacy" || true
         fi
     done
 
@@ -41,7 +58,11 @@ link_isle() {
     if [ -n "$prev" ] && [ "$prev" != "$src" ]; then
         echo "  repointing isle: $prev -> $src"
     fi
-    sudo ln -sf "$src" "$ISLE_CLI_LINK"
+    mkdir -p "$(dirname "$ISLE_CLI_LINK")" 2>/dev/null || true
+    _isle_priv ln -sf "$src" "$ISLE_CLI_LINK" || {
+        echo "link_isle: cannot write $ISLE_CLI_LINK (need sudo, none available)" >&2
+        return 1
+    }
     echo "  isle -> $(readlink -f "$ISLE_CLI_LINK" 2>/dev/null || echo "$src")"
 }
 
@@ -50,7 +71,7 @@ unlink_isle() {
     local p
     for p in "$ISLE_CLI_LINK" $ISLE_CLI_LEGACY; do
         if [ -L "$p" ] || [ -f "$p" ]; then
-            sudo rm -f "$p" 2>/dev/null && echo "  removed $p" || true
+            _isle_priv rm -f "$p" 2>/dev/null && echo "  removed $p" || true
         fi
     done
 }
