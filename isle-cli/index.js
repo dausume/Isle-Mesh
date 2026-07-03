@@ -14,11 +14,13 @@ const scriptPaths = {
     'agent': path.join(__dirname, 'scripts', 'agent.sh'),
     'mdns': path.join(__dirname, 'scripts', 'mdns.sh'),
     'dns': path.join(__dirname, 'scripts', 'dns.sh'),
+    'security': path.join(__dirname, 'scripts', 'security.sh'),
 
     // Deprecated - backward compatibility
     'localhost': path.join(__dirname, 'scripts', 'mdns-app.sh'),
 
     // Top-level utilities
+    'test': path.join(__dirname, 'scripts', 'test.sh'),
     'status': path.join(__dirname, 'scripts', 'status.sh'),
     'create': path.join(__dirname, 'scripts', 'create.sh'),
     'destroy': path.join(__dirname, 'scripts', 'destroy.sh'),
@@ -197,6 +199,16 @@ switch (command) {
     }
     break;
 
+  case 'security':
+    // ISP visibility and network hardening
+    const securityArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
+    try {
+      execSync(`bash ${scriptPaths['security']} ${securityArgs}`, { stdio: 'inherit', cwd: projectRoot });
+    } catch (error) {
+      process.exit(error.status || 1);
+    }
+    break;
+
   case 'localhost':
     // DEPRECATED - backward compatibility, redirect to mdns app
     console.log('\x1b[33m%s\x1b[0m', '⚠️  WARNING: "isle localhost" is deprecated');
@@ -291,6 +303,16 @@ switch (command) {
     }
     break;
 
+  case 'test':
+    // Verify .isle routing goes through the router (not localhost/mDNS)
+    const testArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
+    try {
+      execSync(`bash ${scriptPaths['test']} ${testArgs}`, { stdio: 'inherit', cwd: projectRoot });
+    } catch (error) {
+      process.exit(error.status || 1);
+    }
+    break;
+
   case 'status':
     // Show unified system status
     const statusArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
@@ -305,7 +327,7 @@ switch (command) {
 ║                    COMMAND STRUCTURE                          ║
 ╚═══════════════════════════════════════════════════════════════╝
 
-Isle commands are organized into five main categories:
+Isle commands are organized into six main categories:
 
   \x1b[36misle app <command>\x1b[0m      Mesh application management
                           • Initialize and scaffold apps
@@ -335,11 +357,17 @@ Isle commands are organized into five main categories:
                           • Nginx-to-router connectivity
                           • Bridge lifecycle management
 
+  \x1b[36misle security <command>\x1b[0m  ISP visibility and network hardening
+                          • Check ISP-visible exposure points
+                          • Harden ports, mDNS, firewall
+                          • Verify router air-gap isolation
+
 ╔═══════════════════════════════════════════════════════════════╗
 ║                    GLOBAL COMMANDS                            ║
 ╚═══════════════════════════════════════════════════════════════╝
 
   isle status             Show comprehensive system status (all components)
+  isle test [suite]       Run diagnostic tests (isle/mdns/all/check)
   isle create             Complete setup (agent + router + sample app)
   isle destroy            Complete teardown (apps + agent + router)
   isle join               Join an existing isle from a remote machine

@@ -1,3 +1,6 @@
 [submodule "embed-jinja"]
 	path = embed-jinja
 	url = https://github.com/dausume/embed-jinja.git
+[submodule "isle-manager-app"]
+	path = isle-manager-app
+	url = git@github.com:dausume/isle-app.git

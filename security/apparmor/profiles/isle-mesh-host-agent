@@ -1,0 +1,80 @@
+# AppArmor profile for isle-host-agent-relay.sh
+# Systemd service: isle-host-agent.service
+# Binary: /usr/local/bin/isle-mesh/isle-host-agent-relay.sh
+#
+# Purpose: Watches registry.json, manages Docker containers,
+#          regenerates nginx configs, orchestrates the vlan-agent.
+
+#include <tunables/global>
+
+profile isle-mesh-host-agent /usr/local/bin/isle-mesh/isle-host-agent-relay.sh flags=(complain) {
+  #include <abstractions/base>
+  #include <abstractions/bash>
+  #include <abstractions/nameservice>
+  #include if exists <local/isle-mesh-host-agent>
+
+  # Isle-Mesh base rules
+  include "/home/detts/Isle-Mesh/security/apparmor/abstractions/isle-mesh-base"
+
+  # --- Filesystem: read ---
+  /etc/isle-mesh/agent/                 r,
+  /etc/isle-mesh/agent/**               r,
+  /usr/local/etc/mesh-mdns*             r,
+  /etc/isle-mesh/mesh-mdns.env          r,
+
+  # --- Filesystem: read-write ---
+  /etc/isle-mesh/agent/registry.json    rw,
+  /etc/isle-mesh/agent/nginx/**         rw,
+  /etc/isle-mesh/agent/docker-compose.yml rw,
+  /var/log/isle-mesh/**                 rw,
+  /var/log/isle-mesh/                   rw,
+
+  # --- Docker socket ---
+  /var/run/docker.sock                  rw,
+
+  # --- Executables ---
+  /usr/bin/bash                         ix,
+  /usr/bin/dash                         ix,
+  /usr/bin/docker                       Px -> isle-mesh-docker,
+  /usr/bin/docker-compose               Px -> isle-mesh-docker,
+  /usr/local/bin/docker-compose         Px -> isle-mesh-docker,
+  /usr/bin/jq                           ix,
+  /usr/bin/sed                          ix,
+  /usr/bin/awk                          ix,
+  /usr/bin/grep                         ix,
+  /usr/bin/cat                          ix,
+  /usr/bin/inotifywait                  ix,
+  /usr/bin/avahi-browse                 ix,
+  /usr/bin/sleep                        ix,
+  /usr/bin/date                         ix,
+  /usr/bin/mkdir                        ix,
+  /usr/bin/chmod                        ix,
+  /usr/bin/cp                           ix,
+  /usr/bin/rm                           ix,
+  /usr/bin/mv                           ix,
+  /usr/bin/tee                          ix,
+  /usr/bin/wc                           ix,
+  /usr/bin/head                         ix,
+  /usr/bin/tail                         ix,
+  /usr/bin/cut                          ix,
+  /usr/bin/tr                           ix,
+  /usr/bin/sort                         ix,
+  /usr/bin/basename                     ix,
+  /usr/bin/dirname                      ix,
+  /usr/bin/realpath                     ix,
+  /usr/bin/id                           ix,
+  /usr/bin/whoami                       ix,
+  /usr/bin/python3*                     ix,
+
+  # --- Network ---
+  network inet stream,
+  network inet dgram,
+  network unix stream,
+  network unix dgram,
+
+  # --- Deny: things the agent should never do ---
+  deny /home/**                         rwx,
+  deny /boot/**                         rwx,
+  deny /etc/apt/**                      rwx,
+  deny /etc/systemd/**                  rwx,
+}

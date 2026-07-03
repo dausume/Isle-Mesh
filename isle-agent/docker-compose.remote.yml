@@ -11,6 +11,7 @@ services:
       context: .  # isle-agent/ directory (parent of both vlan-agent and remote-agent)
       dockerfile: isle-remote-agent/Dockerfile.remote
     container_name: isle-remote-agent
+    hostname: "${ISLE_HOSTNAME}"
     restart: unless-stopped
 
     # Virtual MAC address for DHCP isolation
@@ -24,6 +25,7 @@ services:
       - ISLE_NAME=${ISLE_NAME}
       - VLAN_ID=${VLAN_ID}
       - ROUTER_IP=${ROUTER_IP}
+      - ISLE_HOSTNAME=${ISLE_HOSTNAME}
 
     volumes:
       # Initial/template nginx config (read-only source)

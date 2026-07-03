@@ -1,0 +1,85 @@
+# AppArmor profile for router setup scripts
+# Binary: /home/detts/Isle-Mesh/openwrt-router/scripts/setup-isle-mesh-router.sh
+#         (and child scripts sourced from router-init-lib/, isle-vlan-router-config-lib/)
+#
+# Purpose: Initial router VM provisioning - creates bridges, starts VM,
+#          configures OpenWRT via SSH. Runs during `isle create` only.
+
+#include <tunables/global>
+
+profile isle-mesh-router-setup /home/detts/Isle-Mesh/openwrt-router/scripts/setup-isle-mesh-router.sh flags=(complain) {
+  #include <abstractions/base>
+  #include <abstractions/bash>
+  #include <abstractions/nameservice>
+  #include if exists <local/isle-mesh-router-setup>
+
+  # Isle-Mesh base rules
+  include "/home/detts/Isle-Mesh/security/apparmor/abstractions/isle-mesh-base"
+
+  # --- Filesystem: project source (read-only) ---
+  /home/detts/Isle-Mesh/openwrt-router/**   r,
+  /home/detts/Isle-Mesh/config/**           r,
+
+  # --- Filesystem: isle-mesh config ---
+  /etc/isle-mesh/                           r,
+  /etc/isle-mesh/**                         rwk,
+
+  # --- Filesystem: libvirt ---
+  /etc/libvirt/**                           r,
+  /var/lib/libvirt/**                       rw,
+  /run/libvirt/**                           rw,
+
+  # --- Filesystem: logging ---
+  /var/log/isle-mesh/                       rw,
+  /var/log/isle-mesh/**                     rw,
+
+  # --- Executables ---
+  /usr/bin/bash                             ix,
+  /usr/bin/dash                             ix,
+  /usr/bin/virsh                            ix,
+  /usr/bin/ip                               ix,
+  /usr/sbin/brctl                           ix,
+  /usr/bin/ssh                              ix,
+  /usr/bin/scp                              ix,
+  /usr/bin/ssh-keygen                       ix,
+  /usr/bin/sshpass                          ix,
+  /usr/bin/qemu-system-*                    ix,
+
+  # Shell utilities
+  /usr/bin/sed                              ix,
+  /usr/bin/awk                              ix,
+  /usr/bin/grep                             ix,
+  /usr/bin/cat                              ix,
+  /usr/bin/cp                               ix,
+  /usr/bin/rm                               ix,
+  /usr/bin/mv                               ix,
+  /usr/bin/mkdir                            ix,
+  /usr/bin/chmod                            ix,
+  /usr/bin/chown                            ix,
+  /usr/bin/tee                              ix,
+  /usr/bin/sleep                            ix,
+  /usr/bin/date                             ix,
+  /usr/bin/head                             ix,
+  /usr/bin/tail                             ix,
+  /usr/bin/cut                              ix,
+  /usr/bin/tr                               ix,
+  /usr/bin/wc                               ix,
+  /usr/bin/mktemp                           ix,
+  /usr/bin/basename                         ix,
+  /usr/bin/dirname                          ix,
+  /usr/bin/realpath                         ix,
+  /usr/bin/id                               ix,
+
+  # --- Network ---
+  network inet stream,      # SSH to router
+  network inet dgram,
+  network unix stream,      # libvirt socket
+  network unix dgram,
+  network netlink raw,      # ip command for bridge config
+
+  # --- Deny ---
+  deny /home/*/.ssh/**                      rwx,
+  deny /home/*/.gnupg/**                    rwx,
+  deny /boot/**                             rwx,
+  deny /var/run/docker.sock                 rwx,  # router setup doesn't need Docker
+}

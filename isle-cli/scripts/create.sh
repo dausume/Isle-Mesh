@@ -197,28 +197,42 @@ check_prerequisites() {
 }
 
 # Ensure .isle DNS resolution is configured on the host
-# On the host, .isle resolves locally (same as .local) — the nginx agent handles both.
-# On other VLAN devices, .isle resolves via the OpenWRT router's dnsmasq.
+# .isle queries are forwarded to the OpenWRT router's dnsmasq, which holds
+# the authoritative isle domain mappings. This is the real isle network path —
+# NOT localhost resolution (that was the mDNS scaffolding approach).
+#
+# The router's dnsmasq resolves app.isle → 10.10.0.X (the agent's DHCP lease
+# on that device's isle-br-0 macvlan interface).
 ensure_isle_dns() {
     local SPLIT_DNS="/etc/dnsmasq.d/split-dns.conf"
     local RESOLVED_CONF="/etc/systemd/resolved.conf.d/split-mdns.conf"
     local changed=false
 
-    # Get the listen-address from split-dns.conf (should be 127.0.0.6)
-    local LISTEN_ADDR
-    LISTEN_ADDR=$(grep '^listen-address=' "$SPLIT_DNS" 2>/dev/null | head -1 | cut -d= -f2)
-    LISTEN_ADDR="${LISTEN_ADDR:-127.0.0.6}"
+    # Router IP for DNS forwarding
+    # Use the management IP (192.168.1.1) because the host always has a route
+    # to it via br-mgmt. The isle subnet IP (10.10.0.1) is only reachable from
+    # devices that have a DHCP lease on the isle network.
+    local ROUTER_ISLE_IP="${ROUTER_ISLE_IP:-192.168.1.1}"
 
-    # Remove any stale server=/.isle/ forwarding (from previous setup)
-    if grep -q 'server=/.isle/' "$SPLIT_DNS" 2>/dev/null; then
-        sed -i '/server=\/.isle\//d' "$SPLIT_DNS"
+    # Remove any stale address=/.isle/ localhost resolution (mDNS scaffolding)
+    if grep -q 'address=/.isle/' "$SPLIT_DNS" 2>/dev/null; then
+        log_info "Removing stale localhost .isle resolution (upgrading to router forwarding)..."
+        sed -i '/address=\/.isle\//d' "$SPLIT_DNS"
         changed=true
     fi
 
-    # Add .isle wildcard resolution to dnsmasq (same pattern as .local)
-    if ! grep -q 'address=/.isle/' "$SPLIT_DNS" 2>/dev/null; then
-        log_info "Adding .isle DNS resolution to dnsmasq..."
-        echo "address=/.isle/${LISTEN_ADDR}" >> "$SPLIT_DNS"
+    # Forward .isle queries to the OpenWRT router's dnsmasq
+    local CURRENT_SERVER
+    CURRENT_SERVER=$(grep 'server=/.isle/' "$SPLIT_DNS" 2>/dev/null | head -1 || echo "")
+
+    if [ -z "$CURRENT_SERVER" ]; then
+        log_info "Adding .isle DNS forwarding to router at ${ROUTER_ISLE_IP}..."
+        echo "server=/.isle/${ROUTER_ISLE_IP}" >> "$SPLIT_DNS"
+        changed=true
+    elif ! echo "$CURRENT_SERVER" | grep -q "${ROUTER_ISLE_IP}"; then
+        # Router IP changed — update the forwarding rule
+        log_info "Updating .isle DNS forwarding to ${ROUTER_ISLE_IP}..."
+        sed -i "s|server=/.isle/.*|server=/.isle/${ROUTER_ISLE_IP}|" "$SPLIT_DNS"
         changed=true
     fi
 
@@ -232,9 +246,9 @@ ensure_isle_dns() {
     if [ "$changed" = true ]; then
         systemctl restart dnsmasq 2>/dev/null || true
         systemctl restart systemd-resolved 2>/dev/null || true
-        log_success ".isle DNS resolution configured"
+        log_success ".isle DNS forwarding configured (router: ${ROUTER_ISLE_IP})"
     else
-        log_success ".isle DNS resolution already configured"
+        log_success ".isle DNS forwarding already configured (router: ${ROUTER_ISLE_IP})"
     fi
 }
 
@@ -333,10 +347,9 @@ setup_router() {
     # Check if router exists but is stopped
     if virsh list --all 2>/dev/null | grep -q "openwrt-isle-router" || \
        sudo virsh list --all 2>/dev/null | grep -q "openwrt-isle-router"; then
-        log_info "Router exists but is stopped. Starting..."
-        # Try starting without sudo first, then with sudo
-        if bash "$SCRIPT_DIR/router.sh" up openwrt-isle-router 2>/dev/null || \
-           sudo bash "$SCRIPT_DIR/router.sh" up openwrt-isle-router; then
+        log_info "Router exists but is stopped. Recreating bridges and starting..."
+        # Bridge creation + virsh start both need sudo
+        if sudo bash "$SCRIPT_DIR/router.sh" up openwrt-isle-router; then
             log_success "Isle Router started successfully"
             return 0
         else

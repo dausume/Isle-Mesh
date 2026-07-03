@@ -1027,6 +1027,29 @@ reload_config() {
     log_success "nginx configuration reloaded"
 }
 
+# Machine-readable app listing for isle-manager-app UI
+# Output format: one JSON object per line (JSONL)
+list_apps() {
+    if [[ ! -f "${REGISTRY_FILE}" ]]; then
+        echo "[]"
+        return
+    fi
+
+    jq -c '[.apps | to_entries[] | {
+        name: .key,
+        domain: .value.domain,
+        modes: (.value.modes // []),
+        updated_at: (.value.updated_at // ""),
+        services: [(.value.services // [])[] | {
+            name: .name,
+            subdomain: (.subdomain // ""),
+            container: (.container // ""),
+            port: (.port // 0),
+            protocol: (.protocol // "")
+        }]
+    }]' "${REGISTRY_FILE}" 2>/dev/null || echo "[]"
+}
+
 # Show agent status
 show_status() {
     echo ""
@@ -1566,7 +1589,7 @@ main() {
 
     # Commands that don't require Docker
     case "${command}" in
-        help|--help|-h|init|register|unregister)
+        help|--help|-h|init|register|unregister|list-apps)
             ;;
         *)
             # All other commands require Docker
@@ -1612,6 +1635,9 @@ main() {
         unregister)
             shift  # remove 'unregister' from $@
             unregister_app "$@"
+            ;;
+        list-apps)
+            list_apps
             ;;
         cleanup-cache|clean-cache|cleanup)
             cleanup_network_cache

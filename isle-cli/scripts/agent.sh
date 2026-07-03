@@ -215,6 +215,11 @@ case $COMMAND in
         exec "${AGENT_MANAGER}" unregister "$@"
         ;;
 
+    list-apps)
+        check_agent_available
+        exec "${AGENT_MANAGER}" list-apps "$@"
+        ;;
+
     # Config management commands - delegate to merge-configs.sh
     merge)
         check_agent_available

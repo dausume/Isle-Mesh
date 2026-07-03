@@ -3,11 +3,13 @@
 # Isle Remote Agent Entrypoint
 # Container entrypoint for remote mode:
 #   1. udhcpc to get DHCP from router via macvlan
-#   2. dbus + avahi for mDNS broadcasting
+#   2. dbus + avahi for mDNS (with settle period before publishing)
 #   3. Registry watcher + nginx (same as core)
 #
 
 set -e
+
+SETTLE_SECONDS="${SETTLE_SECONDS:-5}"
 
 echo "=================================================="
 echo "  Isle Remote Agent - Nginx Proxy (Remote Mode)"
@@ -19,7 +21,7 @@ echo "  Router IP: ${ROUTER_IP:-unknown}"
 echo ""
 
 # --- Step 1: Get DHCP lease via macvlan interface ---
-echo "[1/5] Obtaining DHCP lease..."
+echo "[1/6] Obtaining DHCP lease..."
 
 # udhcpc is built into Alpine's busybox
 # eth0 should be the macvlan interface connected to the VLAN
@@ -34,7 +36,7 @@ fi
 echo ""
 
 # --- Step 2: Start D-Bus (required by avahi) ---
-echo "[2/5] Starting D-Bus daemon..."
+echo "[2/6] Starting D-Bus daemon..."
 mkdir -p /run/dbus
 if [ -f /run/dbus/pid ]; then
     rm -f /run/dbus/pid
@@ -50,11 +52,65 @@ else
 fi
 echo ""
 
-# --- Step 3: Start Avahi for mDNS ---
-echo "[3/5] Starting Avahi daemon..."
+# --- Step 3: Settle period — observe mDNS before publishing ---
+echo "[3/6] Settle period: observing existing mDNS traffic (${SETTLE_SECONDS}s)..."
 
-# Configure avahi
+# Start avahi in browse-only mode first to see what's already on the network.
+# This lets us know what names exist before we start advertising.
 mkdir -p /etc/avahi
+cat > /etc/avahi/avahi-daemon.conf <<AVAHI_CONF
+[server]
+host-name=$(hostname)
+domain-name=local
+use-ipv4=yes
+use-ipv6=no
+allow-interfaces=eth0
+enable-dbus=yes
+
+[publish]
+publish-addresses=no
+publish-hinfo=no
+publish-workstation=no
+
+[reflector]
+enable-reflector=no
+
+[rlimits]
+AVAHI_CONF
+
+avahi-daemon -D 2>&1 || echo "  WARNING: Avahi daemon failed to start"
+sleep 1
+
+# Browse existing services during settle period
+OBSERVED_NAMES=""
+if avahi-daemon --check 2>/dev/null && command -v avahi-browse >/dev/null 2>&1; then
+    echo "  Listening for existing mDNS names..."
+    OBSERVED_NAMES=$(timeout "$SETTLE_SECONDS" avahi-browse -a -t -p 2>/dev/null \
+        | grep '^=' | cut -d';' -f4 | sort -u || echo "")
+
+    if [ -n "$OBSERVED_NAMES" ]; then
+        OBSERVED_COUNT=$(echo "$OBSERVED_NAMES" | wc -l)
+        echo "  Found $OBSERVED_COUNT existing mDNS name(s):"
+        echo "$OBSERVED_NAMES" | while read -r name; do
+            echo "    - $name"
+        done
+    else
+        echo "  No existing mDNS names detected"
+        sleep "$SETTLE_SECONDS"
+    fi
+else
+    echo "  avahi-browse not available, waiting ${SETTLE_SECONDS}s..."
+    sleep "$SETTLE_SECONDS"
+fi
+echo ""
+
+# --- Step 4: Enable mDNS publishing ---
+echo "[4/6] Enabling mDNS publishing..."
+
+# Kill avahi, reconfigure with publishing enabled, restart
+avahi-daemon -k 2>/dev/null || true
+sleep 1
+
 cat > /etc/avahi/avahi-daemon.conf <<AVAHI_CONF
 [server]
 host-name=$(hostname)
@@ -79,20 +135,23 @@ avahi-daemon -D 2>&1 || echo "  WARNING: Avahi daemon failed to start"
 sleep 1
 
 if avahi-daemon --check 2>/dev/null; then
-    echo "  Avahi daemon is running"
+    echo "  Avahi daemon is running (publishing enabled)"
 else
     echo "  WARNING: Avahi daemon is not running"
 fi
 echo ""
 
-# --- Step 4: Publish mDNS addresses from registry ---
-echo "[4/5] Setting up mDNS publishing..."
+# --- Step 5: Publish mDNS addresses from registry ---
+echo "[5/6] Setting up mDNS publishing..."
 
 # Publish domains from registry via avahi-publish-address in background
 # This reads the registry and publishes .local domains pointing to our VLAN IP
 publish_mdns_domains() {
     local registry="/etc/nginx/registry.json"
     local published_pids=""
+
+    # Wait for first publish cycle to let the network settle further
+    sleep 5
 
     while true; do
         if [ -f "$registry" ] && [ "$VLAN_IP" != "unknown" ]; then
@@ -122,8 +181,8 @@ MDNS_PID=$!
 echo "  mDNS publisher running (PID: $MDNS_PID)"
 echo ""
 
-# --- Step 5: Start registry watcher + nginx ---
-echo "[5/5] Starting nginx and registry watcher..."
+# --- Step 6: Start registry watcher + nginx ---
+echo "[6/6] Starting nginx and registry watcher..."
 echo ""
 
 # Copy initial nginx.conf if needed

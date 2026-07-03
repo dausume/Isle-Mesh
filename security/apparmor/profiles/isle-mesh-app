@@ -1,0 +1,49 @@
+# AppArmor profile for the isle-manager-app JavaFX desktop application
+# Binary: /usr/bin/isle-manager-app
+#
+# Purpose: GUI for managing isle-mesh. Should only be able to read
+#          isle-mesh status and invoke the CLI - never touch secrets directly.
+
+#include <tunables/global>
+
+profile isle-mesh-app /usr/bin/isle-manager-app flags=(complain) {
+  #include <abstractions/base>
+  #include <abstractions/bash>
+  #include <abstractions/nameservice>
+  #include <abstractions/X>
+  #include <abstractions/wayland>
+  #include <abstractions/fonts>
+  #include if exists <local/isle-mesh-app>
+
+  # Isle-Mesh base rules
+  include "/home/detts/Isle-Mesh/security/apparmor/abstractions/isle-mesh-base"
+
+  # --- Java runtime ---
+  /usr/lib/jvm/**                       r,
+  /usr/lib/jvm/**/bin/java              ix,
+  /usr/share/java/**                    r,
+  /etc/java*/**                         r,
+
+  # --- Isle-mesh read-only status ---
+  /etc/isle-mesh/agent/registry.json    r,
+  /etc/isle-mesh/.install*              r,
+  /var/log/isle-mesh/**                 r,
+
+  # --- Invoke CLI (transition to CLI profile) ---
+  /usr/local/bin/isle                   Px -> isle-mesh-cli,
+
+  # --- App data ---
+  owner @{HOME}/.isle-manager-app/**            rw,
+  owner @{HOME}/.config/isle-manager-app/**     rw,
+
+  # --- Network (for status checks) ---
+  network inet stream,
+  network inet dgram,
+  network unix stream,
+
+  # --- Deny: GUI should never touch secrets ---
+  deny /etc/isle-mesh/router/ssh/**     rwx,
+  deny /etc/isle-mesh/agent/ssl/keys/** rwx,
+  deny /etc/isle-mesh/agent/host-agent.conf r,
+  deny /var/run/docker.sock             rwx,
+}

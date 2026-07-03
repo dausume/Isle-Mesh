@@ -1,0 +1,40 @@
+# AppArmor profile for Docker commands executed by isle-mesh
+# This restricts what isle-mesh can do with Docker, not Docker itself.
+#
+# Purpose: Limits isle-mesh's Docker usage to container/network/image operations
+#          on isle-mesh resources only (label-filtered).
+
+#include <tunables/global>
+
+profile isle-mesh-docker /usr/bin/docker flags=(complain) {
+  #include <abstractions/base>
+  #include <abstractions/nameservice>
+  #include if exists <local/isle-mesh-docker>
+
+  # Docker CLI needs to talk to the daemon
+  /var/run/docker.sock                  rw,
+
+  # Docker binary and its dependencies
+  /usr/bin/docker                       mr,
+  /usr/lib/docker/**                    r,
+  /usr/libexec/docker/**                r,
+
+  # Docker config
+  /root/.docker/**                      r,
+  owner @{HOME}/.docker/**              r,
+
+  # Docker data (read for inspect/logs)
+  /var/lib/docker/**                    r,
+
+  # Compose files
+  /etc/isle-mesh/agent/docker-compose.yml  r,
+
+  # Network
+  network inet stream,
+  network inet dgram,
+  network unix stream,
+
+  # --- Deny: Docker shouldn't access isle-mesh secrets directly ---
+  deny /etc/isle-mesh/router/ssh/**     rwx,
+  deny /etc/isle-mesh/agent/ssl/keys/** rwx,
+}

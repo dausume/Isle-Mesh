@@ -643,15 +643,72 @@ cmd_up() {
         return 0
     fi
 
+    # Ensure bridges exist before starting — they're ephemeral and lost on reboot
+    ensure_bridges_for_vm "$ROUTER_NAME"
+
     log_info "Starting router: $ROUTER_NAME"
     sudo virsh start "$ROUTER_NAME"
 
     if [[ $? -eq 0 ]]; then
         log_success "Router $ROUTER_NAME started successfully"
+
+        # Wait for router to become reachable
+        log_info "Waiting for router to boot..."
+        local attempts=0
+        while [[ $attempts -lt 30 ]]; do
+            if ping -c 1 -W 1 192.168.1.1 &>/dev/null; then
+                log_success "Router is reachable at 192.168.1.1"
+                break
+            fi
+            ((attempts++))
+            sleep 1
+        done
+
+        if [[ $attempts -ge 30 ]]; then
+            log_warning "Router not yet reachable. It may still be booting."
+        fi
     else
         log_error "Failed to start router $ROUTER_NAME"
         exit 1
     fi
+}
+
+# Ensure required bridges exist for a VM (recreate if lost after reboot)
+ensure_bridges_for_vm() {
+    local vm_name="$1"
+
+    # Parse which bridges the VM expects from its XML definition
+    local expected_bridges
+    expected_bridges=$(sudo virsh dumpxml "$vm_name" 2>/dev/null \
+        | grep -oP "(?<=<source bridge=')[^']*" | sort -u || echo "")
+
+    if [[ -z "$expected_bridges" ]]; then
+        return 0
+    fi
+
+    for bridge in $expected_bridges; do
+        if ip link show "$bridge" &>/dev/null; then
+            log_info "Bridge $bridge exists"
+        else
+            log_info "Recreating bridge: $bridge"
+            sudo ip link add "$bridge" type bridge 2>/dev/null || {
+                log_error "Failed to create bridge $bridge"
+                return 1
+            }
+            sudo ip link set "$bridge" up || {
+                log_error "Failed to bring up bridge $bridge"
+                return 1
+            }
+
+            # Assign management IP to br-mgmt
+            if [[ "$bridge" == "br-mgmt" ]]; then
+                sudo ip addr add 192.168.1.254/24 dev "$bridge" 2>/dev/null || true
+                log_info "Assigned 192.168.1.254/24 to br-mgmt"
+            fi
+
+            log_success "Recreated bridge: $bridge"
+        fi
+    done
 }
 
 # Down - Stop a router

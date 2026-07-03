@@ -1,0 +1,114 @@
+# AppArmor profile for the isle CLI
+# Entry point: /usr/local/bin/isle (symlink to isle-wrapper.sh or index.js)
+#
+# Purpose: User-facing CLI that orchestrates create/destroy/status/app management.
+# This profile is broader because the CLI drives all isle-mesh operations,
+# but it still shouldn't touch non-isle-mesh system resources.
+
+#include <tunables/global>
+
+profile isle-mesh-cli /usr/local/bin/isle flags=(complain) {
+  #include <abstractions/base>
+  #include <abstractions/bash>
+  #include <abstractions/nameservice>
+  #include <abstractions/node>
+  #include if exists <local/isle-mesh-cli>
+
+  # Isle-Mesh base rules
+  include "/home/detts/Isle-Mesh/security/apparmor/abstractions/isle-mesh-base"
+
+  # --- Filesystem: isle-mesh config (full access) ---
+  /etc/isle-mesh/                       r,
+  /etc/isle-mesh/**                     rwk,
+
+  # --- Filesystem: logging ---
+  /var/log/isle-mesh/                   rw,
+  /var/log/isle-mesh/**                 rw,
+
+  # --- Filesystem: isle-mesh install targets ---
+  /usr/local/bin/isle-mesh/             r,
+  /usr/local/bin/isle-mesh/**           r,
+  /usr/local/etc/mesh-mdns*             rw,
+
+  # --- Filesystem: libvirt/QEMU (router VM) ---
+  /etc/libvirt/**                       r,
+  /var/lib/libvirt/**                   rw,
+  /var/log/libvirt/**                   r,
+  /run/libvirt/**                       rw,
+
+  # --- Docker socket ---
+  /var/run/docker.sock                  rw,
+
+  # --- Executables: system tools ---
+  /usr/bin/bash                         ix,
+  /usr/bin/dash                         ix,
+  /usr/bin/node                         ix,
+  /usr/bin/python3*                     ix,
+  /usr/bin/virsh                        Cx -> virsh,
+  /usr/bin/docker                       Px -> isle-mesh-docker,
+  /usr/bin/ip                           ix,
+  /usr/sbin/brctl                       ix,
+  /usr/bin/ssh                          ix,
+  /usr/bin/scp                          ix,
+  /usr/bin/ssh-keygen                   ix,
+  /usr/bin/sshpass                      ix,
+  /usr/bin/systemctl                    ix,
+  /usr/bin/jq                           ix,
+  /usr/bin/curl                         ix,
+  /usr/bin/wget                         ix,
+
+  # Common shell utilities
+  /usr/bin/sed                          ix,
+  /usr/bin/awk                          ix,
+  /usr/bin/grep                         ix,
+  /usr/bin/cat                          ix,
+  /usr/bin/cp                           ix,
+  /usr/bin/rm                           ix,
+  /usr/bin/mv                           ix,
+  /usr/bin/mkdir                        ix,
+  /usr/bin/chmod                        ix,
+  /usr/bin/chown                        ix,
+  /usr/bin/tee                          ix,
+  /usr/bin/mktemp                       ix,
+  /usr/bin/sleep                        ix,
+  /usr/bin/date                         ix,
+  /usr/bin/head                         ix,
+  /usr/bin/tail                         ix,
+  /usr/bin/cut                          ix,
+  /usr/bin/tr                           ix,
+  /usr/bin/sort                         ix,
+  /usr/bin/wc                           ix,
+  /usr/bin/basename                     ix,
+  /usr/bin/dirname                      ix,
+  /usr/bin/realpath                     ix,
+  /usr/bin/id                           ix,
+  /usr/bin/whoami                       ix,
+  /usr/bin/uname                        ix,
+  /usr/bin/lsb_release                  ix,
+
+  # --- Network ---
+  network inet stream,
+  network inet dgram,
+  network inet6 stream,
+  network inet6 dgram,
+  network unix stream,
+  network unix dgram,
+
+  # --- Deny: things the CLI should never touch ---
+  deny /home/*/.ssh/**                  rwx,
+  deny /home/*/.gnupg/**                rwx,
+  deny /boot/**                         rwx,
+  deny /etc/apt/**                      w,
+  deny /etc/passwd                      w,
+  deny /etc/group                       w,
+
+  # Virsh sub-profile - restrict what virsh can do
+  profile virsh /usr/bin/virsh {
+    #include <abstractions/base>
+    /etc/libvirt/**                     r,
+    /run/libvirt/**                     rw,
+    /var/lib/libvirt/**                 rw,
+    /etc/isle-mesh/router/**            r,
+    network unix stream,
+  }
+}

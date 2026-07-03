@@ -17,9 +17,14 @@ services:
     # Format: 02:00:00:00:VLAN:XX (locally administered)
     mac_address: "02:00:00:00:0a:01"
 
+    # Bind to localhost only — not the ISP-facing interface.
+    # Isle traffic reaches the agent via the macvlan on isle-br-0,
+    # not through Docker port bindings.
+    # Localhost binding kept for local browser access (e.g. https://app.isle
+    # resolved to 127.x.x.x via split-DNS during development).
     ports:
-      - "80:80"
-      - "443:443"
+      - "127.0.0.1:80:80"
+      - "127.0.0.1:443:443"
 
     volumes:
       # Initial/template nginx configs (read-only source)
@@ -47,9 +52,8 @@ services:
     networks:
       isle-agent-net:
         priority: 100
-      # Uncomment to connect to isle-br-0 for OpenWRT integration
-      # isle-br-0:
-      #   priority: 200
+      isle-br-0:
+        priority: 200
 
     labels:
       isle.component: "vlan-agent"
@@ -73,13 +77,12 @@ networks:
         - subnet: 172.20.0.0/16
 
   # Macvlan network on isle-br-0 for OpenWRT router connectivity
-  # Uncomment when ready to connect to OpenWRT router
   # Requirements:
   #   1. Host bridge isle-br-0 must exist (created by agent-manager.sh)
   #   2. OpenWRT router's eth1 connected to isle-br-0 bridge
   #   3. Agent uses virtual MAC (02:00:00:00:0a:01) for DHCP isolation
-  # isle-br-0:
-  #   driver: macvlan
-  #   driver_opts:
-  #     parent: isle-br-0
-  #   name: isle-br-0
+  isle-br-0:
+    driver: macvlan
+    driver_opts:
+      parent: isle-br-0
+    name: isle-br-0

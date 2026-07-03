@@ -1,0 +1,37 @@
+# Isle-Mesh base abstraction - common rules for all isle-mesh components
+# Include this in every isle-mesh profile for shared access patterns
+
+  # Basic system access
+  /etc/ld.so.cache          r,
+  /etc/ld.so.preload        r,
+  /etc/nsswitch.conf        r,
+  /etc/passwd               r,
+  /etc/group                r,
+  /etc/host.conf            r,
+  /etc/hosts                r,
+  /etc/resolv.conf          r,
+  /etc/gai.conf             r,
+  /lib/{,**/}*.so*          mr,
+  /usr/lib/{,**/}*.so*      mr,
+  /usr/share/locale/**      r,
+
+  # Proc/sys basics
+  @{PROC}/sys/kernel/osrelease  r,
+  @{PROC}/sys/kernel/hostname   r,
+  owner @{PROC}/@{pid}/fd/     r,
+  owner @{PROC}/@{pid}/status  r,
+
+  # Temp (private per PrivateTmp in systemd)
+  owner /tmp/**              rw,
+
+  # Deny access to sensitive host paths isle-mesh should never touch
+  deny /home/*/.ssh/**       rwx,
+  deny /home/*/.gnupg/**     rwx,
+  deny /home/*/.config/gcloud/** rwx,
+  deny /home/*/.aws/**       rwx,
+  deny /root/.ssh/**         rwx,
+  deny /root/.gnupg/**       rwx,
+  deny /etc/shadow           rwx,
+  deny /etc/gshadow          rwx,
+  deny /etc/sudoers          rwx,
+  deny /etc/sudoers.d/**     rwx,

@@ -135,7 +135,7 @@ if [[ "$FORCE" != "true" ]]; then
 fi
 
 # Step 1: Stop remote agent container
-echo -e "${CYAN}[1/5] Stopping remote agent container...${NC}"
+echo -e "${CYAN}[1/6] Stopping remote agent container...${NC}"
 if docker ps -a --filter "name=${REMOTE_CONTAINER}" --format '{{.Names}}' | grep -q "^${REMOTE_CONTAINER}$"; then
     docker stop "$REMOTE_CONTAINER" 2>/dev/null || true
     docker rm "$REMOTE_CONTAINER" 2>/dev/null || true
@@ -146,7 +146,7 @@ fi
 echo ""
 
 # Step 2: Stop host agent service
-echo -e "${CYAN}[2/5] Stopping host agent service...${NC}"
+echo -e "${CYAN}[2/6] Stopping host agent service...${NC}"
 if systemctl is-active --quiet isle-host-agent 2>/dev/null; then
     systemctl stop isle-host-agent 2>/dev/null || true
     log_success "Host agent service stopped"
@@ -156,7 +156,7 @@ fi
 echo ""
 
 # Step 3: Remove macvlan network
-echo -e "${CYAN}[3/5] Removing macvlan network...${NC}"
+echo -e "${CYAN}[3/6] Removing macvlan network...${NC}"
 if docker network inspect "$MACVLAN_NETWORK" &>/dev/null; then
     # Disconnect any remaining containers
     connected=$(docker network inspect "$MACVLAN_NETWORK" --format '{{range $k,$v := .Containers}}{{$v.Name}} {{end}}' 2>/dev/null || echo "")
@@ -182,7 +182,7 @@ fi
 echo ""
 
 # Step 4: Clean up remote state
-echo -e "${CYAN}[4/5] Cleaning up remote state...${NC}"
+echo -e "${CYAN}[4/6] Cleaning up remote state...${NC}"
 if [[ -d "$REMOTE_DIR" ]]; then
     rm -rf "$REMOTE_DIR"
     log_success "Remote state directory removed"
@@ -191,8 +191,27 @@ else
 fi
 echo ""
 
-# Step 5: Clear agent mode
-echo -e "${CYAN}[5/5] Clearing agent mode...${NC}"
+# Step 5: Remove .isle DNS forwarding
+echo -e "${CYAN}[5/6] Removing .isle DNS forwarding...${NC}"
+SPLIT_DNS="/etc/dnsmasq.d/split-dns.conf"
+if [[ -f "$SPLIT_DNS" ]] && grep -q 'server=/.isle/' "$SPLIT_DNS" 2>/dev/null; then
+    sed -i '/server=\/.isle\//d' "$SPLIT_DNS"
+    systemctl restart dnsmasq 2>/dev/null || true
+    log_success "Removed .isle DNS forwarding"
+else
+    log_info "No .isle DNS forwarding to remove"
+fi
+# Remove ~isle from systemd-resolved
+RESOLVED_CONF="/etc/systemd/resolved.conf.d/split-mdns.conf"
+if [[ -f "$RESOLVED_CONF" ]] && grep -q '~isle' "$RESOLVED_CONF" 2>/dev/null; then
+    sed -i 's/ ~isle//g' "$RESOLVED_CONF"
+    systemctl restart systemd-resolved 2>/dev/null || true
+    log_info "Removed ~isle from systemd-resolved"
+fi
+echo ""
+
+# Step 6: Clear agent mode
+echo -e "${CYAN}[6/6] Clearing agent mode...${NC}"
 if [[ -f "$MODE_FILE" ]]; then
     rm -f "$MODE_FILE"
     log_success "Agent mode cleared"

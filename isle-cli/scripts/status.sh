@@ -486,12 +486,78 @@ show_help() {
     echo ""
 }
 
+# Machine-readable status check for isle-manager-app
+# Outputs: component=status lines
+cmd_check() {
+    # Router
+    local router_info
+    router_info=$(check_router_status 2>/dev/null | tail -1)
+    local router_type=$(echo "$router_info" | cut -d'|' -f1)
+
+    case "$router_type" in
+        local-running) echo "router=running" ;;
+        local-stopped) echo "router=stopped" ;;
+        remote)        echo "router=remote" ;;
+        *)             echo "router=none" ;;
+    esac
+
+    # Agent container (check both names)
+    local agent_running=false
+    for name in "isle-vlan-agent" "isle-agent"; do
+        if docker ps --filter "name=${name}" --filter "status=running" --format '{{.Names}}' 2>/dev/null | grep -q "^${name}$"; then
+            agent_running=true
+            break
+        fi
+    done
+    if $agent_running; then
+        echo "agent=running"
+    else
+        echo "agent=stopped"
+    fi
+
+    # Host agent (systemd service)
+    if systemctl is-active --quiet isle-host-agent 2>/dev/null; then
+        echo "host-agent=running"
+    else
+        echo "host-agent=stopped"
+    fi
+
+    # mDNS service
+    if systemctl is-active --quiet mesh-mdns.service 2>/dev/null; then
+        echo "mdns=running"
+    elif systemctl list-unit-files 2>/dev/null | grep -q "mesh-mdns.service"; then
+        echo "mdns=stopped"
+    else
+        echo "mdns=none"
+    fi
+
+    # Isle bridge
+    if ip link show isle-br-0 &>/dev/null; then
+        echo "bridge=up"
+    else
+        echo "bridge=down"
+    fi
+
+    # Registered apps
+    local registry_file="/etc/isle-mesh/agent/registry.json"
+    if [[ -f "$registry_file" ]]; then
+        local app_count
+        app_count=$(jq -r '.apps | length' "$registry_file" 2>/dev/null || echo "0")
+        echo "apps=${app_count}"
+    else
+        echo "apps=0"
+    fi
+}
+
 # Parse command
 COMMAND=${1:-show}
 
 case $COMMAND in
     show|"")
         show_status
+        ;;
+    check)
+        cmd_check
         ;;
     help|-h|--help)
         show_help
