@@ -236,22 +236,76 @@ check_dns_leakage() {
     fi
 }
 
+# 12. Containment: a node ON the isle cannot reach/scan the real network.
+# This is the "compromise scenario" test. We use the isle's OWN device-scan
+# capability (the same reachability `isle scan` relies on — ICMP) but run it FROM
+# inside the isle (the agent container) aimed at the real host/LAN. If the isle
+# can reach the real network, an attacker who compromised an isle node could
+# enumerate or pivot into your normal network. Contained = it reaches nothing.
+check_scan_containment() {
+    # Vantage point: a running isle agent container sits on the isle network.
+    local container=""
+    local c
+    for c in isle-vlan-agent isle-remote-agent isle-agent; do
+        if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${c}$"; then
+            container="$c"; break
+        fi
+    done
+    [[ -z "$container" ]] && { echo "skip"; return; }
+
+    # The real-network targets the isle must NOT be able to reach.
+    local isp_ip isp_gw
+    isp_ip=$(detect_isp_ip)
+    isp_gw=$(ip route show default 2>/dev/null | awk '{print $3}' | head -1)
+    [[ -z "$isp_ip" && -z "$isp_gw" ]] && { echo "skip"; return; }
+
+    # Scan from the isle toward the real network (1s timeout per target).
+    local target reached=false
+    for target in "$isp_ip" "$isp_gw"; do
+        [[ -z "$target" ]] && continue
+        if docker exec "$container" sh -c "ping -c1 -W1 ${target} >/dev/null 2>&1"; then
+            reached=true; break
+        fi
+    done
+
+    if $reached; then echo "fail"; else echo "pass"; fi
+}
+
 # ═══════════════════════════════════════════
-# Human-readable status display
+# Test catalogue — organized into overarching KINDS of isolation, each with a
+# plain-language purpose. Entry format:  category:func_name:label:description
 # ═══════════════════════════════════════════
 
+# The overarching kinds of isolation we verify, and WHY each matters.
+#
+# These tests verify isolation at the NETWORK/CONFIG level at runtime. The same
+# kinds are reinforced at the PROCESS level by the AppArmor profiles in
+# security/apparmor/, where each rule is tagged with a matching
+# "[isolation: <kind>]" comment. In particular the `containment` kind below is the
+# runtime counterpart to AppArmor's confinement (a compromised isle process/node
+# cannot reach the real network, host, or secrets). The two are designed to read
+# as one model: this catalogue = "does isolation hold?"; AppArmor = "enforce it".
+CATEGORIES=(
+    "exposure:Inbound Exposure:Can anything on your normal Wi-Fi/LAN or ISP SEE that isle-mesh exists, or reach its services?"
+    "egress:Network Isolation (Egress):Can isle traffic ESCAPE outward to your normal network or the internet?"
+    "router:Router Air-gap:Is the OpenWRT router VM sealed off from the internet and your ISP's DNS?"
+    "footprint:Footprint & Metadata:Does isle-mesh leave traceable artifacts — open binds, real domain names, DNS leaks?"
+    "containment:Containment (Compromise Scenario):If a node ON the isle were compromised, could it reach or scan your real network/host?"
+)
+
 CHECKS=(
-    "port_exposure:Ports 80/443 not exposed to ISP:Web server ports bound to 0.0.0.0 are visible to anyone on your ISP's network"
-    "mdns_exposure:mDNS not broadcasting to ISP:Avahi broadcasts service names on all interfaces including WiFi/ethernet to ISP"
-    "discovery_exposure:Discovery beacon not on host:UDP 7878 beacon could reveal isle-mesh presence if exposed"
-    "firewall_rules:Firewall blocks isle ports on ISP:iptables rules prevent external access to isle-mesh services"
-    "route_isolation:No route from isle to ISP:Isle subnet traffic cannot reach the ISP-facing interface"
-    "no_nat:No NAT from isle to ISP:No masquerading rules that would forward isle traffic to the internet"
-    "router_airgap:Router VM air-gapped:OpenWRT router has no default gateway — cannot reach the internet"
-    "router_dns_isolated:Router DNS is local only:Router resolves DNS locally, not through ISP's DNS servers"
-    "compose_bindings:Docker ports bound to localhost:docker-compose.yml uses 127.0.0.1 bindings, not 0.0.0.0"
-    "cert_names:SSL certs use local domains only:No real domain names in certificates that could be traced via WHOIS"
-    "dns_leakage:No .isle DNS leaking upstream:Queries for .isle domains resolve locally, never sent to ISP's DNS"
+    "exposure:port_exposure:Ports 80/443 not exposed to ISP:Web server ports bound to 0.0.0.0 are visible to anyone on your ISP's network"
+    "exposure:mdns_exposure:mDNS not broadcasting to ISP:Avahi broadcasts service names on all interfaces including WiFi/ethernet to ISP"
+    "exposure:discovery_exposure:Discovery beacon not on host:UDP 7878 beacon could reveal isle-mesh presence if exposed"
+    "egress:firewall_rules:Firewall blocks isle ports on ISP:iptables rules prevent external access to isle-mesh services"
+    "egress:route_isolation:No route from isle to ISP:Isle subnet traffic cannot reach the ISP-facing interface"
+    "egress:no_nat:No NAT from isle to ISP:No masquerading rules that would forward isle traffic to the internet"
+    "router:router_airgap:Router VM air-gapped:OpenWRT router has no default gateway — cannot reach the internet"
+    "router:router_dns_isolated:Router DNS is local only:Router resolves DNS locally, not through ISP's DNS servers"
+    "footprint:compose_bindings:Docker ports bound to localhost:docker-compose.yml uses 127.0.0.1 bindings, not 0.0.0.0"
+    "footprint:cert_names:SSL certs use local domains only:No real domain names in certificates that could be traced via WHOIS"
+    "footprint:dns_leakage:No .isle DNS leaking upstream:Queries for .isle domains resolve locally, never sent to ISP's DNS"
+    "containment:scan_containment:Isle cannot scan the real network:A compromised isle node must not reach your real host/LAN — verified by scanning outward from inside the isle"
 )
 
 show_status() {
@@ -267,27 +321,35 @@ show_status() {
 
     local passed=0 failed=0 warned=0 skipped=0
 
-    for entry in "${CHECKS[@]}"; do
-        IFS=':' read -r func_name label description <<< "$entry"
+    # Walk each overarching KIND of isolation, explain its purpose, then its checks.
+    local cat_entry cat_key cat_name cat_purpose
+    for cat_entry in "${CATEGORIES[@]}"; do
+        IFS=':' read -r cat_key cat_name cat_purpose <<< "$cat_entry"
+        echo -e "${BOLD}${CYAN}${cat_name}${NC}"
+        echo -e "  ${BLUE}${cat_purpose}${NC}"
 
-        local result
-        result=$(check_"$func_name" || echo "fail")
+        local entry category func_name label description
+        for entry in "${CHECKS[@]}"; do
+            IFS=':' read -r category func_name label description <<< "$entry"
+            [[ "$category" != "$cat_key" ]] && continue
 
-        local icon color
-        case "$result" in
-            pass)    icon="[OK]"; color="$GREEN"; ((passed++)) ;;
-            fail)    icon="[!!]"; color="$RED"; ((failed++)) ;;
-            warn)    icon="[??]"; color="$YELLOW"; ((warned++)) ;;
-            skip)    icon="[--]"; color="$BLUE"; ((skipped++)) ;;
-        esac
+            local result
+            result=$(check_"$func_name" || echo "fail")
 
-        echo -e "${color}  ${icon}${NC} ${label}"
-        if [[ "$result" == "fail" ]]; then
-            echo -e "       ${RED}${description}${NC}"
-        fi
+            local icon color
+            case "$result" in
+                pass)    icon="[OK]"; color="$GREEN"; ((passed++)) ;;
+                fail)    icon="[!!]"; color="$RED"; ((failed++)) ;;
+                warn)    icon="[??]"; color="$YELLOW"; ((warned++)) ;;
+                skip)    icon="[--]"; color="$BLUE"; ((skipped++)) ;;
+            esac
+
+            echo -e "${color}    ${icon}${NC} ${label}"
+            # Always show the self-explanation so each test states its purpose.
+            echo -e "         ${description}"
+        done
+        echo ""
     done
-
-    echo ""
     echo -e "  ${GREEN}Pass: ${passed}${NC}  ${RED}Fail: ${failed}${NC}  ${YELLOW}Warn: ${warned}${NC}  ${BLUE}Skip: ${skipped}${NC}"
     echo ""
 
@@ -309,11 +371,21 @@ run_check_mode() {
     echo "security.isp_interface=${isp_iface:-none}"
     echo "security.isp_ip=$(detect_isp_ip)"
 
+    # Emit each kind's metadata (so the app can group + explain dynamically)...
+    local cat_entry cat_key cat_name cat_purpose
+    for cat_entry in "${CATEGORIES[@]}"; do
+        IFS=':' read -r cat_key cat_name cat_purpose <<< "$cat_entry"
+        echo "security.kind.${cat_key}=${cat_name}|${cat_purpose}"
+    done
+
+    # ...then each check's result + which kind it belongs to (existing keys kept).
+    local entry category func_name label description
     for entry in "${CHECKS[@]}"; do
-        IFS=':' read -r func_name label description <<< "$entry"
+        IFS=':' read -r category func_name label description <<< "$entry"
         local result
         result=$(check_"$func_name" || echo "fail")
         echo "security.${func_name}=${result}"
+        echo "security.category.${func_name}=${category}"
     done
 }
 

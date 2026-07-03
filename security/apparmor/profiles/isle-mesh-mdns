@@ -4,6 +4,13 @@
 #
 # Purpose: Broadcasts mDNS service announcements for isle-mesh apps.
 # This is the most restricted profile - it only needs mDNS and its config.
+#
+# ISOLATION MAPPING (vs. isle security kinds):
+#   • containment — tiny blast radius: if the broadcaster is compromised it can
+#                   only speak mDNS and read its own config (no Docker, no secrets).
+#   • egress      — network is clamped to mDNS multicast only; TCP is denied, so a
+#                   compromised broadcaster cannot open outbound connections. This
+#                   reinforces the egress kind (isle traffic can't escape outward).
 
 #include <tunables/global>
 
@@ -37,16 +44,17 @@ profile isle-mesh-mdns /usr/local/bin/isle-mesh/mesh-mdns-broadcast.sh flags=(co
   /usr/bin/basename                     ix,
   /usr/bin/id                           ix,
 
-  # --- Network: mDNS only ---
+  # [isolation: egress] Network clamped to mDNS only — UDP multicast + D-Bus to
+  # avahi. Nothing here lets the service reach off-link or open a TCP channel.
   network inet dgram,      # UDP for mDNS multicast (224.0.0.251:5353)
   network inet6 dgram,     # UDP6 for mDNS multicast
   network unix stream,     # D-Bus to avahi-daemon
 
   # --- Deny: everything this service doesn't need ---
-  deny network inet stream,             # No TCP connections
-  deny /var/run/docker.sock             rwx,
-  deny /home/**                         rwx,
-  deny /boot/**                         rwx,
-  deny /etc/isle-mesh/router/**         rwx,
-  deny /etc/isle-mesh/agent/ssl/**      rwx,
+  deny network inet stream,             # [isolation: egress]    no TCP — can't dial out
+  deny /var/run/docker.sock             rwx,  # [isolation: containment] no Docker = no root escalation
+  deny /home/**                         rwx,  # [isolation: containment] no user data
+  deny /boot/**                         rwx,  # [isolation: containment]
+  deny /etc/isle-mesh/router/**         rwx,  # [isolation: containment] no router SSH keys
+  deny /etc/isle-mesh/agent/ssl/**      rwx,  # [isolation: containment] no TLS private keys
 }

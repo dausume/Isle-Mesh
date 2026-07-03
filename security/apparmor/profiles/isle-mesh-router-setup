@@ -4,6 +4,16 @@
 #
 # Purpose: Initial router VM provisioning - creates bridges, starts VM,
 #          configures OpenWRT via SSH. Runs during `isle create` only.
+#
+# ISOLATION MAPPING (vs. isle security kinds):
+#   • containment — high privilege (libvirt, qemu, netlink, ssh), so confined to
+#                   project source + isle-mesh config, with OS creds, /boot and the
+#                   Docker socket denied. A compromise during provisioning can't
+#                   reach host keys or take over Docker.
+#   • router      — this script CREATES the air-gap it can't itself verify: it
+#                   provisions the OpenWRT VM with no default gateway / local-only
+#                   DNS. `isle security` (router_airgap, router_dns_isolated) is the
+#                   runtime check that this provisioning actually held.
 
 #include <tunables/global>
 
@@ -77,7 +87,9 @@ profile isle-mesh-router-setup /home/detts/Isle-Mesh/openwrt-router/scripts/setu
   network unix dgram,
   network netlink raw,      # ip command for bridge config
 
-  # --- Deny ---
+  # [isolation: containment] Despite needing libvirt + ssh, the setup script is
+  # denied OS creds, /boot, and Docker — provisioning can't be turned into a host
+  # takeover or key theft.
   deny /home/*/.ssh/**                      rwx,
   deny /home/*/.gnupg/**                    rwx,
   deny /boot/**                             rwx,

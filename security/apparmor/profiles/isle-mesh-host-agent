@@ -4,6 +4,12 @@
 #
 # Purpose: Watches registry.json, manages Docker containers,
 #          regenerates nginx configs, orchestrates the vlan-agent.
+#
+# ISOLATION MAPPING (vs. isle security kinds):
+#   • containment — long-running daemon, so confinement limits a persistent
+#                   compromise: scoped to /etc/isle-mesh/agent, Docker via Px,
+#                   and denied /home, /boot, and /etc/systemd (can't add services
+#                   or read user data to persist/escalate).
 
 #include <tunables/global>
 
@@ -72,7 +78,8 @@ profile isle-mesh-host-agent /usr/local/bin/isle-mesh/isle-host-agent-relay.sh f
   network unix stream,
   network unix dgram,
 
-  # --- Deny: things the agent should never do ---
+  # [isolation: containment] No user data, no boot, no package or systemd-unit
+  # writes — a compromised daemon can't install persistence or escalate.
   deny /home/**                         rwx,
   deny /boot/**                         rwx,
   deny /etc/apt/**                      rwx,

@@ -1,5 +1,16 @@
 # Isle-Mesh base abstraction - common rules for all isle-mesh components
 # Include this in every isle-mesh profile for shared access patterns
+#
+# ┌─ ISOLATION MAPPING ────────────────────────────────────────────────────────┐
+# │ AppArmor here provides PROCESS-LEVEL CONTAINMENT (defense-in-depth) — the    │
+# │ "what can a compromised isle process touch?" barrier. It maps to the kinds   │
+# │ verified by `isle security` (see isle-cli/scripts/security.sh CATEGORIES):   │
+# │   • containment — a compromised isle process cannot read OS secrets/creds    │
+# │                   (this file's deny block). Backs: scan_containment, and the │
+# │                   "isle-mesh can't touch OS secrets" half of two-way isolation│
+# │ Network-level kinds (exposure/egress/router) are enforced by firewall/route/ │
+# │ VLAN config and verified by isle security — AppArmor only reinforces them.   │
+# └────────────────────────────────────────────────────────────────────────────┘
 
   # Basic system access
   /etc/ld.so.cache          r,
@@ -24,7 +35,11 @@
   # Temp (private per PrivateTmp in systemd)
   owner /tmp/**              rw,
 
-  # Deny access to sensitive host paths isle-mesh should never touch
+  # [isolation: containment] Deny access to sensitive host paths isle-mesh should
+  # never touch. If any confined isle process is compromised, it still cannot read
+  # OS SSH keys, GPG keyrings, cloud creds, /etc/shadow or sudoers — blocking
+  # credential theft and lateral movement off the isle into the real system.
+  # This is the "isle → OS" half of two-way isolation.
   deny /home/*/.ssh/**       rwx,
   deny /home/*/.gnupg/**     rwx,
   deny /home/*/.config/gcloud/** rwx,

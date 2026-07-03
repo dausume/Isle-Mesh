@@ -4,6 +4,17 @@
 # Purpose: User-facing CLI that orchestrates create/destroy/status/app management.
 # This profile is broader because the CLI drives all isle-mesh operations,
 # but it still shouldn't touch non-isle-mesh system resources.
+#
+# ISOLATION MAPPING (vs. isle security kinds):
+#   • containment — the CLI is the most powerful component (it runs create/destroy,
+#                   drives libvirt + Docker + ssh), so confinement here matters most.
+#                   File access is scoped to /etc/isle-mesh; Docker and virsh are
+#                   reached via Px/Cx sub-profiles (bounded privilege); OS creds and
+#                   /boot are denied — a CLI compromise stays inside isle-mesh.
+#   • footprint   — write access is limited to isle-mesh paths, so the CLI can't
+#                   sprawl artifacts across the system.
+#   (Network exposure/egress/router air-gap are enforced by the router/firewall/VLAN
+#    config the CLI WRITES, and are what `isle security` verifies at runtime.)
 
 #include <tunables/global>
 
@@ -44,6 +55,9 @@ profile isle-mesh-cli /usr/local/bin/isle flags=(complain) {
   /usr/bin/dash                         ix,
   /usr/bin/node                         ix,
   /usr/bin/python3*                     ix,
+  # [isolation: containment] virsh and docker run under tighter sub/peer profiles
+  # (Cx/Px) — the CLI can drive the router VM and containers without those tools
+  # inheriting the CLI's full access.
   /usr/bin/virsh                        Cx -> virsh,
   /usr/bin/docker                       Px -> isle-mesh-docker,
   /usr/bin/ip                           ix,
@@ -94,7 +108,8 @@ profile isle-mesh-cli /usr/local/bin/isle flags=(complain) {
   network unix stream,
   network unix dgram,
 
-  # --- Deny: things the CLI should never touch ---
+  # [isolation: containment] Even the powerful CLI is denied OS creds and /boot,
+  # so a hijacked isle command cannot steal host keys or tamper with boot.
   deny /home/*/.ssh/**                  rwx,
   deny /home/*/.gnupg/**                rwx,
   deny /boot/**                         rwx,

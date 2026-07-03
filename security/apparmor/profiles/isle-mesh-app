@@ -3,6 +3,12 @@
 #
 # Purpose: GUI for managing isle-mesh. Should only be able to read
 #          isle-mesh status and invoke the CLI - never touch secrets directly.
+#
+# ISOLATION MAPPING (vs. isle security kinds):
+#   • containment — the GUI is a thin status reader: it may read registry.json and
+#                   logs and TRANSITION into the CLI profile, but is denied secrets
+#                   and the Docker socket. A compromised GUI cannot pivot to root or
+#                   read keys; it can only do what the CLI profile itself permits.
 
 #include <tunables/global>
 
@@ -29,7 +35,9 @@ profile isle-mesh-app /usr/bin/isle-manager-app flags=(complain) {
   /etc/isle-mesh/.install*              r,
   /var/log/isle-mesh/**                 r,
 
-  # --- Invoke CLI (transition to CLI profile) ---
+  # [isolation: containment] Invoking the CLI hands off into the CLI profile (Px),
+  # so the GUI can never gain more than the CLI itself is allowed — privilege is
+  # bounded by transition, not inherited.
   /usr/local/bin/isle                   Px -> isle-mesh-cli,
 
   # --- App data ---
@@ -41,7 +49,9 @@ profile isle-mesh-app /usr/bin/isle-manager-app flags=(complain) {
   network inet dgram,
   network unix stream,
 
-  # --- Deny: GUI should never touch secrets ---
+  # [isolation: containment] GUI should never touch secrets or escalate. Denying
+  # the Docker socket is key — it is root-equivalent; a GUI compromise must not
+  # become a host compromise.
   deny /etc/isle-mesh/router/ssh/**     rwx,
   deny /etc/isle-mesh/agent/ssl/keys/** rwx,
   deny /etc/isle-mesh/agent/host-agent.conf r,
