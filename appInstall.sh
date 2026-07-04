@@ -25,6 +25,10 @@ if ! sudo dpkg -i "$DEB"; then
 fi
 
 echo ""
+echo "==> Setting up plug-and-play node services (boot recovery + cable hotplug)..."
+sudo bash "$ROOT/install-node-services.sh" || echo "    (node services setup skipped — run: sudo bash $ROOT/install-node-services.sh)"
+
+echo ""
 echo "==> Installed."
 echo "    Desktop app:  isle-manager-app"
 echo "    CLI tool:     isle"
