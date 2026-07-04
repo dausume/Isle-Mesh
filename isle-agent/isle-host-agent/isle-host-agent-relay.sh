@@ -65,7 +65,7 @@ EOF
       jq --arg now "$now" \
          '.apps.health.created_at = $now | .apps.health.updated_at = $now' \
          "$REGISTRY_FILE" > "$temp_file"
-      mv "$temp_file" "$REGISTRY_FILE"
+      cp "$temp_file" "$REGISTRY_FILE" && rm -f "$temp_file"  # inode-preserving (bind mount)
     fi
     log "✅ Default registry created with health.local app"
   else
@@ -103,7 +103,7 @@ ensure_health_app() {
          "updated_at": $now
        }' "$REGISTRY_FILE" > "$temp_file"
 
-    mv "$temp_file" "$REGISTRY_FILE"
+    cp "$temp_file" "$REGISTRY_FILE" && rm -f "$temp_file"  # inode-preserving (bind mount)
     log "✅ Added health.local app to registry"
   fi
 }
@@ -143,7 +143,7 @@ update_registry() {
        }' "$REGISTRY_FILE" > "$temp_file"
 
     # Atomic replace
-    mv "$temp_file" "$REGISTRY_FILE"
+    cp "$temp_file" "$REGISTRY_FILE" && rm -f "$temp_file"  # inode-preserving (bind mount)
     log "✅ Updated registry for $domain -> $resolved_ip"
   else
     log "⚠️  jq not found - cannot update registry"
