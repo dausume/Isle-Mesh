@@ -17,6 +17,9 @@ DISCOVERY_FILE="${DISCOVERY_FILE:-/etc/isle-mesh/agent/discovery-mode.json}"
 
 dm_now_iso()   { date -Iseconds 2>/dev/null || date -u +%Y-%m-%dT%H:%M:%SZ; }
 dm_now_epoch() { date +%s; }
+# Current boot's unique id — changes every reboot, so a session stamped with a prior
+# boot_id is treated as ended ("discovery on until next reboot").
+dm_boot_id()   { tr -d '[:space:]' < /proc/sys/kernel/random/boot_id 2>/dev/null || echo unknown; }
 dm_node_id()   {
     if [[ -s /etc/isle-mesh/agent/remote/hostname ]]; then
         tr -d '[:space:]' < /etc/isle-mesh/agent/remote/hostname
@@ -29,6 +32,12 @@ _dm_write() { local tmp="$1"; cp "$tmp" "$DISCOVERY_FILE" && rm -f "$tmp"; }
 dm_active() {
     [[ -f "$DISCOVERY_FILE" ]] || return 1
     [[ "$(jq -r '.active // false' "$DISCOVERY_FILE" 2>/dev/null)" == "true" ]] || return 1
+    # "until reboot": a session opened on a previous boot is treated as ended.
+    local sb; sb=$(jq -r '.boot_id // ""' "$DISCOVERY_FILE" 2>/dev/null)
+    if [[ -n "$sb" && "$sb" != "$(dm_boot_id)" ]]; then
+        dm_stop "rebooted" >/dev/null 2>&1
+        return 1
+    fi
     local exp now
     exp=$(jq -r '.expires_epoch // 0' "$DISCOVERY_FILE" 2>/dev/null)
     now=$(dm_now_epoch)
@@ -51,9 +60,9 @@ dm_start() {
     [[ "${timeout:-0}" -gt 0 ]] && exp=$((now + timeout))
     local tmp; tmp="$(mktemp)"
     jq -n --arg sid "$sid" --arg started "$(dm_now_iso)" \
-          --argjson exp "$exp" --arg by "$(dm_node_id)" \
+          --argjson exp "$exp" --arg by "$(dm_node_id)" --arg bootid "$(dm_boot_id)" \
         '{active:true, session_id:$sid, started_at:$started, expires_epoch:$exp,
-          started_by:$by, added_macs:[]}' > "$tmp" && _dm_write "$tmp"
+          started_by:$by, boot_id:$bootid, added_macs:[]}' > "$tmp" && _dm_write "$tmp"
     echo "$sid"
 }
 

@@ -31,9 +31,9 @@ TESTS_PASSED=0
 TESTS_FAILED=0
 FAILED_TESTS=()
 
-log_test()   { echo -e "${CYAN}[TEST]${NC} $1"; ((TESTS_RUN++)); }
-log_pass()   { echo -e "${GREEN}  [PASS]${NC} $1"; ((TESTS_PASSED++)); }
-log_fail()   { echo -e "${RED}  [FAIL]${NC} $1"; ((TESTS_FAILED++)); FAILED_TESTS+=("$1"); }
+log_test()   { echo -e "${CYAN}[TEST]${NC} $1"; TESTS_RUN=$((TESTS_RUN+1)); }
+log_pass()   { echo -e "${GREEN}  [PASS]${NC} $1"; TESTS_PASSED=$((TESTS_PASSED+1)); }
+log_fail()   { echo -e "${RED}  [FAIL]${NC} $1"; TESTS_FAILED=$((TESTS_FAILED+1)); FAILED_TESTS+=("$1"); }
 log_warn()   { echo -e "${YELLOW}  [WARN]${NC} $1"; }
 log_info()   { echo -e "${BLUE}  [INFO]${NC} $1"; }
 

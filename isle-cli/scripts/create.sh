@@ -236,10 +236,17 @@ ensure_isle_dns() {
         changed=true
     fi
 
-    # Add ~isle to systemd-resolved domains if not already present
+    # Add ~isle to systemd-resolved domains if not already present.
+    # The drop-in may not exist (fresh machine, or a previous destroy --purge
+    # removed it) — create it rather than sed-ing a missing file.
     if ! grep -q '~isle' "$RESOLVED_CONF" 2>/dev/null; then
         log_info "Adding ~isle to systemd-resolved split-DNS domains..."
-        sed -i 's/Domains=\(.*\)/Domains=\1 ~isle/' "$RESOLVED_CONF"
+        mkdir -p "$(dirname "$RESOLVED_CONF")"
+        if [ -f "$RESOLVED_CONF" ] && grep -q '^Domains=' "$RESOLVED_CONF"; then
+            sed -i 's/^Domains=\(.*\)/Domains=\1 ~isle/' "$RESOLVED_CONF"
+        else
+            { [ -f "$RESOLVED_CONF" ] || echo "[Resolve]"; echo "Domains=~isle"; } >> "$RESOLVED_CONF"
+        fi
         changed=true
     fi
 
@@ -808,6 +815,23 @@ show_completion() {
 }
 
 # Main execution
+# Turn discovery mode ON after install (default-on until next reboot) so the operator
+# can plug devices/cables in one-by-one with no extra steps, then finalize. The boot_id
+# stamp in the session makes it end automatically at the next reboot.
+setup_discovery() {
+    log_step "Enabling Device Discovery Mode"
+    if [[ -f "$SCRIPT_DIR/lib/discovery-mode.sh" ]] && command -v jq >/dev/null 2>&1; then
+        # shellcheck source=/dev/null
+        source "$SCRIPT_DIR/lib/discovery-mode.sh"
+        local sid; sid="$(dm_start 0)"
+        log_success "Discovery mode ON (session ${sid}) — plug in devices/cables now; no extra steps."
+        log_info "It auto-ends on reboot. Toggle anytime: isle discovery start | stop"
+    else
+        log_warning "Could not enable discovery mode (jq or discovery lib missing)."
+    fi
+    echo ""
+}
+
 main() {
     case "${1:-}" in
         help|--help|-h)
@@ -823,10 +847,15 @@ main() {
 
             check_prerequisites
             ensure_isle_dns
-            setup_agent
             setup_mdns_system
+            # Router before agent: the agent's macvlan network needs the
+            # isle-br-0 bridge (created by router setup) as its parent, and
+            # its DHCP lease comes from the router. On a fresh/purged host
+            # the old order failed at docker network creation.
             setup_router
+            setup_agent
             setup_sample_app
+            setup_discovery
             show_completion
             ;;
     esac
