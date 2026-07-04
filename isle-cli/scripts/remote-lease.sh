@@ -55,9 +55,12 @@ if command -v nmcli >/dev/null 2>&1 && nmcli -t -f RUNNING general 2>/dev/null |
   if nmcli -t -f NAME connection show 2>/dev/null | grep -qx "$con"; then
     ok "NM autoconnect profile '$con' already present"
   else
+    # never-default: the isle is a SEPARATE overlay, NOT the internet path. The ISP/wifi
+    # default route must stay; the isle only owns its own subnet route.
     nmcli connection add type ethernet ifname "$IFACE" con-name "$con" \
-      ipv4.method auto ipv6.method ignore connection.autoconnect yes >/dev/null \
-      && ok "created NM autoconnect profile '$con' (DHCP, autoconnect)" \
+      ipv4.method auto ipv4.never-default yes ipv6.method ignore ipv6.never-default yes \
+      connection.autoconnect yes >/dev/null \
+      && ok "created NM autoconnect profile '$con' (DHCP, autoconnect, never-default)" \
       || { err "failed to create NM profile"; exit 1; }
   fi
   nmcli connection up "$con" >/dev/null 2>&1 || true
@@ -69,5 +72,10 @@ else
 fi
 
 sleep 2
+# Safety net for any DHCP path (esp. dhclient): strip an isle-provided DEFAULT route so
+# it can never hijack the ISP/wifi internet path. The isle keeps only its subnet route.
+if ip route show default dev "$IFACE" 2>/dev/null | grep -q .; then
+    ip route del default dev "$IFACE" 2>/dev/null && log "removed isle default route on $IFACE (ISP internet path preserved)"
+fi
 addr="$(ip -4 -o addr show "$IFACE" 2>/dev/null | awk '{print $4}' | head -1)"
-if [[ -n "$addr" ]]; then ok "leased: $IFACE = $addr"; else log "no lease yet on $IFACE (is OpenWRT serving DHCP on the cable?)"; fi
+if [[ -n "$addr" ]]; then ok "leased: $IFACE = $addr (isle overlay, not default route)"; else log "no lease yet on $IFACE (is OpenWRT serving DHCP on the cable?)"; fi
