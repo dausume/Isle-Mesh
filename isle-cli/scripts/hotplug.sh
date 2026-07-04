@@ -23,8 +23,9 @@ log(){ ( echo "[$(date '+%F %T')] $*" >> "$LOG" ) 2>/dev/null || true; }
 [[ -n "$IFACE" ]] || { log "no interface given"; exit 0; }
 
 # --- guards ---------------------------------------------------------------
-default_iface(){ ip route show default 2>/dev/null | awk '{print $5; exit}'; }
-[[ "$IFACE" == "$(default_iface)" ]] && { log "skip $IFACE (default-route / ISP)"; exit 0; }
+# Never touch the WIFI (ISP/SSH path) or loopback. We do NOT skip on "holds a default
+# route" — an isle-hijacked default lands on the ethernet cable, which is exactly what
+# we want to act on (and remote-lease's never-default keeps it from recurring).
 [[ "$IFACE" == "lo" ]] && exit 0
 [[ -d "/sys/class/net/$IFACE/wireless" ]] && { log "skip $IFACE (wireless)"; exit 0; }
 case "$IFACE" in wl*|wlan*|wlp*) log "skip $IFACE (wifi)"; exit 0 ;; esac

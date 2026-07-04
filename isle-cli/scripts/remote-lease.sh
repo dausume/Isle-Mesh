@@ -5,8 +5,8 @@
 # ethernet port so it pulls an isle address whenever the cable is live — on boot and
 # on plug-in — with NO manual dhclient. Idempotent; safe to re-run.
 #
-# THREAT-MODEL GUARD: never touches the wifi / default-route interface (the ISP LAN /
-# SSH path). Only acts on a wired, non-default-route, non-wireless NIC with carrier.
+# THREAT-MODEL GUARD: never touches the WIFI (the ISP LAN / SSH path) or loopback.
+# Only acts on a wired, non-wireless NIC with carrier.
 #
 #   isle remote-lease [iface]   (auto-detects the isle cable NIC if omitted)
 set -uo pipefail
@@ -17,12 +17,12 @@ err(){ echo -e "\033[0;31m[isle-remote-lease] ✗\033[0m $*" >&2; }
 
 require_root(){ [[ ${EUID:-$(id -u)} -eq 0 ]] || { err "run as root (sudo isle remote-lease)"; exit 1; }; }
 
-default_iface(){ ip route show default 2>/dev/null | awk '{print $5; exit}'; }
-
-# Never touch: default-route iface, any wireless iface, loopback.
+# Never touch the ISP/SSH path = the WIFI (and loopback). We do NOT protect an interface
+# merely for holding a default route: an isle-hijacked default lands on the ethernet
+# cable, and correcting that is this script's job. (never-default keeps us from
+# re-creating one.) On wired-ISP boxes, pass the isle interface explicitly.
 is_protected(){
-  local i="$1" d; d="$(default_iface)"
-  [[ -n "$d" && "$i" == "$d" ]] && return 0
+  local i="$1"
   [[ "$i" == "lo" ]] && return 0
   [[ -d "/sys/class/net/$i/wireless" ]] && return 0
   case "$i" in wl*|wlan*|wlp*) return 0 ;; esac
