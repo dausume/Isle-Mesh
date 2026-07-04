@@ -116,7 +116,7 @@ create_join_protocol_daemon() {
 
 ISLE_NAME="$ISLE_NAME"
 VLAN_ID="$VLAN_ID"
-DNSMASQ_CONF="/etc/dnsmasq.d/isle-vlan-domains.conf"
+DNSMASQ_CONF="/tmp/dnsmasq.d/isle-vlan-domains.conf"
 DISCOVERY_INTERVAL=30
 PIDFILE="/var/run/isle-join-protocol.pid"
 
@@ -134,8 +134,8 @@ log_error() {
 # Write PID file
 echo $$ > "$PIDFILE"
 
-# Ensure dnsmasq.d directory exists
-mkdir -p /etc/dnsmasq.d
+# Ensure the jail-readable dnsmasq conf-dir exists
+mkdir -p /tmp/dnsmasq.d
 
 # Initialize the vlan domains config file
 initialize_config() {
@@ -296,8 +296,8 @@ deploy_to_router() {
 chmod +x /usr/bin/isle-join-protocol && \
 /etc/init.d/isle-join-protocol enable && \
 /etc/init.d/isle-join-protocol start && \
-if ! grep -q 'conf-dir=/etc/dnsmasq.d' /etc/dnsmasq.conf 2>/dev/null; then \
-    echo 'conf-dir=/etc/dnsmasq.d' >> /etc/dnsmasq.conf && \
+if ! grep -q 'local=/isle/' /etc/dnsmasq.conf 2>/dev/null; then \
+    echo 'local=/isle/' >> /etc/dnsmasq.conf && \
     /etc/init.d/dnsmasq restart; \
 fi"
 
