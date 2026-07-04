@@ -99,6 +99,15 @@ COMMAND=${1:-help}
 shift || true
 
 case $COMMAND in
+    register)
+        bash "$SCRIPT_DIR/dns-register.sh" register "$@"
+        ;;
+    unregister)
+        bash "$SCRIPT_DIR/dns-register.sh" unregister "$@"
+        ;;
+    mappings|list-isle)
+        bash "$SCRIPT_DIR/dns-register.sh" list "$@"
+        ;;
     get-ip)
         # Get router IP for DNS configuration
         echo -e "${BOLD}Router DNS Server IP${NC}"
