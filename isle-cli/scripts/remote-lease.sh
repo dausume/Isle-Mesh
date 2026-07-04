@@ -79,3 +79,7 @@ if ip route show default dev "$IFACE" 2>/dev/null | grep -q .; then
 fi
 addr="$(ip -4 -o addr show "$IFACE" 2>/dev/null | awk '{print $4}' | head -1)"
 if [[ -n "$addr" ]]; then ok "leased: $IFACE = $addr (isle overlay, not default route)"; else log "no lease yet on $IFACE (is OpenWRT serving DHCP on the cable?)"; fi
+
+# Split-DNS: make *.isle resolve via the isle router (ISP DNS untouched).
+_SELF="$(readlink -f "${BASH_SOURCE[0]}")"; _SD="$(cd "$(dirname "$_SELF")" && pwd)"
+[[ -f "$_SD/remote-dns.sh" ]] && bash "$_SD/remote-dns.sh" "$IFACE" 2>/dev/null || true
