@@ -104,10 +104,34 @@ Ordered by dependency & value. Each branch note lists: goal · files · test.
 ### B6 — `feat/isle-app-deb`  (portable packaging) + manager AppsView lifecycle
 - **Goal:** wrap an isle-app into a `.deb` installable on another node; AppsView
   double-click → access/up/down+deregister/uninstall driving the CLI verbs.
-- **Files:** a per-app deb builder (extend `mesh-app-scaffolding` + `build-deb.sh`
-  patterns), `isle-manager-app/.../AppsView/*`.
-- **Test:** build an isle-app .deb, install on the remote, bring it up from the manager
-  app, access it via `.isle`.
+- **Status (2026-07-04): packager BUILT + build-tested headlessly.**
+  - `isle app package --name <n> --compose <file> [--domain --container --port
+    --protocol --version --output --icon --maintainer]` -> `isle-app-<n>_<v>_all.deb`
+    (`isle-cli/scripts/app-package.sh`). Verified: valid control metadata
+    (`Depends: docker.io | docker-ce`), correct file layout, and the per-app lifecycle
+    wrapper with its `__APPROOT__` placeholder substituted.
+  - The `.deb` ships: payload `docker-compose.yml` + `isle-app.env` under
+    `/usr/share/isle-mesh/apps/<n>/`; a lifecycle wrapper `/usr/bin/isle-app-<n>`
+    (`up`=compose up + `isle agent register`; `down`=`isle agent unregister` + compose
+    down; `status`; `access`=xdg-open the domain); a `.desktop` entry (double-click ->
+    `up`); `postinst` (records an installed-but-down marker under
+    `/etc/isle-mesh/agent/installed-apps/`, does NOT auto-start); `prerm` (down +
+    deregister + forget).
+  - `isle app installed [--json]` (`app-installed.sh`) lists installed-but-down apps by
+    reading those markers — the CLI verb AppsView needs to show installed apps and offer
+    "bring up". Tested (empty + populated).
+- **Test (needs sudo on a node — DO WHEN BACK):**
+  1. `isle app package --name demo-wiki --compose <compose> --port 80` -> produces the `.deb`.
+  2. Copy to the remote node, `sudo dpkg -i isle-app-demo-wiki_0.1.0_all.deb`
+     (postinst prints the bring-up hint; `isle app installed` now lists it, down).
+  3. `isle-app-demo-wiki up` (or from the manager app) -> compose up + registered; served
+     on `demo-wiki.local` / `demo-wiki.isle` via the proxy. `... access` opens it.
+  4. `isle-app-demo-wiki down` -> deregistered + containers down. `sudo dpkg -r
+     isle-app-demo-wiki` -> prerm brings it down + deregisters + drops the marker.
+- **Follow-up (not blocking):** AppsView should call `isle app installed` to render
+  installed-but-down apps alongside running ones, and map double-click ->
+  `isle-app-<n> {up,down,access}` / `dpkg -r`. De-register button already wired
+  (`feat/appsview-deregister`).
 
 ### Bx — cleanup (needs sudo, do when back)
 - Remove router test cruft: `test.isle`/`test2`/`test3` UCI domains + the manual

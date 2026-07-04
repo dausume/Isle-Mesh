@@ -13,6 +13,8 @@ PROJECT_ROOT="$(dirname "$CLI_DIR")"
 # Script paths
 ISLE_CORE="$SCRIPT_DIR/isle-core.sh"
 SCAFFOLD="$SCRIPT_DIR/scaffold.sh"
+PACKAGE="$SCRIPT_DIR/app-package.sh"
+INSTALLED="$SCRIPT_DIR/app-installed.sh"
 CONFIG="$SCRIPT_DIR/config.sh"
 DISCOVER="$SCRIPT_DIR/discover.sh"
 SSL="$SCRIPT_DIR/ssl.sh"
@@ -49,6 +51,14 @@ show_help() {
     echo -e "    -o, --output DIR                  Output directory"
     echo -e "    -d, --domain DOMAIN               Base domain"
     echo -e "    -n, --name NAME                   Project name"
+    echo -e ""
+    echo -e "Packaging (portable install onto any isle node):"
+    echo -e "  ${CYAN}isle app package [opts]${NC}          Build an installable isle-app .deb"
+    echo -e "    --name NAME                       App name (required)"
+    echo -e "    --compose FILE                    docker-compose.yml to wrap (required)"
+    echo -e "    --domain D  --port P  --protocol  Proxy scoping (default <name>.local :80 http)"
+    echo -e "    --version V  --output DIR  --icon PNG"
+    echo -e "  ${CYAN}isle app installed [--json]${NC}      List isle-apps installed on this node"
     echo -e ""
     echo -e "Managing Services (like docker-compose):"
     echo -e "  ${CYAN}isle app up [--build]${NC}             Start mesh-app services"
@@ -167,6 +177,12 @@ case $COMMAND in
     # Project tools
     scaffold)
         exec bash "$SCAFFOLD" "$@"
+        ;;
+    package)
+        exec bash "$PACKAGE" "$@"
+        ;;
+    installed)
+        exec bash "$INSTALLED" "$@"
         ;;
 
     config)
