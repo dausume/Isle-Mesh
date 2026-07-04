@@ -128,10 +128,12 @@ Ordered by dependency & value. Each branch note lists: goal · files · test.
      on `demo-wiki.local` / `demo-wiki.isle` via the proxy. `... access` opens it.
   4. `isle-app-demo-wiki down` -> deregistered + containers down. `sudo dpkg -r
      isle-app-demo-wiki` -> prerm brings it down + deregisters + drops the marker.
-- **Follow-up (not blocking):** AppsView should call `isle app installed` to render
-  installed-but-down apps alongside running ones, and map double-click ->
-  `isle-app-<n> {up,down,access}` / `dpkg -r`. De-register button already wired
-  (`feat/appsview-deregister`).
+- **AppsView lifecycle wired (2026-07-04, submodule `feat/appsview-deregister`):** the
+  view merges `isle agent list-apps` (running) with `isle app installed --json`
+  (deb-installed, carrying each app's `pkg`) and renders state-aware cards —
+  running: Open / Bring Down / De-register; installed-down: Bring Up / Uninstall
+  (`pkexec dpkg -r`). Slow actions run off the FX thread. Compiles clean (mvn -o,
+  BUILD SUCCESS). Main repo pins this submodule commit.
 
 ### Bx — cleanup (needs sudo, do when back)
 - Remove router test cruft: `test.isle`/`test2`/`test3` UCI domains + the manual

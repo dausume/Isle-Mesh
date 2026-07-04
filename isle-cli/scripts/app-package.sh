@@ -54,6 +54,7 @@ DOMAIN="${DOMAIN}"
 CONTAINER="${CONTAINER}"
 PORT="${PORT}"
 PROTOCOL="${PROTOCOL}"
+PKG="${PKG}"
 EOF
 
 # --- lifecycle wrapper: wraps docker compose + isle agent registration --------
