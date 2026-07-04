@@ -29,5 +29,5 @@ HDR
   echo "Built: $out"
 }
 
-bundle "$ROOT/add-ethernet-connection.main.sh" "$ROOT/add-ethernet-lib" "$OUT/add-ethernet-connection.sh"
+bundle "$ROOT/add-ethernet-connection.main.sh" "$ROOT/add-ethernet-connection-lib" "$OUT/add-ethernet-connection.sh"
 bundle "$ROOT/add-usb-wifi.main.sh"            "$ROOT/add-usb-wifi-lib" "$OUT/add-usb-wifi.sh"

@@ -4,86 +4,114 @@ const fs = require('fs');
 const { execSync } = require('child_process');
 const path = require('path');
 
-// Get the project root (parent of isle-cli)
+// Project root (parent of isle-cli)
 const projectRoot = path.resolve(__dirname, '..');
+const scriptsDir = path.join(__dirname, 'scripts');
 
-const scriptPaths = {
-    // Namespace commands
-    'app': path.join(__dirname, 'scripts', 'app.sh'),
-    'router': path.join(__dirname, 'scripts', 'router.sh'),
-    'agent': path.join(__dirname, 'scripts', 'agent.sh'),
-    'mdns': path.join(__dirname, 'scripts', 'mdns.sh'),
-    'dns': path.join(__dirname, 'scripts', 'dns.sh'),
-    'security': path.join(__dirname, 'scripts', 'security.sh'),
+// ─────────────────────────────────────────────────────────────────────────────
+// COMMAND TABLE — the single source of truth for every CLI command.
+//
+// Add a command by adding ONE entry here; dispatch, validation, and aliases are
+// all derived from it. No parallel switch-case to keep in sync (that duplication
+// was the source of repeated wiring bugs). Every command dispatches uniformly:
+//   bash <scripts>/<script> <subcommand> <extraArgs...>   (stdio inherited)
+// with clean exit-code propagation (no Node stack traces on script failure).
+//
+//   script:     filename under scripts/
+//   desc:       one-line description (help + docs)
+//   aliases:    alternate names for the same command
+//   docker:     true → warn if the user isn't in the docker group first
+//   deprecated: string → print a deprecation notice before running
+// ─────────────────────────────────────────────────────────────────────────────
+const commands = {
+  // Namespace modules (dispatch their own subcommands)
+  app:      { script: 'app.sh',      desc: 'Mesh application management', docker: true },
+  router:   { script: 'router.sh',   desc: 'Router and network management' },
+  agent:    { script: 'agent.sh',    desc: 'Agent and bridge management' },
+  mdns:     { script: 'mdns.sh',     desc: 'mDNS infrastructure (.local domains)' },
+  dns:      { script: 'dns.sh',      desc: 'Router DNS management (.isle domains)' },
+  security: { script: 'security.sh', desc: 'ISP visibility and network hardening' },
 
-    // Deprecated - backward compatibility
-    'localhost': path.join(__dirname, 'scripts', 'mdns-app.sh'),
+  // Lifecycle
+  create:    { script: 'create.sh',    desc: 'Complete setup (agent + router + sample app)' },
+  destroy:   { script: 'destroy.sh',   desc: 'Complete teardown (apps + agent + router)' },
+  recover:   { script: 'boot-bringup.sh', desc: 'Idempotent full-isle bring-up (also run at boot)', aliases: ['boot'] },
+  join:      { script: 'join.sh',      desc: 'Join an existing isle from a remote machine' },
+  leave:     { script: 'leave.sh',     desc: 'Leave an isle (tear down remote agent)' },
+  install:   { script: 'install.sh',   desc: 'Install dependencies (app/router/agent/all)' },
+  uninstall: { script: 'uninstall.sh', desc: 'Uninstall components (app/router/all)' },
 
-    // Top-level utilities
-    'test': path.join(__dirname, 'scripts', 'test.sh'),
-    'scan': path.join(__dirname, 'scripts', 'scan.sh'),
-    'devices': path.join(__dirname, 'scripts', 'devices.sh'),
-    'discovery': path.join(__dirname, 'scripts', 'discovery.sh'),
-    'onboard': path.join(__dirname, 'scripts', 'onboard.sh'),
-    'usb': path.join(__dirname, 'scripts', 'usb.sh'),
-    'ports': path.join(__dirname, 'scripts', 'ports.sh'),
-    'status': path.join(__dirname, 'scripts', 'status.sh'),
-    'create': path.join(__dirname, 'scripts', 'create.sh'),
-    'destroy': path.join(__dirname, 'scripts', 'destroy.sh'),
-    'join': path.join(__dirname, 'scripts', 'join.sh'),
-    'leave': path.join(__dirname, 'scripts', 'leave.sh'),
-    'install': path.join(__dirname, 'scripts', 'install.sh'),
-    'uninstall': path.join(__dirname, 'scripts', 'uninstall.sh'),
-    'permissions': path.join(__dirname, 'scripts', 'permissions.sh'),
-    'fix-docker': path.join(__dirname, 'scripts', 'fix-docker-cgroups.sh'),
-    'dependencies': path.join(__dirname, 'scripts', 'check-dependencies.sh'),
-    'deps': path.join(__dirname, 'scripts', 'check-dependencies.sh'),  // Alias
+  // Discovery / onboarding
+  discovery: { script: 'discovery.sh', desc: 'Turn node-discovery mode on/off' },
+  scan:      { script: 'scan.sh',      desc: 'Discover hosts on the isle; flag ones without the agent' },
+  devices:   { script: 'devices.sh',   desc: 'Known-devices ledger + onboarding decisions' },
+  onboard:   { script: 'onboard.sh',   desc: 'Guided walkthrough to add a device to the mesh' },
+
+  // Diagnostics / status
+  status:    { script: 'status.sh',    desc: 'Comprehensive system status (all components)' },
+  diagnose:  { script: 'diagnose.sh',  desc: 'Mesh-expansion hardware capacity diagnostic', aliases: ['capacity'] },
+  test:      { script: 'test.sh',      desc: 'Run diagnostic tests (isle/mdns/all/check)' },
+
+  // Tooling / maintenance
+  usb:          { script: 'usb.sh',                desc: 'Make a USB drive into a portable isle-mesh installer' },
+  ports:        { script: 'ports.sh',              desc: 'See/switch physical ethernet ports onto the isle' },
+  permissions:  { script: 'permissions.sh',        desc: 'Manage file permissions' },
+  'fix-docker': { script: 'fix-docker-cgroups.sh', desc: 'Check/fix Docker cgroup configuration issues' },
+  dependencies: { script: 'check-dependencies.sh', desc: 'Manage system dependencies (check/install)', aliases: ['deps'] },
+
+  // Deprecated (kept for backward compatibility)
+  localhost: { script: 'mdns-app.sh', desc: 'DEPRECATED — use "isle mdns app"', deprecated: 'Use "isle mdns app" instead' },
 };
 
+// Resolve alias → canonical name.
+const aliasMap = {};
+for (const [name, def] of Object.entries(commands)) {
+  for (const a of def.aliases || []) aliasMap[a] = name;
+}
+const resolve = (name) => aliasMap[name] || name;
+
+// Old namespace-less commands → show a helpful "requires a namespace" error.
+const namespacelessCommands = [
+  'init', 'up', 'down', 'logs', 'ps', 'prune', 'scaffold', 'config',
+  'discover', 'ssl', 'mesh-app-scaffolding', 'mesh-proxy', 'proxy',
+  'embed-jinja', 'jinja', 'sample',
+];
+
 const makeExecutable = (filePath) => {
+  try {
+    execSync(`chmod +x ${filePath}`);
+  } catch (err) {
+    console.error(`Failed to make ${filePath} executable.`);
+  }
+};
+
+// Ensure every command's script exists and is executable.
+const validateScripts = () => {
+  let ok = true;
+  const seen = new Set();
+  for (const def of Object.values(commands)) {
+    const filePath = path.join(scriptsDir, def.script);
+    if (seen.has(filePath)) continue;
+    seen.add(filePath);
     try {
-      execSync(`chmod +x ${filePath}`);
-      console.log(`Made ${filePath} executable.`);
-    } catch (err) {
-      console.error(`Failed to make ${filePath} executable.`);
-    }
-  };
-
-  const validateScripts = () => {
-    let allScriptsValid = true;
-
-    Object.keys(scriptPaths).forEach((key) => {
-      const filePath = scriptPaths[key];
-      try {
-        const stats = fs.statSync(filePath);
-        if ((stats.mode & fs.constants.S_IXUSR) === 0) {
-          console.log(`Script ${filePath} is not executable. Attempting to make it executable.`);
-          makeExecutable(filePath);
-
-          // Revalidate after attempting to make executable
-          try {
-            const newStats = fs.statSync(filePath);
-            if ((newStats.mode & fs.constants.S_IXUSR) === 0) {
-              console.error(`Error: Script ${filePath} is still not executable.`);
-              allScriptsValid = false;
-            }
-          } catch (err) {
-            console.error(`Error: Script ${filePath} does not exist.`);
-            allScriptsValid = false;
-          }
+      const stats = fs.statSync(filePath);
+      if ((stats.mode & fs.constants.S_IXUSR) === 0) {
+        makeExecutable(filePath);
+        if ((fs.statSync(filePath).mode & fs.constants.S_IXUSR) === 0) {
+          console.error(`Error: Script ${filePath} is still not executable.`);
+          ok = false;
         }
-      } catch (err) {
-        console.error(`Error: Script ${filePath} does not exist.`);
-        allScriptsValid = false;
       }
-    });
-
-    return allScriptsValid;
-  };
+    } catch (err) {
+      console.error(`Error: Script ${filePath} does not exist.`);
+      ok = false;
+    }
+  }
+  return ok;
+};
 
 const checkDockerGroupMembership = () => {
   try {
-    // Check if user is in docker group
     const groups = execSync('groups', { encoding: 'utf8' });
     if (!groups.includes('docker')) {
       console.warn('\x1b[33m%s\x1b[0m', '═══════════════════════════════════════════════════════════════');
@@ -96,10 +124,8 @@ const checkDockerGroupMembership = () => {
       console.log('  \x1b[36m%s\x1b[0m', '2. newgrp docker');
       console.log('  \x1b[36m%s\x1b[0m', '   (or log out and log back in)\n');
       console.warn('\x1b[33m%s\x1b[0m', '═══════════════════════════════════════════════════════════════\n');
-      return true; // Changed to true - allow execution with warning
+      return;
     }
-
-    // Additional check: verify docker socket is accessible
     try {
       execSync('docker ps > /dev/null 2>&1');
     } catch (err) {
@@ -112,27 +138,18 @@ const checkDockerGroupMembership = () => {
       console.log('  \x1b[36m%s\x1b[0m', 'newgrp docker');
       console.log('  \x1b[36m%s\x1b[0m', '(or log out and log back in)\n');
       console.warn('\x1b[33m%s\x1b[0m', '═══════════════════════════════════════════════════════════════\n');
-      return true; // Changed to true - allow execution with warning
     }
-
-    return true;
   } catch (err) {
     console.warn('Warning: Error checking Docker group membership:', err.message);
-    return true; // Changed to true - allow execution even on check error
   }
 };
 
-const command = process.argv[2];
-const subcommand = process.argv[3];
-const extraArgs = process.argv.slice(4);
-
-// Helper function to show error for commands without namespace
 const showNamespaceError = (attemptedCommand) => {
   console.error('\x1b[31m%s\x1b[0m', '═══════════════════════════════════════════════════════════════');
   console.error('\x1b[31m%s\x1b[0m', '  ERROR: Command Requires Namespace');
   console.error('\x1b[31m%s\x1b[0m', '═══════════════════════════════════════════════════════════════');
   console.error('\x1b[33m%s\x1b[0m', `\nThe command '${attemptedCommand}' requires a namespace specifier.\n`);
-  console.log('Isle CLI commands are organized into five categories:\n');
+  console.log('Isle CLI commands are organized into modules:\n');
   console.log('  \x1b[36m%s\x1b[0m', '• isle app <command>       - Mesh application management');
   console.log('  \x1b[36m%s\x1b[0m', '• isle mdns <scope> <cmd>  - mDNS infrastructure (.local)');
   console.log('  \x1b[36m%s\x1b[0m', '• isle dns <command>       - Router DNS management (.isle)');
@@ -141,259 +158,18 @@ const showNamespaceError = (attemptedCommand) => {
   console.log('Examples:');
   console.log('  \x1b[32m%s\x1b[0m', `  isle app ${attemptedCommand}`);
   console.log('  \x1b[32m%s\x1b[0m', `  isle router ${attemptedCommand}\n`);
-  console.log('For more information, run: \x1b[36mile help\x1b[0m');
+  console.log('For more information, run: \x1b[36misle help\x1b[0m');
   console.error('\x1b[31m%s\x1b[0m', '═══════════════════════════════════════════════════════════════\n');
 };
 
-// Commands that require Docker (app commands will check internally)
-const dockerCommands = ['app'];
-
-// Validate scripts on initialization
-if (!validateScripts()) {
-  process.exit(1);
-}
-
-// Check Docker group membership for Docker-related commands
-if (dockerCommands.includes(command)) {
-  if (!checkDockerGroupMembership()) {
-    //process.exit(1);
-  }
-}
-
-switch (command) {
-  case 'app':
-    // All mesh application commands
-    const appArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
-    execSync(`bash ${scriptPaths['app']} ${appArgs}`, { stdio: 'inherit', cwd: projectRoot });
-    break;
-
-  case 'router':
-    // All router management commands
-    const routerArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
-    try {
-      execSync(`bash ${scriptPaths['router']} ${routerArgs}`, { stdio: 'inherit', cwd: projectRoot });
-    } catch (error) {
-      // Router script already displayed error message, just exit with same code
-      process.exit(error.status || 1);
-    }
-    break;
-
-  case 'agent':
-    // All agent and bridge management commands
-    const agentArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
-    try {
-      execSync(`bash ${scriptPaths['agent']} ${agentArgs}`, { stdio: 'inherit', cwd: projectRoot });
-    } catch (error) {
-      // Agent script already displayed error message, just exit with same code
-      process.exit(error.status || 1);
-    }
-    break;
-
-  case 'mdns':
-    // mDNS namespace (system, domain, app, sample, discover)
-    const mdnsArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
-    execSync(`bash ${scriptPaths['mdns']} ${mdnsArgs}`, { stdio: 'inherit', cwd: projectRoot });
-    break;
-
-  case 'dns':
-    // DNS namespace (router DNS management - .isle domains)
-    const dnsArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
-    try {
-      execSync(`bash ${scriptPaths['dns']} ${dnsArgs}`, { stdio: 'inherit', cwd: projectRoot });
-    } catch (error) {
-      process.exit(error.status || 1);
-    }
-    break;
-
-  case 'security':
-    // ISP visibility and network hardening
-    const securityArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
-    try {
-      execSync(`bash ${scriptPaths['security']} ${securityArgs}`, { stdio: 'inherit', cwd: projectRoot });
-    } catch (error) {
-      process.exit(error.status || 1);
-    }
-    break;
-
-  case 'localhost':
-    // DEPRECATED - backward compatibility, redirect to mdns app
-    console.log('\x1b[33m%s\x1b[0m', '⚠️  WARNING: "isle localhost" is deprecated');
-    console.log('\x1b[33m%s\x1b[0m', '   Use "isle mdns app" instead');
-    console.log('');
-    const localhostArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
-    execSync(`bash ${scriptPaths['localhost']} ${localhostArgs}`, { stdio: 'inherit', cwd: projectRoot });
-    break;
-
-  case 'create':
-    // One-command setup: agent + router + sample app
-    const createArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
-    execSync(`bash ${scriptPaths['create']} ${createArgs}`, { stdio: 'inherit', cwd: projectRoot });
-    break;
-
-  case 'destroy':
-    // Complete teardown: apps + agent + router
-    const destroyArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
-    try {
-      execSync(`bash ${scriptPaths['destroy']} ${destroyArgs}`, { stdio: 'inherit', cwd: projectRoot });
-    } catch (error) {
-      process.exit(error.status || 1);
-    }
-    break;
-
-  case 'join':
-    // Join an existing isle from a remote machine
-    const joinArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
-    try {
-      execSync(`bash ${scriptPaths['join']} ${joinArgs}`, { stdio: 'inherit', cwd: projectRoot });
-    } catch (error) {
-      process.exit(error.status || 1);
-    }
-    break;
-
-  case 'leave':
-    // Leave an isle (tear down remote agent)
-    const leaveArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
-    try {
-      execSync(`bash ${scriptPaths['leave']} ${leaveArgs}`, { stdio: 'inherit', cwd: projectRoot });
-    } catch (error) {
-      process.exit(error.status || 1);
-    }
-    break;
-
-  case 'install':
-    // Install system dependencies with optional target (app/router/agent/all)
-    const installArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
-    try {
-      execSync(`bash ${scriptPaths['install']} ${installArgs}`, { stdio: 'inherit', cwd: projectRoot });
-    } catch (error) {
-      // Install script already displayed error message, just exit with same code
-      process.exit(error.status || 1);
-    }
-    break;
-
-  case 'uninstall':
-    // Uninstall with optional target (app/router/all)
-    const uninstallArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
-    try {
-      execSync(`bash ${scriptPaths['uninstall']} ${uninstallArgs}`, { stdio: 'inherit', cwd: projectRoot });
-    } catch (error) {
-      // Exit with the same code as the script, but don't show Node.js error stack
-      process.exit(error.status || 1);
-    }
-    break;
-
-  case 'permissions':
-    // Manage file permissions for Isle-Mesh
-    const permissionsArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
-    execSync(`bash ${scriptPaths['permissions']} ${permissionsArgs}`, { stdio: 'inherit', cwd: projectRoot });
-    break;
-
-  case 'fix-docker':
-    // Fix Docker systemd D-Bus issues
-    const fixDockerArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
-    try {
-      execSync(`bash ${scriptPaths['fix-docker']} ${fixDockerArgs}`, { stdio: 'inherit', cwd: projectRoot });
-    } catch (error) {
-      process.exit(error.status || 1);
-    }
-    break;
-
-  case 'dependencies':
-  case 'deps':
-    // Manage Isle-Mesh dependencies
-    const depsArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
-    try {
-      execSync(`bash ${scriptPaths['dependencies']} ${depsArgs}`, { stdio: 'inherit', cwd: projectRoot });
-    } catch (error) {
-      process.exit(error.status || 1);
-    }
-    break;
-
-  case 'test':
-    // Verify .isle routing goes through the router (not localhost/mDNS)
-    const testArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
-    try {
-      execSync(`bash ${scriptPaths['test']} ${testArgs}`, { stdio: 'inherit', cwd: projectRoot });
-    } catch (error) {
-      process.exit(error.status || 1);
-    }
-    break;
-
-  case 'scan':
-    // Discover hosts on the isle and classify onboarded vs un-onboarded
-    const scanArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
-    try {
-      execSync(`bash ${scriptPaths['scan']} ${scanArgs}`, { stdio: 'inherit', cwd: projectRoot });
-    } catch (error) {
-      process.exit(error.status || 1);
-    }
-    break;
-
-  case 'devices':
-    // Known-devices ledger (onboarded vs candidate, with decisions)
-    const devicesArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
-    try {
-      execSync(`bash ${scriptPaths['devices']} ${devicesArgs}`, { stdio: 'inherit', cwd: projectRoot });
-    } catch (error) {
-      process.exit(error.status || 1);
-    }
-    break;
-
-  case 'discovery':
-    // Discovery mode (gate detection/onboarding on an explicit session)
-    const discoveryArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
-    try {
-      execSync(`bash ${scriptPaths['discovery']} ${discoveryArgs}`, { stdio: 'inherit', cwd: projectRoot });
-    } catch (error) {
-      process.exit(error.status || 1);
-    }
-    break;
-
-  case 'onboard':
-    // Guided walkthrough to bring a discovered device onto the mesh
-    const onboardArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
-    try {
-      execSync(`bash ${scriptPaths['onboard']} ${onboardArgs}`, { stdio: 'inherit', cwd: projectRoot });
-    } catch (error) {
-      process.exit(error.status || 1);
-    }
-    break;
-
-  case 'usb':
-    // Make a USB drive into a portable isle-mesh installer
-    const usbArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
-    try {
-      execSync(`bash ${scriptPaths['usb']} ${usbArgs}`, { stdio: 'inherit', cwd: projectRoot });
-    } catch (error) {
-      process.exit(error.status || 1);
-    }
-    break;
-
-  case 'ports':
-    // See/switch physical ethernet ports onto the isle
-    const portsArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
-    try {
-      execSync(`bash ${scriptPaths['ports']} ${portsArgs}`, { stdio: 'inherit', cwd: projectRoot });
-    } catch (error) {
-      process.exit(error.status || 1);
-    }
-    break;
-
-  case 'status':
-    // Show unified system status
-    const statusArgs = [subcommand, ...extraArgs].filter(Boolean).join(' ');
-    execSync(`bash ${scriptPaths['status']} ${statusArgs}`, { stdio: 'inherit', cwd: projectRoot });
-    break;
-
-  case 'help':
-  case undefined:
-    console.log(`\x1b[1mIsle-Mesh CLI\x1b[0m - Zero-configuration mesh networking for containerized applications
+const showHelp = () => {
+  console.log(`\x1b[1mIsle-Mesh CLI\x1b[0m - Zero-configuration mesh networking for containerized applications
 
 ╔═══════════════════════════════════════════════════════════════╗
 ║                    COMMAND STRUCTURE                          ║
 ╚═══════════════════════════════════════════════════════════════╝
 
-Isle commands are organized into six main categories:
+Isle commands are organized into six modules (run \x1b[36misle <module> help\x1b[0m for each):
 
   \x1b[36misle app <command>\x1b[0m      Mesh application management
                           • Initialize and scaffold apps
@@ -419,7 +195,7 @@ Isle commands are organized into six main categories:
                           • Security and isolation verification
 
   \x1b[36misle agent <command>\x1b[0m    Agent and bridge management
-                          • Automatic bridge creation (coming soon)
+                          • Bridge creation and macvlan setup
                           • Nginx-to-router connectivity
                           • Bridge lifecycle management
 
@@ -432,26 +208,32 @@ Isle commands are organized into six main categories:
 ║                    GLOBAL COMMANDS                            ║
 ╚═══════════════════════════════════════════════════════════════╝
 
-  isle status             Show comprehensive system status (all components)
-  isle discovery          Turn node-discovery mode on/off (gates detection)
-  isle scan               Discover hosts on the isle; flag ones without the agent
-  isle devices            Known-devices ledger + onboarding decisions
-  isle onboard <ip|mac>   Guided walkthrough to add a device to the mesh
-  isle usb                Make a USB drive into a portable isle-mesh installer
-  isle test [suite]       Run diagnostic tests (isle/mdns/all/check)
   isle create             Complete setup (agent + router + sample app)
   isle destroy            Complete teardown (apps + agent + router)
+  isle recover            Idempotent full-isle bring-up (also run at boot)
   isle join               Join an existing isle from a remote machine
   isle leave              Leave an isle (tear down remote agent)
   isle install [target]   Install dependencies (app/router/agent/all)
   isle uninstall [target] Uninstall components (app/router/all)
+
+  isle discovery          Turn node-discovery mode on/off (gates detection)
+  isle scan               Discover hosts on the isle; flag ones without the agent
+  isle devices            Known-devices ledger + onboarding decisions
+  isle onboard <ip|mac>   Guided walkthrough to add a device to the mesh
+
+  isle status             Show comprehensive system status (all components)
+  isle diagnose           Mesh-expansion hardware capacity (USB/wifi headroom)
+  isle test [suite]       Run diagnostic tests (isle/mdns/all/check)
+
+  isle usb                Make a USB drive into a portable isle-mesh installer
+  isle ports              See/switch physical ethernet ports onto the isle
   isle dependencies       Manage system dependencies (check/install)
   isle permissions        Manage file permissions
   isle fix-docker [cmd]   Check/fix Docker cgroup configuration issues
   isle help               Show this help message
 
 ╔═══════════════════════════════════════════════════════════════╗
-║                    DETAILED HELP                              ║
+║                    DETAILED HELP                             ║
 ╚═══════════════════════════════════════════════════════════════╝
 
 For detailed command information:
@@ -463,7 +245,7 @@ For detailed command information:
   \x1b[32misle agent help\x1b[0m         Show all agent commands
 
 ╔═══════════════════════════════════════════════════════════════╗
-║                    QUICK START                                ║
+║                    QUICK START                               ║
 ╚═══════════════════════════════════════════════════════════════╝
 
 1. Complete setup with one command (recommended for first-time users):
@@ -484,34 +266,48 @@ For detailed command information:
    c. Scaffold existing docker-compose:
       \x1b[33misle app scaffold docker-compose.yml -d myapp.local\x1b[0m
       \x1b[33misle app up\x1b[0m
+`);
+};
 
-For more examples and documentation, visit:
-https://github.com/yourusername/IsleMesh
-    `);
-    break;
+// ─────────────────────────────────────────────────────────────────────────────
+// Dispatch
+// ─────────────────────────────────────────────────────────────────────────────
+const command = process.argv[2];
+const subcommand = process.argv[3];
+const extraArgs = process.argv.slice(4);
 
-  // Handle old commands without namespace - show helpful error
-  case 'init':
-  case 'up':
-  case 'down':
-  case 'logs':
-  case 'ps':
-  case 'prune':
-  case 'scaffold':
-  case 'config':
-  case 'discover':
-  case 'ssl':
-  case 'mesh-app-scaffolding':
-  case 'mesh-proxy':
-  case 'proxy':
-  case 'embed-jinja':
-  case 'jinja':
-  case 'sample':
-    showNamespaceError(command);
-    process.exit(1);
+if (!validateScripts()) process.exit(1);
 
-  default:
-    console.log('\x1b[31mUnknown command:\x1b[0m', command);
-    console.log('\nUse \x1b[36mile help\x1b[0m to see available commands.');
-    process.exit(1);
+if (command === undefined || command === 'help') {
+  showHelp();
+  process.exit(0);
+}
+
+if (namespacelessCommands.includes(command)) {
+  showNamespaceError(command);
+  process.exit(1);
+}
+
+const def = commands[resolve(command)];
+if (!def) {
+  console.log('\x1b[31mUnknown command:\x1b[0m', command);
+  console.log('\nUse \x1b[36misle help\x1b[0m to see available commands.');
+  process.exit(1);
+}
+
+if (def.deprecated) {
+  console.log('\x1b[33m%s\x1b[0m', `⚠️  WARNING: "isle ${command}" is deprecated`);
+  console.log('\x1b[33m%s\x1b[0m', `   ${def.deprecated}`);
+  console.log('');
+}
+
+if (def.docker) checkDockerGroupMembership();
+
+const scriptPath = path.join(scriptsDir, def.script);
+const args = [subcommand, ...extraArgs].filter(Boolean).join(' ');
+try {
+  execSync(`bash ${scriptPath} ${args}`, { stdio: 'inherit', cwd: projectRoot });
+} catch (error) {
+  // The script already printed its own error; exit with its code, no Node stack.
+  process.exit(error.status || 1);
 }

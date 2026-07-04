@@ -54,6 +54,7 @@ services:
         priority: 100
       isle-br-0:
         priority: 200
+        ipv4_address: 10.10.0.2
 
     labels:
       isle.component: "vlan-agent"
@@ -82,7 +83,5 @@ networks:
   #   2. OpenWRT router's eth1 connected to isle-br-0 bridge
   #   3. Agent uses virtual MAC (02:00:00:00:0a:01) for DHCP isolation
   isle-br-0:
-    driver: macvlan
-    driver_opts:
-      parent: isle-br-0
+    external: true
     name: isle-br-0

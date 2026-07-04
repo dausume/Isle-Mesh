@@ -660,7 +660,7 @@ cmd_up() {
                 log_success "Router is reachable at 192.168.1.1"
                 break
             fi
-            ((attempts++))
+            attempts=$((attempts+1))
             sleep 1
         done
 

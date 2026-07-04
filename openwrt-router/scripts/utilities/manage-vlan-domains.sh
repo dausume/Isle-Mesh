@@ -337,7 +337,7 @@ interactive_mode() {
             echo -e "      IP: $ip"
             echo ""
 
-            ((index++))
+            index=$((index+1))
         fi
     done <<< "$discovered_json"
 

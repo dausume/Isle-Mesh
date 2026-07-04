@@ -1,0 +1,19 @@
+[Unit]
+Description=Isle Mesh — boot-time bring-up and cable persistence
+# Needs docker + libvirt up, and the base network online, before it can recreate
+# bridges, start the router VM, re-sync the macvlan and (re)start the agent.
+After=docker.service libvirtd.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Route through the symlinked CLI copy (stable path, independent of $HOME).
+ExecStart=/bin/bash /usr/local/lib/node_modules/isle-cli/scripts/boot-bringup.sh --boot
+TimeoutStartSec=180
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

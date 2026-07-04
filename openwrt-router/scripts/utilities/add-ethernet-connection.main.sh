@@ -7,7 +7,7 @@ BUNDLED_MODE="${BUNDLED_MODE:-0}"
 
 if [[ "$BUNDLED_MODE" != "1" ]]; then
   SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-  for f in "$SCRIPT_DIR"/add-ethernet-lib/[0-9][0-9]-*.sh; do source "$f"; done
+  for f in "$SCRIPT_DIR"/add-ethernet-connection-lib/[0-9][0-9]-*.sh; do source "$f"; done
 fi
 
 main() {
@@ -19,6 +19,7 @@ main() {
   pick_or_validate_eth
   create_bridge_and_enslave
   attach_bridge_to_vm
+  configure_openwrt_network
   finish_msg_eth
 }
 trap 'cleanup_tmp' EXIT

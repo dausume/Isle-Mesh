@@ -236,10 +236,17 @@ ensure_isle_dns() {
         changed=true
     fi
 
-    # Add ~isle to systemd-resolved domains if not already present
+    # Add ~isle to systemd-resolved domains if not already present.
+    # The drop-in may not exist (fresh machine, or a previous destroy --purge
+    # removed it) — create it rather than sed-ing a missing file.
     if ! grep -q '~isle' "$RESOLVED_CONF" 2>/dev/null; then
         log_info "Adding ~isle to systemd-resolved split-DNS domains..."
-        sed -i 's/Domains=\(.*\)/Domains=\1 ~isle/' "$RESOLVED_CONF"
+        mkdir -p "$(dirname "$RESOLVED_CONF")"
+        if [ -f "$RESOLVED_CONF" ] && grep -q '^Domains=' "$RESOLVED_CONF"; then
+            sed -i 's/^Domains=\(.*\)/Domains=\1 ~isle/' "$RESOLVED_CONF"
+        else
+            { [ -f "$RESOLVED_CONF" ] || echo "[Resolve]"; echo "Domains=~isle"; } >> "$RESOLVED_CONF"
+        fi
         changed=true
     fi
 
@@ -823,9 +830,13 @@ main() {
 
             check_prerequisites
             ensure_isle_dns
-            setup_agent
             setup_mdns_system
+            # Router before agent: the agent's macvlan network needs the
+            # isle-br-0 bridge (created by router setup) as its parent, and
+            # its DHCP lease comes from the router. On a fresh/purged host
+            # the old order failed at docker network creation.
             setup_router
+            setup_agent
             setup_sample_app
             show_completion
             ;;
