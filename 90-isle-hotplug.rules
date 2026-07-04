@@ -1,0 +1,5 @@
+# Isle-Mesh cable hotplug — trigger the isle plug handler when a wired NIC comes up.
+# The handler (isle hotplug) is role-aware, discovery-gated, and ignores wifi.
+# Runs asynchronously so udev isn't blocked by DHCP/router work.
+ACTION=="add", SUBSYSTEM=="net", ENV{ID_NET_DRIVER}!="", ATTR{type}=="1", RUN+="/bin/sh -c '/usr/local/bin/isle hotplug %k >/dev/null 2>&1 &'"
+ACTION=="change", SUBSYSTEM=="net", ATTR{type}=="1", ATTR{carrier}=="1", RUN+="/bin/sh -c '/usr/local/bin/isle hotplug %k >/dev/null 2>&1 &'"

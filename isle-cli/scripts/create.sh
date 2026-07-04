@@ -815,6 +815,23 @@ show_completion() {
 }
 
 # Main execution
+# Turn discovery mode ON after install (default-on until next reboot) so the operator
+# can plug devices/cables in one-by-one with no extra steps, then finalize. The boot_id
+# stamp in the session makes it end automatically at the next reboot.
+setup_discovery() {
+    log_step "Enabling Device Discovery Mode"
+    if [[ -f "$SCRIPT_DIR/lib/discovery-mode.sh" ]] && command -v jq >/dev/null 2>&1; then
+        # shellcheck source=/dev/null
+        source "$SCRIPT_DIR/lib/discovery-mode.sh"
+        local sid; sid="$(dm_start 0)"
+        log_success "Discovery mode ON (session ${sid}) — plug in devices/cables now; no extra steps."
+        log_info "It auto-ends on reboot. Toggle anytime: isle discovery start | stop"
+    else
+        log_warning "Could not enable discovery mode (jq or discovery lib missing)."
+    fi
+    echo ""
+}
+
 main() {
     case "${1:-}" in
         help|--help|-h)
@@ -838,6 +855,7 @@ main() {
             setup_router
             setup_agent
             setup_sample_app
+            setup_discovery
             show_completion
             ;;
     esac

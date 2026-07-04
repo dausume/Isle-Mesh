@@ -46,6 +46,8 @@ const commands = {
   scan:      { script: 'scan.sh',      desc: 'Discover hosts on the isle; flag ones without the agent' },
   devices:   { script: 'devices.sh',   desc: 'Known-devices ledger + onboarding decisions' },
   onboard:   { script: 'onboard.sh',   desc: 'Guided walkthrough to add a device to the mesh' },
+  'remote-lease': { script: 'remote-lease.sh', desc: 'Pull an isle DHCP lease on the cable (remote node)' },
+  hotplug:   { script: 'hotplug.sh',   desc: 'Internal: cable-plug handler (udev-invoked; role-aware)' },
 
   // Diagnostics / status
   status:    { script: 'status.sh',    desc: 'Comprehensive system status (all components)' },
@@ -220,6 +222,7 @@ Isle commands are organized into six modules (run \x1b[36misle <module> help\x1b
   isle scan               Discover hosts on the isle; flag ones without the agent
   isle devices            Known-devices ledger + onboarding decisions
   isle onboard <ip|mac>   Guided walkthrough to add a device to the mesh
+  isle remote-lease       Pull an isle DHCP lease on the cable (remote node)
 
   isle status             Show comprehensive system status (all components)
   isle diagnose           Mesh-expansion hardware capacity (USB/wifi headroom)
