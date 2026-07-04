@@ -383,85 +383,54 @@ cmd_add_connection() {
     bash "$ROUTER_DIR/scripts/add-connection.sh" "$@"
 }
 
-# reconfigure - Reconfigure network on existing VM
-cmd_test_reconfigure() {
-    check_router_dir
-    check_sudo
-
-    log_info "Reconfiguring OpenWRT test VM network interfaces..."
-    echo ""
-
-    if [[ ! -f "$ROUTER_DIR/scripts/auto-configure-network.sh" ]]; then
-        log_error "Auto-configure script not found: $ROUTER_DIR/scripts/auto-configure-network.sh"
-        exit 1
-    fi
-
-    # Run the auto-configure script with test VM defaults
-    bash "$ROUTER_DIR/scripts/auto-configure-network.sh" -v "openwrt-test" -m "192.168.100.1" -i "10.100.0.1" "$@"
-}
-
 # Provision - Provision production router
 cmd_provision() {
-    check_router_dir
-    check_sudo
-
-    # Check for existing routers before provisioning
-    check_existing_routers
-
-    log_info "Provisioning OpenWRT router..."
-    echo ""
-
-    if [[ ! -f "$ROUTER_DIR/scripts/provision-vm.sh" ]]; then
-        log_error "Provision script not found: $ROUTER_DIR/scripts/provision-vm.sh"
-        exit 1
-    fi
-
-    # Parse optional VM name as first positional argument
-    local PROVISION_ARGS=()
-    if [[ -n "$1" ]] && [[ ! "$1" =~ ^- ]]; then
-        # First argument is a VM name (not a flag)
-        local VM_NAME="$1"
-        shift
-        PROVISION_ARGS+=("-n" "$VM_NAME")
-    fi
-
-    # Append any remaining arguments
-    PROVISION_ARGS+=("$@")
-
-    # Run the provision script with parsed arguments
-    bash "$ROUTER_DIR/scripts/provision-vm.sh" "${PROVISION_ARGS[@]}"
+    # The standalone provision-vm.sh was never built; full router creation lives in init.
+    log_warning "'isle router provision' is not implemented (the provisioning script was never built)."
+    log_info "For a full router build, use: sudo isle router init"
+    exit 1
 }
 
-# Configure - Configure OpenWRT router
+# Configure - (re)apply OpenWRT router config. Exposes the real capabilities that
+# otherwise only run bundled inside 'init', so each can be re-applied on its own.
 cmd_configure() {
     check_router_dir
+    local RS="$ROUTER_DIR/scripts/router-setup"
 
-    log_info "Configuring OpenWRT router..."
-    echo ""
+    local target="all"
+    if [[ -n "$1" && "$1" != -* ]]; then target="$1"; shift; fi
 
-    if [[ ! -f "$ROUTER_DIR/scripts/configure-openwrt.sh" ]]; then
-        log_error "Configure script not found: $ROUTER_DIR/scripts/configure-openwrt.sh"
-        exit 1
-    fi
-
-    # Run the configure script
-    bash "$ROUTER_DIR/scripts/configure-openwrt.sh" "$@"
+    case "$target" in
+        dhcp|dhcp-vlan|vlan)
+            log_info "Configuring OpenWRT DHCP + VLAN..."
+            bash "$RS/configure-dhcp-vlan.sh" "$@"
+            ;;
+        discovery|beacon)
+            log_info "Configuring OpenWRT discovery beacon..."
+            bash "$RS/configure-discovery.sh" "$@"
+            ;;
+        all)
+            log_info "Configuring OpenWRT router (DHCP/VLAN + discovery beacon)..."
+            bash "$RS/configure-dhcp-vlan.sh" "$@" && bash "$RS/configure-discovery.sh" "$@"
+            ;;
+        *)
+            log_error "Unknown configure target: $target"
+            echo ""
+            echo "Usage: isle router configure [dhcp|discovery|all]   (default: all)"
+            echo "  dhcp        Apply the isle DHCP + VLAN config"
+            echo "  discovery   Deploy the discovery beacon"
+            echo "  all         Both (default)"
+            exit 1
+            ;;
+    esac
 }
 
-# Detect - Detect available USB/Ethernet ports
+# Detect - point at the real port-detection paths (standalone detect-ports.sh unbuilt).
 cmd_detect() {
-    check_router_dir
-
-    log_info "Detecting available hardware..."
-    echo ""
-
-    if [[ ! -f "$ROUTER_DIR/scripts/detect-ports.sh" ]]; then
-        log_error "Detect script not found: $ROUTER_DIR/scripts/detect-ports.sh"
-        exit 1
-    fi
-
-    # Run the detect script
-    bash "$ROUTER_DIR/scripts/detect-ports.sh" "$@"
+    log_info "Physical port detection is available via:"
+    log_info "  isle ports                  — list/switch ethernet ports on the isle"
+    log_info "  isle router add-connection  — auto-detects eligible NICs when adding a cable"
+    exit 0
 }
 
 # Security - Verify network isolation
@@ -1340,15 +1309,15 @@ cmd_help() {
     echo -e "                           Requires: sudo"
     echo -e "                           Run: sudo isle router init --help"
     echo ""
-    echo -e "  ${CYAN}configure${NC}               Configure OpenWRT router"
-    echo -e "                           - Sets up network interfaces"
-    echo -e "                           - Configures firewall rules"
-    echo -e "                           - Enables WiFi access points"
+    echo -e "  ${CYAN}configure [target]${NC}      (Re)apply OpenWRT router config"
+    echo -e "                           - ${CYAN}dhcp${NC}       Isle DHCP + VLAN config"
+    echo -e "                           - ${CYAN}discovery${NC}  Discovery beacon"
+    echo -e "                           - ${CYAN}all${NC}        Both (default)"
+    echo -e "                           (these otherwise run bundled inside 'init')"
     echo ""
-    echo -e "  ${CYAN}detect${NC}                  Detect available USB WiFi and Ethernet"
-    echo -e "                           - Shows USB WiFi adapters"
-    echo -e "                           - Shows Ethernet interfaces"
-    echo -e "                           - Generates sample configuration"
+    echo -e "  ${CYAN}detect${NC}                  Detect available ports (see also:)"
+    echo -e "                           - ${CYAN}isle ports${NC}                 list/switch ethernet ports"
+    echo -e "                           - ${CYAN}isle router add-connection${NC} auto-detects NICs when adding a cable"
     echo ""
     echo -e "${GREEN}UTILITY COMMANDS:${NC}"
     echo -e "  ${CYAN}status${NC}                  Show comprehensive router status"
@@ -1511,14 +1480,10 @@ case "$SUBCOMMAND" in
             cleanup)
                 cmd_test_cleanup "$@"
                 ;;
-            reconfigure)
-                cmd_test_reconfigure "$@"
-                ;;
             *)
                 log_error "Unknown test action: $TEST_ACTION"
                 echo ""
                 echo "Available test actions:"
-                echo "  reconfigure - Reconfigure existing VM network"
                 echo "  cleanup     - Clean up test environment"
                 echo ""
                 echo "Run 'isle router help' for more information"
