@@ -503,7 +503,7 @@ jq -r '.subdomains' /etc/isle-mesh/agent/registry.json
 
 # Manually remove app from registry (if deleted improperly)
 jq 'del(.apps.myapp)' /etc/isle-mesh/agent/registry.json > /tmp/registry.json
-sudo mv /tmp/registry.json /etc/isle-mesh/agent/registry.json
+sudo cp /tmp/registry.json /etc/isle-mesh/agent/registry.json
 ```
 
 ## Contributing
