@@ -35,7 +35,7 @@ SSH_USER="root"
 AUTO_MODE=false
 LIST_MODE=false
 REMOVE_DOMAIN=""
-DNSMASQ_CONF="/etc/dnsmasq.d/isle-vlan-domains.conf"
+DNSMASQ_CONF="/tmp/dnsmasq.d/isle-vlan-domains.conf"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
