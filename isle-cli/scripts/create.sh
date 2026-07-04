@@ -271,11 +271,12 @@ setup_agent() {
 
     log_info "Starting Isle Agent..."
 
-    # Clear stale registry from previous runs so nginx doesn't try to proxy
-    # to containers that don't exist yet (sample app gets registered later)
+    # DURABLE REGISTRY: do NOT wipe registered apps on setup. The registry is the
+    # platform's memory of which isle-apps are installed on the mesh; bring-up
+    # reconciles it. Only initialize the file if it is missing.
     local REGISTRY="/etc/isle-mesh/agent/registry.json"
-    if [[ -f "$REGISTRY" ]]; then
-        log_info "Clearing stale app registry..."
+    if [[ ! -f "$REGISTRY" ]]; then
+        mkdir -p "$(dirname "$REGISTRY")"
         echo '{"domains": {}, "subdomains": {}, "apps": {}}' > "$REGISTRY"
     fi
 
