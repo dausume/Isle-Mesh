@@ -409,6 +409,10 @@ cmd_configure() {
             log_info "Configuring OpenWRT discovery beacon..."
             bash "$RS/configure-discovery.sh" "$@"
             ;;
+        join|join-protocol)
+            log_info "Configuring OpenWRT join protocol..."
+            bash "$RS/configure-join-protocol.sh" "$@"
+            ;;
         all)
             log_info "Configuring OpenWRT router (DHCP/VLAN + discovery beacon)..."
             bash "$RS/configure-dhcp-vlan.sh" "$@" && bash "$RS/configure-discovery.sh" "$@"
@@ -416,10 +420,11 @@ cmd_configure() {
         *)
             log_error "Unknown configure target: $target"
             echo ""
-            echo "Usage: isle router configure [dhcp|discovery|all]   (default: all)"
+            echo "Usage: isle router configure [dhcp|discovery|join|all]   (default: all)"
             echo "  dhcp        Apply the isle DHCP + VLAN config"
             echo "  discovery   Deploy the discovery beacon"
-            echo "  all         Both (default)"
+            echo "  join        Configure the join protocol"
+            echo "  all         dhcp + discovery (default)"
             exit 1
             ;;
     esac
@@ -431,6 +436,12 @@ cmd_detect() {
     log_info "  isle ports                  — list/switch ethernet ports on the isle"
     log_info "  isle router add-connection  — auto-detects eligible NICs when adding a cable"
     exit 0
+}
+
+# Diagnose - check the router's VLAN support / network health
+cmd_diagnose() {
+    check_router_dir
+    bash "$ROUTER_DIR/scripts/router-setup/diagnose-vlan.sh" "$@"
 }
 
 # Security - Verify network isolation
@@ -1319,6 +1330,8 @@ cmd_help() {
     echo -e "                           - ${CYAN}isle ports${NC}                 list/switch ethernet ports"
     echo -e "                           - ${CYAN}isle router add-connection${NC} auto-detects NICs when adding a cable"
     echo ""
+    echo -e "  ${CYAN}diagnose${NC}                Check router VLAN support / network health"
+    echo ""
     echo -e "${GREEN}UTILITY COMMANDS:${NC}"
     echo -e "  ${CYAN}status${NC}                  Show comprehensive router status"
     echo -e "                           - VM status and resource usage"
@@ -1502,6 +1515,10 @@ case "$SUBCOMMAND" in
 
     detect)
         cmd_detect "$@"
+        ;;
+
+    diagnose)
+        cmd_diagnose "$@"
         ;;
 
     status)
