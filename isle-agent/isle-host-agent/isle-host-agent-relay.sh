@@ -31,6 +31,24 @@ log() {
   fi
 }
 
+# === Function: Safely replace the registry with a candidate file ===
+# The vlan-agent bind-mounts registry.json BY INODE, so we cp (not mv) to keep the
+# inode stable so the container sees updates. But NEVER overwrite the durable registry
+# with an empty or invalid candidate: a failed/partial jq (e.g. two relays racing on
+# the file) produces an empty temp, and cp-ing that wipes every registered app. Guard
+# on non-empty + valid JSON; on failure keep the existing registry untouched.
+safe_replace_registry() {
+  local candidate="$1"
+  if [ -s "$candidate" ] && jq -e . "$candidate" >/dev/null 2>&1; then
+    cp "$candidate" "$REGISTRY_FILE"   # inode-preserving (bind mount)
+    rm -f "$candidate"
+    return 0
+  fi
+  log "refused to replace registry with empty/invalid data - kept existing"
+  rm -f "$candidate"
+  return 1
+}
+
 # === Function: Initialize registry with default structure ===
 init_registry() {
   # Ensure registry directory exists
@@ -65,7 +83,7 @@ EOF
       jq --arg now "$now" \
          '.apps.health.created_at = $now | .apps.health.updated_at = $now' \
          "$REGISTRY_FILE" > "$temp_file"
-      cp "$temp_file" "$REGISTRY_FILE" && rm -f "$temp_file"  # inode-preserving (bind mount)
+      safe_replace_registry "$temp_file"
     fi
     log "✅ Default registry created with health.local app"
   else
@@ -103,7 +121,7 @@ ensure_health_app() {
          "updated_at": $now
        }' "$REGISTRY_FILE" > "$temp_file"
 
-    cp "$temp_file" "$REGISTRY_FILE" && rm -f "$temp_file"  # inode-preserving (bind mount)
+    safe_replace_registry "$temp_file"
     log "✅ Added health.local app to registry"
   fi
 }
@@ -143,7 +161,7 @@ update_registry() {
        }' "$REGISTRY_FILE" > "$temp_file"
 
     # Atomic replace
-    cp "$temp_file" "$REGISTRY_FILE" && rm -f "$temp_file"  # inode-preserving (bind mount)
+    safe_replace_registry "$temp_file"
     log "✅ Updated registry for $domain -> $resolved_ip"
   else
     log "⚠️  jq not found - cannot update registry"
