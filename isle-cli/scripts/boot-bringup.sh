@@ -152,6 +152,25 @@ bring_up_agent(){
   fi
 }
 
+# Bring up every installed isle-app whose availability_mode is always-available (default).
+# on-demand/scheduled/etc. are left DOWN (woken on access / by policy).
+reconcile_apps(){
+  local dir=/etc/isle-mesh/agent/installed-apps envf NAME PKG AVAILABILITY_MODE mode
+  [[ -d "$dir" ]] || return 0
+  log "Reconciling always-available isle-apps"
+  shopt -s nullglob
+  for envf in "$dir"/*.env; do
+    NAME=""; PKG=""; AVAILABILITY_MODE=""; . "$envf" 2>/dev/null
+    [[ -n "$PKG" ]] || PKG="isle-app-$(printf '%s' "$NAME" | tr '[:upper:]_' '[:lower:]-' | tr -cd 'a-z0-9.-')"
+    mode="${AVAILABILITY_MODE:-always-available}"
+    if [[ "$mode" == "always-available" ]]; then
+      command -v "$PKG" >/dev/null 2>&1 && { "$PKG" up >/dev/null 2>&1 && ok "app up: $NAME" || warn "app up failed: $NAME"; }
+    else
+      log "app $NAME: mode=$mode (left down)"
+    fi
+  done
+}
+
 main(){
   require_root
   log "=== Isle bring-up$( [[ $BOOT == 1 ]] && echo ' (boot)' ) ==="
@@ -159,6 +178,7 @@ main(){
   replay_reserved_ports
   resync_macvlan
   bring_up_agent
+  reconcile_apps
   log "=== summary ==="
   docker ps --format '  {{.Names}}: {{.Status}}' 2>/dev/null | grep -iE 'isle|vlan|sample' || true
   log "=== done ==="

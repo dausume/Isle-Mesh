@@ -53,6 +53,10 @@ create_vm() {
     log_info "Starting VM..."
     virsh start "$VM_NAME" || { log_error "Failed to start VM"; exit 1; }
     log_success "VM started"
+    # always-available: bring the router up on libvirtd/boot, independent of boot-bringup
+    virsh autostart "$VM_NAME" >/dev/null 2>&1 \
+      && log_success "VM autostart enabled (always-available)" \
+      || log_info "Could not set autostart (later: sudo virsh autostart ${VM_NAME})"
     log_info "Waiting for OpenWRT to boot (30 seconds)..."
     sleep 30
     log_success "OpenWRT should now be booted"
