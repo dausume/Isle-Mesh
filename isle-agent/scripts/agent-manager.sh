@@ -887,6 +887,22 @@ start_agent() {
     echo "Step 2/3: Starting containers..."
     cd "${PROJECT_ROOT}/isle-agent"
 
+    # Self-correct: the agent compose declares isle-br-0 (macvlan) as EXTERNAL, so it must
+    # exist before `up`. On a fresh create nothing created it yet (boot-bringup does via
+    # resync_macvlan, but the create path did not). Create it if missing — keeps the create
+    # (cli + app) and boot paths aligned so both function identically.
+    if command -v docker &>/dev/null && ! docker network inspect isle-br-0 &>/dev/null; then
+        if ip link show isle-br-0 &>/dev/null; then
+            log_info "Creating isle-br-0 macvlan network (agent needs it before start)..."
+            docker network create --driver macvlan --opt parent=isle-br-0 \
+                --subnet 10.10.0.0/24 --gateway 10.10.0.1 isle-br-0 &>/dev/null \
+                && log_success "isle-br-0 macvlan network created" \
+                || log_warn "Could not create isle-br-0 macvlan network"
+        else
+            log_warn "isle-br-0 bridge missing — router setup must run before the agent"
+        fi
+    fi
+
     if ! $DOCKER_COMPOSE_CMD up -d; then
         log_error "Failed to start agent containers"
         echo ""
