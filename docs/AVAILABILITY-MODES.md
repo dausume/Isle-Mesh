@@ -85,3 +85,45 @@ Open questions:
    boot-bringup reconciles always-available apps up.
 3. Management app: show/set mode.
 4. on-demand scaffolding: device-relay wake message → proxy wake-hold → activity/idle tracker.
+
+---
+
+## Extended availability modes
+
+Rather than a fixed enum, availability is really a composition of **up-trigger ×
+down-trigger × placement**. Named modes are presets over that model (intuitive names +
+composable knobs underneath, per the isle knobs-and-suggestions rule):
+
+- **up-trigger:** boot | access | schedule | presence/quorum | manual | resource-permitting
+- **down-trigger:** never | idle-timeout | schedule-end | presence-lost | manual | resource-pressure
+- **placement:** single-host | replicated (failover across devices)
+
+Named presets:
+1. **always-available** — up:boot, down:never, single. *(default)*
+2. **on-demand** — up:access, down:idle-timeout, single.
+3. **scheduled** — up during declared windows (e.g. a coordination app only 07:00–23:00,
+   or only for the duration of a declared session), down at window end. Predictable access
+   + emissions control.
+4. **presence-gated / quorum** — up only when ≥N members (or a specific device) are on the
+   isle; down when presence drops below threshold. Fits democratic coordination (don't run
+   the shared app unless enough people are present) and covert operation (no idle service
+   when nobody's around).
+5. **replicated / failover (HA)** — installed on several devices; one primary, others
+   standby; if the primary drops off the isle, a standby is promoted (brought up +
+   re-registered). "Always-available across devices" — resilience against a device being
+   seized, lost, or powered down. Important for covert infra.
+6. **manual / pinned** — never auto-managed; only explicit operator up/down. For sensitive
+   apps that must not auto-start or be woken by others.
+7. **resource-aware (modifier)** — a gate layered on any start decision: suppress start when
+   the host is on battery / thermally throttled / over a data budget. Ties to the low-power
+   N95 mesh nodes and [[resource-aware-simulation]]-style budgeting; availability conditioned
+   on a resource budget.
+
+Related but distinct — **duress / dead-man** (a *trigger*, not a steady mode): brings
+everything down (or wipes) on a panic signal or a missed check-in. Lives in the
+kill-switch/threat-model layer but shares the control plane with on-demand wake.
+
+**Why on-demand is the keystone:** modes 3–5 reuse the same control-plane primitives
+on-demand needs (wake message on device-relay, activity/presence tracker, app→device
+directory). Build on-demand first; scheduled/presence/replicated are then mostly policy on
+top. `manual` is trivial (no automation); `resource-aware` is a gate on any start decision.
