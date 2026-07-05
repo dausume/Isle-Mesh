@@ -271,6 +271,12 @@ ensure_isle_dns() {
 setup_agent() {
     log_step "Step 1: Setting up Isle Agent"
 
+    # Record this node's role = core so the manager app (and CLI) know it is already an
+    # isle core and SKIP the role picker on launch — go straight to status. join.sh writes
+    # "remote" for the remote path; this is the matching core-side record (cli/app parity).
+    mkdir -p /etc/isle-mesh/agent 2>/dev/null || true
+    echo "core" > /etc/isle-mesh/agent/agent.mode 2>/dev/null || true
+
     # Check if agent is already running
     if docker ps | grep -q isle-agent; then
         log_success "Isle Agent is already running"
