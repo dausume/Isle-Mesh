@@ -15,6 +15,7 @@ ISLE_CORE="$SCRIPT_DIR/isle-core.sh"
 SCAFFOLD="$SCRIPT_DIR/scaffold.sh"
 PACKAGE="$SCRIPT_DIR/app-package.sh"
 INSTALLED="$SCRIPT_DIR/app-installed.sh"
+APPMODE="$SCRIPT_DIR/app-mode.sh"
 CONFIG="$SCRIPT_DIR/config.sh"
 DISCOVER="$SCRIPT_DIR/discover.sh"
 SSL="$SCRIPT_DIR/ssl.sh"
@@ -59,6 +60,7 @@ show_help() {
     echo -e "    --domain D  --port P  --protocol  Proxy scoping (default <name>.local :80 http)"
     echo -e "    --version V  --output DIR  --icon PNG"
     echo -e "  ${CYAN}isle app installed [--json]${NC}      List isle-apps installed on this node"
+    echo -e "  ${CYAN}isle app mode <name> [<mode>]${NC}    Get/set availability mode (--list for all)"
     echo -e ""
     echo -e "Managing Services (like docker-compose):"
     echo -e "  ${CYAN}isle app up [--build]${NC}             Start mesh-app services"
@@ -183,6 +185,9 @@ case $COMMAND in
         ;;
     installed)
         exec bash "$INSTALLED" "$@"
+        ;;
+    mode)
+        exec bash "$APPMODE" "$@"
         ;;
 
     config)
