@@ -22,11 +22,12 @@ fi
 if [[ $JSON == 1 ]]; then
   first=1; printf '['
   for f in "${files[@]}"; do
-    NAME=; DOMAIN=; PORT=; PROTOCOL=; PKG=; . "$f"
+    NAME=; DOMAIN=; PORT=; PROTOCOL=; PKG=; AVAILABILITY_MODE=; . "$f"
     [[ -n "$PKG" ]] || PKG="isle-app-$(printf '%s' "$NAME" | tr '[:upper:]_' '[:lower:]-' | tr -cd 'a-z0-9.-')"
+    [[ -n "$AVAILABILITY_MODE" ]] || AVAILABILITY_MODE="always-available"
     [[ $first == 1 ]] || printf ','
-    printf '{"name":"%s","domain":"%s","port":"%s","protocol":"%s","pkg":"%s"}' \
-      "$NAME" "$DOMAIN" "$PORT" "$PROTOCOL" "$PKG"
+    printf '{"name":"%s","domain":"%s","port":"%s","protocol":"%s","pkg":"%s","availability_mode":"%s"}' \
+      "$NAME" "$DOMAIN" "$PORT" "$PROTOCOL" "$PKG" "$AVAILABILITY_MODE"
     first=0
   done
   printf ']\n'

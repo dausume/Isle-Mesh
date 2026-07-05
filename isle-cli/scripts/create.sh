@@ -821,6 +821,9 @@ show_completion() {
 # stamp in the session makes it end automatically at the next reboot.
 setup_discovery() {
     log_step "Enabling Device Discovery Mode"
+    # always-available host: user services survive reboot with no interactive login
+    command -v loginctl >/dev/null 2>&1 && sudo loginctl enable-linger "${SUDO_USER:-$USER}" >/dev/null 2>&1 \
+        && log_info "Linger enabled (always-available: no login needed after reboot)" || true
     if [[ -f "$SCRIPT_DIR/lib/discovery-mode.sh" ]] && command -v jq >/dev/null 2>&1; then
         # shellcheck source=/dev/null
         source "$SCRIPT_DIR/lib/discovery-mode.sh"

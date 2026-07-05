@@ -13,7 +13,7 @@
 # The management app (AppsView) drives the installed apps; double-click → this wrapper.
 set -euo pipefail
 
-NAME=""; COMPOSE=""; DOMAIN=""; CONTAINER=""; PORT="80"; PROTOCOL="http"
+NAME=""; COMPOSE=""; DOMAIN=""; CONTAINER=""; PORT="80"; PROTOCOL="http"; AVAILABILITY_MODE="always-available"
 VERSION="0.1.0"; OUTPUT="."; ICON=""; MAINTAINER="isle-mesh <isle@localhost>"
 
 die(){ echo "ERROR: $*" >&2; exit 1; }
@@ -25,6 +25,7 @@ while [[ $# -gt 0 ]]; do
     --container) CONTAINER="$2"; shift 2 ;;
     --port) PORT="$2"; shift 2 ;;
     --protocol) PROTOCOL="$2"; shift 2 ;;
+    --mode) AVAILABILITY_MODE="$2"; shift 2 ;;
     --version) VERSION="$2"; shift 2 ;;
     --output) OUTPUT="$2"; shift 2 ;;
     --icon) ICON="$2"; shift 2 ;;
@@ -55,6 +56,7 @@ CONTAINER="${CONTAINER}"
 PORT="${PORT}"
 PROTOCOL="${PROTOCOL}"
 PKG="${PKG}"
+AVAILABILITY_MODE="${AVAILABILITY_MODE}"
 EOF
 
 # --- lifecycle wrapper: wraps docker compose + isle agent registration --------
