@@ -353,7 +353,7 @@ ${BLUE}Service Management:${NC}
   ssh root@${ROUTER_IP} '/etc/init.d/isle-join-protocol restart'
 
   # View DNS mappings
-  ssh root@${ROUTER_IP} 'cat /etc/dnsmasq.d/isle-vlan-domains.conf'
+  ssh root@${ROUTER_IP} 'cat /tmp/dnsmasq.d/isle-vlan-domains.conf'
 
 ${BLUE}Testing:${NC}
   1. Ensure an isle-agent is running and advertising .local domain
