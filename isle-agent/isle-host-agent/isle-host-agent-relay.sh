@@ -54,9 +54,11 @@ init_registry() {
   # Ensure registry directory exists
   mkdir -p "$(dirname "$REGISTRY_FILE")"
 
-  # Create default registry structure if it doesn't exist
-  if [ ! -f "$REGISTRY_FILE" ]; then
-    log "Creating default registry with health check app..."
+  # Create/repair the registry skeleton if it is missing, empty, or invalid JSON.
+  # Self-heal: a 0-byte registry (e.g. from an old clobber) must not be left broken —
+  # init previously only checked for a MISSING file, so a truncated one never recovered.
+  if [ ! -s "$REGISTRY_FILE" ] || ! jq -e . "$REGISTRY_FILE" >/dev/null 2>&1; then
+    log "Initializing/repairing registry (missing/empty/invalid) with health check app..."
     cat > "$REGISTRY_FILE" <<'EOF'
 {
   "domains": {},
