@@ -300,7 +300,7 @@ find_linkup_no_ip_interfaces() {
 
         # Must have NO IPv4 address
         local has_ip
-        has_ip=$(ip -4 addr show "$iface" 2>/dev/null | grep -c 'inet ' || echo "0")
+        has_ip=$(ip -4 addr show "$iface" 2>/dev/null | grep -c 'inet ' || true)
         if [[ "$has_ip" -gt 0 ]]; then
             continue
         fi
