@@ -35,6 +35,8 @@ ${CYAN}OPTIONS:${NC}
   --purge               Wipe the ENTIRE isle-mesh footprint (configs, DNS,
                         services, networks, state) — everything EXCEPT the
                         isle CLI itself. This is the full "Wipe Island".
+  --purge-apps          With --purge: also bring down and 'dpkg -r' every
+                        installed isle-app (.deb). Otherwise apps are kept.
   --keep-agent          Keep agent running (only destroy apps and router)
   --keep-router         Keep router running (only destroy apps and agent)
   --apps-only           Only destroy mesh applications
@@ -73,6 +75,7 @@ KEEP_AGENT=false
 KEEP_ROUTER=false
 APPS_ONLY=false
 PURGE=false
+PURGE_APPS=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -82,6 +85,11 @@ while [[ $# -gt 0 ]]; do
             ;;
         --purge)
             PURGE=true
+            shift
+            ;;
+        --purge-apps)
+            PURGE=true
+            PURGE_APPS=true
             shift
             ;;
         --keep-agent)
@@ -136,7 +144,9 @@ fi
 if [ "$PURGE" = true ]; then
     echo -e "  ${YELLOW}✓${NC} ${BOLD}PURGE:${NC} all configs (/etc/isle-mesh), DNS split files, isle"
     echo -e "      services (host-agent, mesh-mdns, registry-sync, device-relay,"
-    echo -e "      port-detection), udev rules, leftover networks, state & logs"
+    echo -e "      port-detection, boot-recovery), udev + hotplug rules, NM isle-cable"
+    echo -e "      profiles, leftover networks, state & logs; installed isle-apps are"
+    echo -e "      brought down (add --purge-apps to also uninstall them)"
     echo -e "      ${GREEN}(the isle CLI itself is kept)${NC}"
 fi
 echo ""
@@ -313,7 +323,7 @@ if [ "$PURGE" = true ]; then
     done
 
     # Systemd services we install — stop, disable, remove unit files
-    for svc in isle-host-agent mesh-mdns agent-registry-sync isle-device-relay isle-port-detection; do
+    for svc in isle-host-agent mesh-mdns agent-registry-sync isle-device-relay isle-port-detection isle-mesh-boot; do
         sudo systemctl stop "$svc" 2>/dev/null || true
         sudo systemctl disable "$svc" 2>/dev/null || true
         sudo rm -f "/etc/systemd/system/${svc}.service" 2>/dev/null || true
@@ -321,11 +331,27 @@ if [ "$PURGE" = true ]; then
     sudo systemctl daemon-reload 2>/dev/null || true
     echo -e "${BLUE}  → removed isle systemd services${NC}"
 
-    # Cable-plug detection (udev rules + helper binaries)
-    sudo rm -f /etc/udev/rules.d/99-isle-mesh-ports.rules /etc/udev/rules.d/99-isle-mesh-usb.rules 2>/dev/null || true
+    # Cable-plug detection + boot recovery (udev rules + helper binaries)
+    sudo rm -f /etc/udev/rules.d/99-isle-mesh-ports.rules /etc/udev/rules.d/99-isle-mesh-usb.rules \
+               /etc/udev/rules.d/90-isle-hotplug.rules 2>/dev/null || true
     sudo rm -f /usr/local/bin/isle-port-event /usr/local/bin/isle-port-event-handler \
-               /usr/local/bin/isle-port-init /usr/local/bin/isle-add-connection 2>/dev/null || true
+               /usr/local/bin/isle-port-init /usr/local/bin/isle-add-connection \
+               /usr/local/bin/agent-registry-watcher /usr/local/bin/sync-lh-mdns-and-agent-registry 2>/dev/null || true
     command -v udevadm >/dev/null 2>&1 && sudo udevadm control --reload-rules 2>/dev/null || true
+
+    # NetworkManager isle-cable autoconnect profiles (remote nodes) — never-default
+    # overlay profiles that would re-lease/re-attach the isle on every plug/boot.
+    if command -v nmcli >/dev/null 2>&1; then
+        nmcli -t -f NAME connection show 2>/dev/null | grep '^isle-cable-' | while read -r con; do
+            sudo nmcli connection delete "$con" 2>/dev/null && echo -e "${BLUE}  → removed NM profile ${con}${NC}" || true
+        done
+    fi
+
+    # Avahi interface scoping (deny/allow-interfaces) — revert via the existing restore.
+    if [ -f "$PROJECT_ROOT/security/harden-host-network.sh" ]; then
+        sudo bash "$PROJECT_ROOT/security/harden-host-network.sh" --remove 2>/dev/null \
+          && echo -e "${BLUE}  → reverted avahi interface scoping${NC}" || true
+    fi
 
     # DNS split configuration
     sudo rm -f /etc/dnsmasq.d/split-dns.conf /etc/systemd/resolved.conf.d/split-mdns.conf 2>/dev/null || true
@@ -336,16 +362,50 @@ if [ "$PURGE" = true ]; then
     # mDNS broadcast + host-agent runtime scripts and domain list
     # (NOTE: /usr/local/bin/isle-mesh holds installed scripts; /usr/local/bin/isle
     #  is the CLI symlink and is intentionally NOT touched.)
-    sudo rm -rf /usr/local/bin/isle-mesh /usr/local/etc/mesh-mdns-domains.list 2>/dev/null || true
+    sudo rm -rf /usr/local/bin/isle-mesh /usr/local/etc/mesh-mdns-domains.list /usr/local/etc/mesh-mdns.conf 2>/dev/null || true
 
     # Runtime state + logs
-    sudo rm -rf /var/lib/isle-mesh /var/log/isle-mesh 2>/dev/null || true
+    sudo rm -rf /var/lib/isle-mesh /var/log/isle-mesh /var/log/isle-hotplug.log 2>/dev/null || true
+
+    # Installed isle-apps (.deb): bring each DOWN before we delete the markers under
+    # /etc/isle-mesh. Their containers/wrappers/desktop entries live OUTSIDE /etc/isle-mesh
+    # and would otherwise be orphaned (running, unrecorded). --purge-apps also dpkg -r's them.
+    if [ -d /etc/isle-mesh/agent/installed-apps ]; then
+        for envf in /etc/isle-mesh/agent/installed-apps/*.env; do
+            [ -e "$envf" ] || continue
+            PKG=""; NAME=""; . "$envf" 2>/dev/null
+            [ -n "$PKG" ] || PKG="isle-app-$(printf '%s' "$NAME" | tr '[:upper:]_' '[:lower:]-' | tr -cd 'a-z0-9.-')"
+            echo -e "${BLUE}  → bringing down isle-app ${NAME}${NC}"
+            command -v "$PKG" >/dev/null 2>&1 && "$PKG" down 2>/dev/null || true
+            if [ "$PURGE_APPS" = true ]; then
+                sudo dpkg -r "$PKG" 2>/dev/null && echo -e "${BLUE}    also uninstalled ${PKG}${NC}" || true
+            fi
+        done
+        [ "$PURGE_APPS" = false ] && echo -e "${YELLOW}  ! isle-app .deb packages kept (use --purge-apps to also uninstall them)${NC}" || true
+    fi
 
     # Configuration tree (last)
     sudo rm -rf /etc/isle-mesh 2>/dev/null || true
     echo -e "${BLUE}  → removed /etc/isle-mesh and runtime state${NC}"
 
+    # ── Host-level changes NOT auto-reverted (blind reversion can break DNS/docker) ──
+    # Detect + SUGGEST only, per the isle knobs-and-suggestions rule.
+    printf '%b\n' "${YELLOW}  Host-level changes left in place (revert manually if you want a full teardown):${NC}"
+    if [ -L /etc/resolv.conf ] && readlink /etc/resolv.conf | grep -q systemd; then
+        echo -e "    • /etc/resolv.conf → $(readlink /etc/resolv.conf) (isle may have repointed this)"
+    fi
+    if ip -o -4 addr show dev lo 2>/dev/null | grep -qE 'inet 127\.0\.0\.[2-9]'; then
+        for a in $(ip -o -4 addr show dev lo | awk '/127\.0\.0\.[2-9]/{print $4}'); do
+            echo -e "    • lo alias ${a} — revert:  sudo ip addr del ${a} dev lo"
+        done
+    fi
+    if [ -f /etc/docker/daemon.json ] && grep -qE 'cgroupdriver|exec-opts' /etc/docker/daemon.json 2>/dev/null; then
+        echo -e "    • /etc/docker/daemon.json was modified (cgroup driver) — review before reverting."
+    fi
+    systemctl is-enabled libvirtd >/dev/null 2>&1 && echo -e "    • libvirtd left enabled + 'libvirt' group membership (shared dep — usually keep)."
+
     echo -e "${GREEN}  ✓ Footprint purged — the isle CLI was kept${NC}"
+    [ "$PURGE_APPS" = true ] && echo -e "${GREEN}  ✓ Installed isle-apps uninstalled${NC}" || true
     echo ""
 fi
 

@@ -65,7 +65,9 @@ if command -v nmcli >/dev/null 2>&1 && nmcli -t -f RUNNING general 2>/dev/null |
   fi
   nmcli connection up "$con" >/dev/null 2>&1 || true
 else
-  # Non-NM fallback: one-shot DHCP now; boot persistence via isle-remote-lease.service.
+  # Non-NM fallback: one-shot DHCP now. NOTE: no boot persistence on this path
+  # (the NM autoconnect profile above is what persists across reboots); re-run
+  # on boot via the isle hotplug rule, or 'isle remote-lease' manually.
   if   command -v dhclient >/dev/null 2>&1; then dhclient -1 "$IFACE" || true
   elif command -v udhcpc   >/dev/null 2>&1; then udhcpc -i "$IFACE" -q -n -t 5 || true
   else err "no DHCP client (dhclient/udhcpc) available"; exit 1; fi
