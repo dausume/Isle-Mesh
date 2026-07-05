@@ -108,6 +108,9 @@ case $COMMAND in
     mappings|list-isle)
         bash "$SCRIPT_DIR/dns-register.sh" list "$@"
         ;;
+    use-router|split-dns)
+        bash "$SCRIPT_DIR/remote-dns.sh" "$@"
+        ;;
     get-ip)
         # Get router IP for DNS configuration
         echo -e "${BOLD}Router DNS Server IP${NC}"
