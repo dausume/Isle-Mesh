@@ -37,16 +37,28 @@ broadcast_discovery() {
 
     local message="ISLE_MESH_DISCOVERY|isle=${ISLE_NAME}|vlan=${VLAN_ID}|router=${ROUTER_IP}|dhcp=${DHCP_RANGE}"
 
+    # Bind the broadcast to the isle L3 interface (the bridge that holds ROUTER_IP), which
+    # floods to EVERY isle port including cables added later (eth2...). A plain
+    # 255.255.255.255 broadcast exits only the kernel's default interface, so a remote node
+    # on a newly-added cable never receives the beacon (DHCP still works because dnsmasq
+    # LISTENS per-port; the beacon is an OUTBOUND broadcast that must be steered).
+    local dev
+    dev="$(ip -4 -o addr show 2>/dev/null | awk -v ip="${ROUTER_IP}/" 'index($4, ip)==1 {print $2; exit}')"
+
     case "$tool" in
         socat)
-            echo "$message" | socat - UDP4-DATAGRAM:255.255.255.255:${DISCOVERY_PORT},broadcast 2>/dev/null
+            if [ -n "$dev" ]; then
+                echo "$message" | socat - UDP4-DATAGRAM:255.255.255.255:${DISCOVERY_PORT},broadcast,so-bindtodevice="$dev" 2>/dev/null
+            else
+                echo "$message" | socat - UDP4-DATAGRAM:255.255.255.255:${DISCOVERY_PORT},broadcast 2>/dev/null
+            fi
             ;;
         nc)
             echo "$message" | nc -u -b 255.255.255.255 ${DISCOVERY_PORT} 2>/dev/null
             ;;
     esac
 
-    log_msg "Broadcasted: $message"
+    log_msg "Broadcasted on ${dev:-default}: $message"
 }
 
 # Main loop
