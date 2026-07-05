@@ -341,7 +341,11 @@ ensure_mesh_mdns() {
     echo ""
     echo "The mesh-mdns service is required for .local domain broadcasting."
     echo "Would you like to install it now? (y/N)"
-    read -r response
+    if [[ -t 0 && "${ISLE_ASSUME_YES:-}" != "1" ]]; then
+        read -r response
+    else
+        response="y"; log_info "Installing mesh-mdns (required; non-interactive)"
+    fi
 
     if [[ "$response" =~ ^[Yy]$ ]]; then
         log_info "Installing mesh-mdns system..."
@@ -599,7 +603,11 @@ cleanup_network_cache() {
         echo "You will need to restart the agent after cleanup."
         echo ""
         echo -n "Continue? (y/N): "
-        read -r response
+        if [[ -t 0 ]]; then
+            read -r response
+        else
+            response=""  # non-interactive: do not auto-run destructive cleanup (use --force)
+        fi
         if [[ ! "$response" =~ ^[Yy]$ ]]; then
             log_info "Cleanup cancelled"
             return 1

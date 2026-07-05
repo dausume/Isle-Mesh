@@ -135,8 +135,12 @@ check_prerequisites() {
         echo ""
         echo "Solution: Switch Docker to use 'cgroupfs' driver instead."
         echo ""
-        read -p "Would you like to automatically fix this? (requires sudo) [Y/n]: " -n 1 -r
-        echo ""
+        if [[ -t 0 && "${ISLE_ASSUME_YES:-}" != "1" ]]; then
+            read -p "Would you like to automatically fix this? (requires sudo) [Y/n]: " -n 1 -r
+            echo ""
+        else
+            REPLY="Y"; log_info "Auto-fixing Docker cgroup config (non-interactive)"
+        fi
         if [[ $REPLY =~ ^[Yy]$ ]] || [[ -z $REPLY ]]; then
             log_info "Applying Docker configuration fix..."
             if sudo bash "$SCRIPT_DIR/fix-docker-cgroups.sh" fix; then
@@ -168,7 +172,11 @@ check_prerequisites() {
         echo "Install with:"
         echo "  sudo apt-get install qemu-kvm libvirt-daemon-system libvirt-clients"
         echo ""
-        read -p "Do you want to continue without the router? (y/N): " confirm
+        if [[ -t 0 ]]; then
+            read -p "Do you want to continue without the router? (y/N): " confirm
+        else
+            confirm=""; log_error "libvirt missing and no terminal — cannot build the router (install qemu-kvm + libvirt)"
+        fi
         if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
             exit 1
         fi

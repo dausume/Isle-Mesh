@@ -433,7 +433,11 @@ validate_no_subnet_conflict() {
         echo "  The isle subnet overlaps with an existing interface."
         echo "  This may cause routing issues."
         echo ""
-        read -p "  Continue anyway? (y/N): " confirm
+        if [[ -t 0 ]]; then
+            read -p "  Continue anyway? (y/N): " confirm
+        else
+            confirm=""  # non-interactive: do not proceed past a subnet conflict
+        fi
         if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
             log_error "Aborted due to subnet conflict"
             exit 1

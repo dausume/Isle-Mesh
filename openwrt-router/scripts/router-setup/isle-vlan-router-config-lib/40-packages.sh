@@ -20,7 +20,7 @@ install_required_packages(){
     warn "No packages found in $PACKAGES_DIR"
     warn "Run: $SCRIPT_DIR/download-packages.sh to download packages first"
     echo -n "Continue without installing packages? (y/N) "
-    read -r ans
+    if [[ -t 0 ]]; then read -r ans; else ans="y"; warn "Continuing without packages (non-interactive)"; fi
     [[ "$ans" =~ ^[Yy]$ ]] || exit 1
     return 0
   fi

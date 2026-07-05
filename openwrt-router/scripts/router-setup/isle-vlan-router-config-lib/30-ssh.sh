@@ -57,17 +57,30 @@ init_ssh_auth(){
     return 1
   fi
 
-  warn "SSH key/cached password not working — password required"
-  echo -n "Enter password for root@${OPENWRT_IP}: "
-  read -s OPENWRT_PASSWORD
-  echo ""
+  # Non-interactive first: try the known default router password(s).
+  local _dp
+  for _dp in "${ROUTER_DEFAULT_PASSWORD:-root}" "root" ""; do
+    if sshpass -p "$_dp" ssh $SSH_OPTS "${OPENWRT_USER}@${OPENWRT_IP}" "echo SSHOK" >/dev/null 2>&1; then
+      OPENWRT_PASSWORD="$_dp"; ok "SSH connection successful (default password)"; return 0
+    fi
+  done
 
-  if sshpass -p "$OPENWRT_PASSWORD" ssh $SSH_OPTS "${OPENWRT_USER}@${OPENWRT_IP}" "echo SSHOK" >/dev/null 2>&1; then
-    ok "SSH connection successful (password auth)"
-    return 0
+  # Prompt only if a real terminal is present; unattended/app installs must not hang.
+  if [[ -t 0 ]]; then
+    warn "SSH key/cached/default password not working — password required"
+    echo -n "Enter password for root@${OPENWRT_IP}: "
+    read -s OPENWRT_PASSWORD
+    echo ""
+    if sshpass -p "$OPENWRT_PASSWORD" ssh $SSH_OPTS "${OPENWRT_USER}@${OPENWRT_IP}" "echo SSHOK" >/dev/null 2>&1; then
+      ok "SSH connection successful (password auth)"
+      return 0
+    else
+      err "SSH authentication failed with provided password"
+      OPENWRT_PASSWORD=""
+      return 1
+    fi
   else
-    err "SSH authentication failed with provided password"
-    OPENWRT_PASSWORD=""
+    err "Router SSH auth failed (default rejected) and no terminal to prompt"
     return 1
   fi
 }

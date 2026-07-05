@@ -229,20 +229,41 @@ install_ssh_key_to_router() {
       sleep 3
     done
 
-    echo ""
-    echo "  The OpenWRT router requires a password for initial SSH setup."
-    echo "  This password will be cached and used to install an SSH key"
-    echo "  so that subsequent connections are passwordless."
-    echo ""
-    echo -n "  Enter root password for router at ${router_ip}: "
-    read -s router_password
-    echo ""
+    # Non-interactive first: try the known default router password(s) so a standard install
+    # needs no terminal. The isle OpenWRT image ships with a known default root password;
+    # once in, the per-install key is installed and all later access is passwordless.
+    local _dp
+    for _dp in "${ROUTER_DEFAULT_PASSWORD:-root}" "root" ""; do
+      if _try_ssh_pass "$_dp"; then
+        router_password="$_dp"; authenticated=true
+        log_info "Authenticated with default router password"
+        break
+      fi
+    done
 
-    if _try_ssh_pass "$router_password"; then
-      authenticated=true
-    else
-      log_error "SSH authentication failed with provided password"
-      return 1
+    # Fall back to a prompt ONLY if a real terminal is present. An app-invoked / unattended
+    # install must never hang on stdin (zero-terminal goal).
+    if [[ "$authenticated" != "true" ]]; then
+      if [[ -t 0 ]]; then
+        echo ""
+        echo "  The OpenWRT router requires a password for initial SSH setup."
+        echo "  This password will be cached and used to install an SSH key"
+        echo "  so that subsequent connections are passwordless."
+        echo ""
+        echo -n "  Enter root password for router at ${router_ip}: "
+        read -s router_password
+        echo ""
+        if _try_ssh_pass "$router_password"; then
+          authenticated=true
+        else
+          log_error "SSH authentication failed with provided password"
+          return 1
+        fi
+      else
+        log_error "Router SSH auth failed (default rejected) and no terminal to prompt."
+        log_info "Set ROUTER_PASSWORD env, or ensure the router image ships the default password."
+        return 1
+      fi
     fi
   fi
 

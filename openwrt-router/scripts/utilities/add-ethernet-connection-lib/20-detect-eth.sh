@@ -13,10 +13,16 @@ pick_or_validate_eth(){
   else
     mapfile -t CANDIDATES < <(list_eth)
     [[ ${#CANDIDATES[@]} -gt 0 ]] || { err "No eligible Ethernet interfaces found"; exit 1; }
-    banner "Select Ethernet Interface"
-    local i=1; for c in "${CANDIDATES[@]}"; do echo "[$i] $c"; ((i++)); done
-    read -rp "Choose [1-${#CANDIDATES[@]}]: " n
-    [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#CANDIDATES[@]} )) || { err "Invalid choice"; exit 1; }
+    if [[ ${#CANDIDATES[@]} -eq 1 ]]; then
+      n=1
+    elif [[ -t 0 ]]; then
+      banner "Select Ethernet Interface"
+      local i=1; for c in "${CANDIDATES[@]}"; do echo "[$i] $c"; ((i++)); done
+      read -rp "Choose [1-${#CANDIDATES[@]}]: " n
+      [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#CANDIDATES[@]} )) || { err "Invalid choice"; exit 1; }
+    else
+      err "Multiple eligible NICs and no terminal — pass --iface <name>"; exit 1
+    fi
     ETH_IFACE="${CANDIDATES[$((n-1))]}"
   fi
   reserved "ETH:$ETH_IFACE" && { warn "Interface already reserved"; } || reserve "ETH:$ETH_IFACE"
