@@ -26,7 +26,22 @@ create_vm_xml() {
   mkdir -p "$ROUTER_CONFIG_DIR"
 
   local XML_FILE="$ROUTER_CONFIG_DIR/${VM_NAME}.xml"
-  local IMAGE_PATH="$IMAGE_DIR/openwrt-isle-router.qcow2"
+
+  # Stage the router disk into the STANDARD libvirt images dir and run the VM from there.
+  # The VM must NOT run from the install tree: virt-aa-helper (AppArmor) cannot read a disk
+  # under /usr/share (the .deb bundle) or an arbitrary checkout path, so the per-VM AppArmor
+  # profile fails to load and the VM won't start. Staging here makes the app (.deb) and cli
+  # (checkout) installs behave IDENTICALLY — both run from /var/lib/libvirt/images.
+  local TEMPLATE_IMAGE="$IMAGE_DIR/openwrt-isle-router.qcow2"
+  local RUNTIME_DIR="/var/lib/libvirt/images"
+  local IMAGE_PATH="$RUNTIME_DIR/${VM_NAME}.qcow2"
+  mkdir -p "$RUNTIME_DIR"
+  if [[ ! -f "$IMAGE_PATH" ]]; then
+    log_info "Staging router image -> $IMAGE_PATH (writable, AppArmor-readable)"
+    cp "$TEMPLATE_IMAGE" "$IMAGE_PATH" || { log_error "Failed to stage router image from $TEMPLATE_IMAGE"; exit 1; }
+  fi
+  chown libvirt-qemu:kvm "$IMAGE_PATH" 2>/dev/null || true
+  chmod 660 "$IMAGE_PATH" 2>/dev/null || true
 
   # Use template engine to generate VM XML
   local vm_template
@@ -51,8 +66,26 @@ create_vm() {
 
   if [[ "${NO_START}" == "false" ]]; then
     log_info "Starting VM..."
-    virsh start "$VM_NAME" || { log_error "Failed to start VM"; exit 1; }
-    log_success "VM started"
+    # Self-correcting start: on failure, remediate the two things that actually break a
+    # router VM boot in normal use — a disk libvirt/AppArmor can't read (re-stage it into
+    # the standard images dir) and a stale per-VM AppArmor profile (drop it, restart
+    # libvirtd) — then retry once. Goal: the user never sees a raw libvirt error.
+    if ! virsh start "$VM_NAME" 2>/dev/null; then
+      log_warning "VM start failed — self-correcting (stage disk + clear stale AppArmor profile)..."
+      local _rt="/var/lib/libvirt/images/${VM_NAME}.qcow2" _uuid
+      [[ -f "$_rt" ]] || cp "$IMAGE_DIR/openwrt-isle-router.qcow2" "$_rt" 2>/dev/null || true
+      chown libvirt-qemu:kvm "$_rt" 2>/dev/null || true; chmod 660 "$_rt" 2>/dev/null || true
+      _uuid="$(virsh domuuid "$VM_NAME" 2>/dev/null)"
+      [[ -n "$_uuid" ]] && rm -f "/etc/apparmor.d/libvirt/libvirt-${_uuid}"* 2>/dev/null || true
+      systemctl restart libvirtd 2>/dev/null || true; sleep 2
+      if virsh start "$VM_NAME" 2>/dev/null; then
+        log_success "VM started (self-corrected)"
+      else
+        log_error "Failed to start VM after self-correction (see: journalctl -u libvirtd)"; exit 1
+      fi
+    else
+      log_success "VM started"
+    fi
     # always-available: bring the router up on libvirtd/boot, independent of boot-bringup
     virsh autostart "$VM_NAME" >/dev/null 2>&1 \
       && log_success "VM autostart enabled (always-available)" \

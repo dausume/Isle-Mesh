@@ -215,6 +215,13 @@ destroy_vm() {
         return 1
     fi
 
+    # Remove the staged runtime disk so the next create starts from a fresh template
+    # (keeps app + cli teardown aligned; a stale disk would carry old isle state forward).
+    local RUNTIME_DISK="/var/lib/libvirt/images/${VM_NAME}.qcow2"
+    if [[ -f "$RUNTIME_DISK" ]]; then
+        rm -f "$RUNTIME_DISK" && log_success "Removed staged VM disk: $RUNTIME_DISK"
+    fi
+
     log_success "VM '$VM_NAME' destroyed"
 }
 
