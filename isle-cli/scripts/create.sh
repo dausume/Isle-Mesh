@@ -335,6 +335,35 @@ setup_mdns_system() {
     echo ""
 }
 
+# Step 3b (self-forming): bridge already-connected, non-ISP ethernet cables into the isle.
+# Hotplug covers cables plugged AFTER install; this covers cables already plugged at create
+# time, so the isle self-forms with no manual `isle router add-connection`. Never touches the
+# ISP uplink or wifi (SSH path). Non-interactive (passes --iface).
+add_connected_cables() {
+    if [[ "$SKIP_ROUTER" == true ]]; then return 0; fi
+    log_step "Step 3b: Bridging connected isle cables (self-forming)"
+    local isp_iface eth added=0
+    isp_iface="$(ip route show default 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}' | head -1)"
+    for eth in $(ls /sys/class/net 2>/dev/null); do
+        [[ "$eth" == "lo" ]] && continue
+        [[ -d "/sys/class/net/$eth/wireless" ]] && continue           # never wifi (ISP/SSH path)
+        [[ -e "/sys/class/net/$eth/device" ]] || continue             # physical NIC only (skip bridges/veth/docker)
+        [[ "$eth" == "$isp_iface" ]] && continue                      # never the ISP uplink
+        [[ "$(cat "/sys/class/net/$eth/carrier" 2>/dev/null)" == "1" ]] || continue  # cable actually plugged
+        if ip -4 addr show "$eth" 2>/dev/null | grep -q 'inet '; then continue; fi   # skip if it already has an IP
+        [[ -e "/sys/class/net/$eth/master" ]] && continue             # skip if already bridged
+        log_info "Detected connected isle cable '$eth' — bridging into the isle..."
+        if sudo bash "$SCRIPT_DIR/router.sh" add-connection --iface "$eth"; then
+            log_success "Cable '$eth' added to the isle"
+            added=$((added + 1))
+        else
+            log_warning "Could not add cable '$eth' (add later: isle router add-connection --iface $eth)"
+        fi
+    done
+    [[ $added -eq 0 ]] && log_info "No new isle cables to bridge (plug one in anytime — hotplug adds it)."
+    echo ""
+}
+
 # Step 3: Create/Start Isle Router
 setup_router() {
     if [[ "$SKIP_ROUTER" == true ]]; then
@@ -857,6 +886,7 @@ main() {
             # its DHCP lease comes from the router. On a fresh/purged host
             # the old order failed at docker network creation.
             setup_router
+            add_connected_cables
             setup_agent
             setup_sample_app
             setup_discovery
