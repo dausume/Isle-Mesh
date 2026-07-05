@@ -127,3 +127,23 @@ kill-switch/threat-model layer but shares the control plane with on-demand wake.
 on-demand needs (wake message on device-relay, activity/presence tracker, app→device
 directory). Build on-demand first; scheduled/presence/replicated are then mostly policy on
 top. `manual` is trivial (no automation); `resource-aware` is a gate on any start decision.
+
+---
+
+## CLI + app parity (required for every capability)
+
+Per the standing rule, every availability capability exists as BOTH a CLI verb AND a
+management-app control — and the app **shells out to the CLI verb** (single source of truth,
+same as AppsView already calls `isle agent …` / `isle app installed`). Target surface:
+
+| Capability | CLI verb | Management-app control |
+|---|---|---|
+| Get/set a unit's mode | `isle app mode <name> [<mode>]`, `isle router mode [<mode>]` | per-app mode dropdown + router mode selector |
+| List units + mode + run-state | `isle app availability [--json]` | AppsView "Mode" + "State" columns |
+| Manual wake / sleep (on-demand) | `isle app wake <name>` / `isle app sleep <name>` | Wake / Sleep buttons |
+| Who is using it (on-demand) | `isle app active [<name>] [--json]` | "active users" indicator |
+| Schedule window (scheduled) | `isle app schedule <name> <window>` | schedule editor |
+| Presence/quorum threshold | `isle app quorum <name> <n>` | quorum setting |
+
+Rule of thumb: build the **CLI verb first**, then wire the app control to call it. If one
+surface ships without the other, log it as a follow-up gap.
