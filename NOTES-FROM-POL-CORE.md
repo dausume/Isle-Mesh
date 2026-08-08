@@ -54,3 +54,12 @@ SSH pulls). Plans live in polari-suite: MESH_APP_CONVERGENCE_*.md.
 - The agent now fronts polari; polari ingests this machine
   registry/fragments/facts every 2min and its /isle-mesh page
   draws the isle from inside it.
+
+## 2026-08-08 — .isle certs now CA-SIGNED (suite Polari Root CA)
+agent ssl slots for polari.isle + api.polari.isle now hold a
+FULLCHAIN wildcard leaf (*.isle, *.polari.isle; 1yr) issued by the
+polari suite CA — one root import in a browser = all isle apps
+green. Convention going forward: new .isle apps can copy this
+wildcard fullchain into their <domain>.crt slot instead of
+self-signing (or the fragment generator learns a default-cert
+path). Reload that works in the vlan-agent: kill -HUP 1.
