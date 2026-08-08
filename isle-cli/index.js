@@ -30,6 +30,7 @@ const commands = {
   agent:    { script: 'agent.sh',    desc: 'Agent and bridge management' },
   mdns:     { script: 'mdns.sh',     desc: 'mDNS infrastructure (.local domains)' },
   dns:      { script: 'dns.sh',      desc: 'Router DNS management (.isle domains)' },
+  trust:    { script: 'trust.sh',    desc: 'CA trust install-step (status/install/cert)' },
   security: { script: 'security.sh', desc: 'ISP visibility and network hardening' },
 
   // Lifecycle

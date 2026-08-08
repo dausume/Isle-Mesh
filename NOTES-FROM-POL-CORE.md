@@ -63,3 +63,17 @@ green. Convention going forward: new .isle apps can copy this
 wildcard fullchain into their <domain>.crt slot instead of
 self-signing (or the fragment generator learns a default-cert
 path). Reload that works in the vlan-agent: kill -HUP 1.
+
+## 2026-08-08 — new verb: isle trust (CA as an install step)
+trust.sh + dispatch entry (also synced to /usr/share/isle-mesh).
+status = detect trust everywhere (system store, Chrome NSS,
+Firefox note, LIVE PROBE via --cacert fetch); install = consented
+import (fingerprint shown, --yes for postinst), system +
+user-NSS, installs libnss3-tools if needed; cert = path+fp.
+Root lives at /etc/isle-mesh/ca/isle-root.crt (currently the
+polari suite root). INTENDED WIRING: .deb postinst calls
+"isle trust install" behind a debconf consent; a plain-HTTP
+trust.isle page does the phone walkthrough (JS probe: fetch an
+https .isle URL, catch = untrusted). RECOMMENDATION recorded: mint
+a DEDICATED name-constrained isle root (permitted DNS=.isle) so
+the import can never vouch for non-isle names.
