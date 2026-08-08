@@ -35,3 +35,22 @@ plan §3): containers on this machine, ingress ONLY via the agent
 pipeline is the intended path (dogfood). An agent-side pusher will
 feed registry/fragments/device facts into polari (replacing pol-core
 SSH pulls). Plans live in polari-suite: MESH_APP_CONVERGENCE_*.md.
+
+## 2026-08-08 — polari deployed ON the isle (prf-isle)
+
+- ~/polari-isle/: compose (backend+frontend :staging, NO ports,
+  isle-agent-net, sqlite, lean/no-KC) + runtime-config +
+  push-to-polari.sh + systemd timer polari-isle-push (2min).
+- Registered via agent-manager.sh register as TWO apps (polari →
+  prf-isle-frontend:4200, polari-api → prf-isle-backend:3000) —
+  register is single-service-per-app; the registry schema supports
+  services[] w/ subdomains but no verb fills it (converter-upgrade
+  candidate). Certs: /etc/isle-mesh/agent/ssl/{certs,keys}/
+  <domain>.{crt,key} self-signed.
+- .isle DNS: polari.isle + api.polari.isle → 10.10.0.2 (agent
+  macvlan) via isle dns register.
+- Gotchas for this side: staging frontend nginx answers on 4200;
+  pusher needs sudo -n for virsh (router detection).
+- The agent now fronts polari; polari ingests this machine
+  registry/fragments/facts every 2min and its /isle-mesh page
+  draws the isle from inside it.
