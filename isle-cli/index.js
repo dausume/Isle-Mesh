@@ -31,6 +31,7 @@ const commands = {
   mdns:     { script: 'mdns.sh',     desc: 'mDNS infrastructure (.local domains)' },
   dns:      { script: 'dns.sh',      desc: 'Router DNS management (.isle domains)' },
   trust:    { script: 'trust.sh',    desc: 'CA trust install-step (status/install/cert)' },
+  certs:    { script: 'certs.sh',    desc: 'Per-domain leaf issuance from the isle CA' },
   security: { script: 'security.sh', desc: 'ISP visibility and network hardening' },
 
   // Lifecycle

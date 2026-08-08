@@ -95,3 +95,16 @@ trust.isle (registration-triggered leaf issuance = converter item).
 JOIN-FLOW WIRING (to build): manager-app connect → agreement/QR
 carries the root fingerprint → app runs pkexec isle trust fetch
 --fingerprint <fp> → device fully trusted at join, zero terminal.
+
+## 2026-08-08 — isle certs: registration-triggered leaf issuance
+Dustin ruled: wildcards GONE, explicit SANs only. New verb
+`isle certs status|sync|issue <domain>`: per-domain EC leaves
+signed by the isle INTERMEDIATE (/etc/isle-mesh/ca/signing — the
+ROOT key never leaves the suite CA), fullchain into agent slots,
+agent HUP. agent-manager register now calls certs issue (the
+hook). sync = idempotent reconcile over registry.json (domains +
+subdomain.domain). All five registered domains reissued as
+individual explicit-SAN leaves. 🔧 gotchas: process substitution
+extfile dies under sudo (use a real file); tmp must be USER-owned
+for shell redirects; installed CLI at /usr/share needs sudo cp +
+chmod 755 after repo edits.

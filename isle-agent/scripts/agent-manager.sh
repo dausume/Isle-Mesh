@@ -1441,6 +1441,13 @@ register_app() {
 
     log_success "App '${app_name}' registered in registry.json"
 
+    # explicit-SAN leaf at registration (isle certs; no-op if this
+    # device lacks the signing material)
+    local certs_sh="${SCRIPT_DIR}/../../isle-cli/scripts/certs.sh"
+    if [ -f "$certs_sh" ]; then
+        bash "$certs_sh" issue "${domain}" || log_warn "leaf issuance failed for ${domain} (isle certs issue ${domain})"
+    fi
+
     # Add domain to mDNS broadcast list
     local mdns_list="/usr/local/etc/mesh-mdns-domains.list"
     if [[ -f "$mdns_list" ]]; then
