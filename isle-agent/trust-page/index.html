@@ -1,0 +1,38 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Join this isle — trust setup</title>
+<style>
+body{font-family:system-ui,sans-serif;max-width:640px;margin:2rem auto;padding:0 1rem;line-height:1.5}
+.ok{background:#e6f4e6;border:1px solid #2e7d32;padding:1rem;border-radius:8px}
+.warn{background:#fff3e0;border:1px solid #ef6c00;padding:1rem;border-radius:8px}
+code{background:#eee;padding:2px 5px;border-radius:4px}
+h1{font-size:1.4rem}
+</style></head><body>
+<h1>Isle trust setup</h1>
+<div id="probe" class="warn">Probing whether this device trusts the isle…</div>
+<p>This isle serves its apps over HTTPS using its own certificate
+authority. Trusting that CA once makes every <code>*.isle</code> app
+load cleanly on this device.</p>
+<p><a href="/ca/isle-root.crt" download>Download the isle root
+certificate</a> — verify its fingerprint against the one shown by
+the isle operator (<code>isle trust cert</code>) before trusting.</p>
+<h2>How to trust it</h2>
+<ul>
+<li><b>Linux + Chrome/Chromium:</b> run <code>isle trust install</code>
+ (isle CLI installed), or import via Settings → Privacy and security →
+ Security → Manage certificates → Authorities.</li>
+<li><b>Firefox:</b> Settings → Privacy &amp; Security → Certificates →
+ View Certificates → Authorities → Import.</li>
+<li><b>iPhone/iPad:</b> download above, then Settings → Profile
+ Downloaded → Install; then Settings → General → About → Certificate
+ Trust Settings → enable full trust.</li>
+<li><b>Android:</b> download above, then Settings → Security →
+ More/Encryption → Install a certificate → CA certificate.</li>
+</ul>
+<script>
+fetch("https://api.polari.isle/api/health", {mode:"cors"})
+ .then(function(){document.getElementById("probe").className="ok";
+  document.getElementById("probe").textContent="✓ This device already trusts the isle — apps will load cleanly.";})
+ .catch(function(){document.getElementById("probe").textContent="✗ Not trusted yet — follow the steps below, then reload this page.";});
+</script>
+</body></html>

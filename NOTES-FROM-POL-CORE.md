@@ -77,3 +77,21 @@ trust.isle page does the phone walkthrough (JS probe: fetch an
 https .isle URL, catch = untrusted). RECOMMENDATION recorded: mint
 a DEDICATED name-constrained isle root (permitted DNS=.isle) so
 the import can never vouch for non-isle names.
+
+## 2026-08-08 — trust lifecycle COMPLETE (Dustin rulings applied)
+Rulings: the app/agent PERFORMS trust actions; CA install is part
+of CONNECTING TO THE CORE; auto-update capability; the JavaFX
+manager app prompts for elevation (pkexec) so the user consents in
+a familiar OS dialog.
+Built: trust.isle static page+container (probe JS, per-platform
+walkthrough, root download — the phone path); isle trust grew
+fetch (first-join: fingerprint = the consent, --fingerprint for
+scripted/app-driven joins) + update (SIGNED-CHANNEL RULE: new root
+only over TLS the current root authenticates; re-key = explicit
+re-consent) + daily isle-trust-update.timer. 🔑 X.509 GOTCHA:
+single-label wildcards (*.isle) are REJECTED by OpenSSL — every
+top-level .isle app needs an explicit SAN; shared leaf reissued w/
+trust.isle (registration-triggered leaf issuance = converter item).
+JOIN-FLOW WIRING (to build): manager-app connect → agreement/QR
+carries the root fingerprint → app runs pkexec isle trust fetch
+--fingerprint <fp> → device fully trusted at join, zero terminal.
