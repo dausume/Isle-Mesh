@@ -131,3 +131,15 @@ kind or absent consumer module = recorded available-but-unbound,
 named honestly (binds when the module lands). So: isle app deploy
 odoo --engine business-ops=http://<c>:8069 makes odoo a polari
 engine automatically. GET /api/islemesh/engines lists them.
+
+## 2026-08-08 — the general isle app store (§20.1/§20.3): isle store
+Catalog lives in polari (IsleCatalogEntry rows + install-plan at
+/api/islemesh/catalog[/{entry}]); `isle store list|show|install`
+browses it and RUNS the plan on the host (mover-on-host). PROVEN:
+store list shows 3 (polari/whoami/odoo across both variants);
+store install whoami --yes → catalog plan → isle app deploy →
+container+cert+DNS, fully automatic. app-deploy gained --image
+(synthesizes a one-service compose). Store dispatches: mesh-app →
+isle app deploy; polari-app → shared-shell launcher build+apt;
+polari-module → module deb. Consumers of both proven variants, one
+front door.

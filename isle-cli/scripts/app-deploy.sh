@@ -34,9 +34,10 @@ die(){ echo -e "${R}[FAIL]${N} $*"; exit 1; }
 
 NAME="${1:-}"; shift || true
 [ -n "$NAME" ] && [ "${NAME#-}" = "$NAME" ] || die "usage: isle app deploy <name> --compose <file> [--service <svc>] [--port <p>] [--domain <d>] [--engine <kind>=<url>]"
-COMPOSE=""; SERVICE=""; PORT=""; DOMAIN="$NAME.isle"; PROTOCOL="http"; ENGINE=""
+COMPOSE=""; IMAGE=""; SERVICE=""; PORT=""; DOMAIN="$NAME.isle"; PROTOCOL="http"; ENGINE=""
 while [ $# -gt 0 ]; do case "$1" in
     --compose) COMPOSE="$2"; shift 2 ;;
+    --image) IMAGE="$2"; shift 2 ;;
     --service) SERVICE="$2"; shift 2 ;;
     --port) PORT="$2"; shift 2 ;;
     --domain) DOMAIN="$2"; shift 2 ;;
@@ -44,7 +45,15 @@ while [ $# -gt 0 ]; do case "$1" in
     --engine) ENGINE="$2"; shift 2 ;;
     *) die "unknown arg: $1" ;;
 esac; done
-[ -n "$COMPOSE" ] && [ -f "$COMPOSE" ] || die "--compose <existing file> required"
+# --image <ref> synthesizes a one-service compose (the catalog's
+# bare-image path); --compose is the file path otherwise.
+if [ -z "$COMPOSE" ] && [ -n "$IMAGE" ]; then
+    COMPOSE="$(mktemp --suffix=.yml)"
+    SVC="${SERVICE:-$NAME}"
+    printf 'services:\n  %s:\n    image: %s\n    restart: unless-stopped\n' \
+        "$SVC" "$IMAGE" > "$COMPOSE"
+fi
+[ -n "$COMPOSE" ] && [ -f "$COMPOSE" ] || die "--compose <file> or --image <ref> required"
 
 # ---- parse services (first service = default primary)
 mapfile -t SERVICES < <(python3 - "$COMPOSE" <<'PYEOF'

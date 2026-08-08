@@ -32,6 +32,7 @@ const commands = {
   dns:      { script: 'dns.sh',      desc: 'Router DNS management (.isle domains)' },
   trust:    { script: 'trust.sh',    desc: 'CA trust install-step (status/install/cert)' },
   certs:    { script: 'certs.sh',    desc: 'Per-domain leaf issuance from the isle CA' },
+  store:    { script: 'store.sh',    desc: 'The general isle app store (list/show/install)' },
   security: { script: 'security.sh', desc: 'ISP visibility and network hardening' },
 
   // Lifecycle
