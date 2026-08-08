@@ -108,3 +108,15 @@ individual explicit-SAN leaves. 🔧 gotchas: process substitution
 extfile dies under sudo (use a real file); tmp must be USER-owned
 for shell redirects; installed CLI at /usr/share needs sudo cp +
 chmod 755 after repo edits.
+
+## 2026-08-08 — isle app deploy: the store install pipeline
+`isle app deploy <name> --compose <f> [--service --port --domain
+--protocol --engine k=urltmpl]`: arbitrary compose -> ONE command
+-> running (isle-overlay.yml auto-attaches every service to
+isle-agent-net) -> agent register -> leaf issued (hook) -> .isle
+DNS -> in the graph. PROVEN with traefik/whoami: cert issued
+(DNS:whoami.isle chained to isle intermediate), https://whoami.isle
+served, graph edge drawn. --engine writes /etc/isle-mesh/apps/
+<name>/engine.json (provides + url) = polari provider-wiring
+material. undeploy tears down. Single primary service (registry
+shape) = the recorded multi-service gap.

@@ -177,6 +177,18 @@ case $COMMAND in
         ;;
 
     # Project tools
+    deploy)
+        # store install pipeline: arbitrary compose -> isle app
+        bash "$SCRIPT_DIR/app-deploy.sh" "$@"
+        ;;
+
+    undeploy)
+        NAME="${1:?usage: isle app undeploy <name>}"
+        sudo docker compose -p "isle-$NAME" -f "/etc/isle-mesh/apps/$NAME/docker-compose.yml" -f "/etc/isle-mesh/apps/$NAME/isle-overlay.yml" down 2>/dev/null
+        sudo bash "$SCRIPT_DIR/../../isle-agent/scripts/agent-manager.sh" unregister --name "$NAME" 2>/dev/null || true
+        echo "undeployed $NAME (DNS entry remains; isle dns unregister to drop)"
+        ;;
+
     scaffold)
         exec bash "$SCAFFOLD" "$@"
         ;;
