@@ -5,23 +5,39 @@
 # up behind the agent, (re)registers polari.isle + api.polari.isle,
 # issues leaves, DNS, restarts the self-feed pusher, verifies.
 #
-# The dev LOOP (from pol-core, where the code lives):
-#   pol node build backend            # build the image
-#   docker save prf-backend:staging | ssh isle-core docker load
-#   ssh isle-core isle-polari-deploy.sh   # deploy on the isle
-# This script is the isle half — one command makes the isle serve
-# the current polari image.
+# The dev LOOP (from pol-core, where the code lives) — now via the
+# MESH-LOCAL REGISTRY (fast push/pull, no 935MB save|ssh|load):
+#   pol node build backend
+#   docker tag prf-backend:staging 192.168.0.24:5000/prf-backend:staging
+#   docker push 192.168.0.24:5000/prf-backend:staging
+#   ssh isle-core isle-polari-deploy --pull   # pull + retag + deploy
 #
-#   isle-polari-deploy.sh [--modules <csv>]
+#   isle-polari-deploy.sh [--modules <csv>] [--pull]
 set -u
 MODULES="${POLARI_ISLE_MODULES:-islemesh}"
-[ "${1:-}" = "--modules" ] && MODULES="$2"
+REGISTRY="${ISLE_REGISTRY:-registry.isle:5000}"
+PULL=0
+while [ $# -gt 0 ]; do case "$1" in
+    --modules) MODULES="$2"; shift 2 ;;
+    --pull) PULL=1; shift ;;
+    *) shift ;;
+esac; done
 DIR="$HOME/polari-isle"
 G="\033[0;32m"; Y="\033[1;33m"; R="\033[0;31m"; N="\033[0m"
 ok(){ echo -e "${G}[ OK ]${N} $*"; }
 step(){ echo -e "${Y}==>${N} $*"; }
 die(){ echo -e "${R}[FAIL]${N} $*"; exit 1; }
 [ -d "$DIR" ] || die "no $DIR — first-time setup writes the compose (see handoff §17)"
+
+if [ "$PULL" = 1 ]; then
+    step "0/5 pull the pushed image from the mesh registry"
+    docker pull "$REGISTRY/prf-backend:staging" \
+        || die "pull failed — is $REGISTRY reachable + trusted? (isle-registry-setup on the CA host; certs.d here)"
+    docker tag "$REGISTRY/prf-backend:staging" prf-backend:staging
+    docker pull "$REGISTRY/prf-frontend:staging" 2>/dev/null \
+        && docker tag "$REGISTRY/prf-frontend:staging" prf-frontend:staging || true
+    ok "images pulled from $REGISTRY + retagged local"
+fi
 
 step "1/5 bring prf-isle up (current image, behind the agent)"
 (cd "$DIR" && POLARI_ISLE_MODULES="$MODULES" docker compose up -d) \

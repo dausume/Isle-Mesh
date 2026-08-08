@@ -161,3 +161,20 @@ load` → `ssh isle-core isle-polari-deploy`. Ran it fully:
 teardown→build→ship→deploy→verify; prf-isle came back with fresh
 code (catalog --image fix visible). This is how we deploy polari
 now — through the isle, not host ports.
+
+## 2026-08-08 — mesh-local docker registry (§10 gap #8 / mac-3)
+isle-registry-setup.sh (isle CA host): registry:2 on :5000 with an
+isle-CA-signed multi-SAN cert (registry.isle + hostname + home IP
+192.168.0.24 + isle IP 192.168.1.254 + localhost); trusted via
+/etc/docker/certs.d/<addr>/ca.crt (the isle root); DNS registry.isle
+-> 192.168.1.254 (isle-core br-mgmt, where :5000 publishes — NOT the
+agent 10.10.0.2). PROVEN push/pull round-trip both registry.isle:5000
+and 192.168.0.24:5000. This is the dev-loop accelerator + offline-
+complete + swarm-placement enabler.
+DEV LOOP now (registry, not save|ssh|load): pol-core `pol node build
+backend` -> `docker tag prf-backend:staging 192.168.0.24:5000/
+prf-backend:staging` -> `docker push ...` -> `ssh isle-core
+isle-polari-deploy --pull`. isle-polari-deploy --pull pulls+retags
+from registry.isle:5000 then deploys.
+ONE-TIME pol-core trust (Dustin sudo): mkdir -p /etc/docker/certs.d/
+192.168.0.24:5000 && cp isle-root.crt there.
