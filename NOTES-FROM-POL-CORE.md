@@ -120,3 +120,14 @@ served, graph edge drawn. --engine writes /etc/isle-mesh/apps/
 <name>/engine.json (provides + url) = polari provider-wiring
 material. undeploy tears down. Single primary service (registry
 shape) = the recorded multi-service gap.
+
+## 2026-08-08 — engine interconnect (§20.4): app deploy --engine
+push-to-polari.sh now also POSTs each /etc/isle-mesh/apps/*/
+engine.json to /api/islemesh/ingest/engine. Polari side: IsleEngine
+row + a BINDER (islemesh_engines.py) that wires known kinds to
+their consumer — business-ops/odoo -> OdooInstanceConfig.base_url
+(unit-proven: real config row written at the isle url). Unknown
+kind or absent consumer module = recorded available-but-unbound,
+named honestly (binds when the module lands). So: isle app deploy
+odoo --engine business-ops=http://<c>:8069 makes odoo a polari
+engine automatically. GET /api/islemesh/engines lists them.
