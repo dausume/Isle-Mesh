@@ -5,7 +5,10 @@
 #
 #   isle app deploy <name> --compose <file> [--service <svc>]
 #                   [--port <p>] [--domain <name>.isle]
-#                   [--protocol http] [--engine <kind>=<url-tmpl>]
+#                   [--protocol http] [--engine <kind>[@<url>]]
+#
+# --engine business-ops            → http://<container>:<port> (auto)
+# --engine business-ops@http://x   → explicit url (no <> chars)
 #
 # Pipeline (each step an existing isle capability — this verb only
 # sequences them):
@@ -113,15 +116,20 @@ else
 fi
 
 # ---- 5. engine declaration (what this app provides to polari)
+# --engine <kind>            → URL auto-derived: http://<container>:<port>
+# --engine <kind>@<url>      → explicit URL (no shell-hostile <> chars)
 if [ -n "$ENGINE" ]; then
-    KIND="${ENGINE%%=*}"; URLT="${ENGINE#*=}"
-    python3 - "$KIND" "$URLT" "$CONTAINER" "$PORT" <<'PYEOF' | sudo tee "$APPS_DIR/$NAME/engine.json" > /dev/null
+    if [ "${ENGINE#*@}" != "$ENGINE" ]; then
+        KIND="${ENGINE%%@*}"; EURL="${ENGINE#*@}"
+    else
+        KIND="$ENGINE"; EURL="http://$CONTAINER:$PORT"
+    fi
+    python3 - "$KIND" "$EURL" "$CONTAINER" <<'PYEOF' | sudo tee "$APPS_DIR/$NAME/engine.json" > /dev/null
 import json, sys
-kind, urlt, container, port = sys.argv[1:5]
-url = urlt.replace('<container>', container).replace('<port>', port)
+kind, url, container = sys.argv[1:4]
 print(json.dumps({'provides': kind, 'url': url, 'container': container}, indent=1))
 PYEOF
-    ok "engine declared: $KIND ($(sudo cat "$APPS_DIR/$NAME/engine.json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["url"])')) — polari provider wiring reads this"
+    ok "engine declared: $KIND ($EURL) — polari provider wiring reads this"
 fi
 
 echo
