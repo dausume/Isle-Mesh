@@ -143,3 +143,21 @@ container+cert+DNS, fully automatic. app-deploy gained --image
 isle app deploy; polari-app → shared-shell launcher build+apt;
 polari-module → module deb. Consumers of both proven variants, one
 front door.
+
+## 2026-08-08 — isle-oriented dev route + full teardown (§25.2/3)
+Two host capabilities (in /usr/local/bin, sourced in isle-cli/
+scripts):
+- isle-polari-teardown [--keep-data|--apps-only]: FULL reproducible
+  teardown — store apps (compose down + unregister + cert/DNS drop
+  + rm apps dir), prf-isle (compose down -v), polari.isle/api
+  deregistered, pusher timer disabled, agent reloaded. Device-level
+  (agent, trust-page, CA, sample) correctly persist. PROVEN clean.
+- isle-polari-deploy [--modules csv]: deploy/redeploy polari on the
+  isle — compose up (POLARI_ISLE_MODULES env), register both
+  domains (leaf hook), DNS, pusher, verify health+web. PROVEN.
+THE DEV LOOP (main deployment route going forward): on pol-core
+`pol node build backend` → `docker save | ssh isle-core docker
+load` → `ssh isle-core isle-polari-deploy`. Ran it fully:
+teardown→build→ship→deploy→verify; prf-isle came back with fresh
+code (catalog --image fix visible). This is how we deploy polari
+now — through the isle, not host ports.
