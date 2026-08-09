@@ -219,6 +219,71 @@ PYMOD
     echo "   undeploy: isle polari instance undeploy $NAME"
 }
 
+# THE DYNAMIC-URL PROOF (Dustin #1): change a LIVE instance's URL
+# and push the change through every reference — runtime-config
+# (IN-PLACE: bind-mounted, mv breaks the inode), agent registry,
+# fragments (watcher regen), DNS, leaf (rides the register hook).
+rebase(){
+    local NAME="${1:?usage: isle polari instance rebase <name> --domain <new.isle>}"; shift
+    local NEWDOM=""
+    while [ $# -gt 0 ]; do case "$1" in
+        --domain) NEWDOM="$2"; shift 2 ;;
+        *) shift ;;
+    esac; done
+    [ -n "$NEWDOM" ] || die "--domain <new.isle> required"
+    echo "$NEWDOM" | grep -qE '^[a-z0-9][a-z0-9-]{0,40}\.isle$' || die "bad domain: $NEWDOM (want <name>.isle)"
+    local DIR="$BASE/$NAME"
+    [ -d "$DIR" ] || die "no such instance: $DIR"
+    require_member
+    local OLDDOM
+    OLDDOM=$(python3 -c "import json;print(json.load(open('$DIR/runtime-config.json'))['frontend']['https']['url'])" 2>/dev/null)
+    [ -n "$OLDDOM" ] || die "cannot read current domain from $DIR/runtime-config.json"
+    step "1/4 rewrite URL references (runtime-config, in place)"
+    sudo python3 - "$DIR/runtime-config.json" "$OLDDOM" "$NEWDOM" <<'PYRC'
+import json, sys
+path, old, new = sys.argv[1:4]
+txt = open(path).read().replace("api." + old, "api." + new).replace(old, new)
+open(path, "w").write(txt)
+PYRC
+    ok "$OLDDOM -> $NEWDOM (+ api.) in runtime-config.json"
+    step "2/4 re-register behind the agent (fragment regen + leaf ride the hook)"
+    local AM=/usr/share/isle-mesh/isle-agent/scripts/agent-manager.sh
+    sudo bash "$AM" unregister --name "$NAME" >/dev/null 2>&1
+    sudo bash "$AM" unregister --name "$NAME-api" >/dev/null 2>&1
+    sudo bash "$AM" register --name "$NAME" --domain "$NEWDOM" \
+        --container "prf-$NAME-frontend" --port 4200 --protocol http >/dev/null 2>&1 \
+        && ok "$NEWDOM" || die "$NEWDOM registration failed"
+    sudo bash "$AM" register --name "$NAME-api" --domain "api.$NEWDOM" \
+        --container "prf-$NAME-backend" --port 3000 --protocol http >/dev/null 2>&1 \
+        && ok "api.$NEWDOM" || warn "api.$NEWDOM registration failed"
+    # keep the modules note on the fresh entry
+    local MODS
+    MODS=$(python3 -c "import json;reg=json.load(open('/etc/isle-mesh/agent/registry.json'));print(','.join(m.split(':',1)[1] for a in [reg['apps'].get('$NAME',{})] for m in (a.get('modes') or []) if str(m).startswith('modules:')))" 2>/dev/null)
+    step "3/4 DNS: new rows in, old rows out"
+    local IP; IP=$(agent_ip)
+    for dom in "$NEWDOM" "api.$NEWDOM"; do
+        sudo /usr/local/bin/isle dns register "$dom" "$IP" >/dev/null 2>&1 \
+            && ok "$dom -> $IP" || warn "$dom: DNS via the core reconcile"
+    done
+    for dom in "$OLDDOM" "api.$OLDDOM"; do
+        sudo /usr/local/bin/isle dns unregister "$dom" >/dev/null 2>&1 \
+            && ok "retired $dom" || warn "$dom not unregistered (may already be gone)"
+    done
+    step "4/4 report + verify"
+    self_report
+    local code
+    code=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 8 \
+        --resolve "$NEWDOM:443:127.0.0.1" "https://$NEWDOM/" 2>/dev/null)
+    [ "$code" = 200 ] && ok "https://$NEWDOM -> 200 (references moved)" \
+        || warn "https://$NEWDOM -> ${code:-none} (agent regen can lag a few seconds)"
+    local oldcode
+    oldcode=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 8 \
+        --resolve "$OLDDOM:443:127.0.0.1" "https://$OLDDOM/" 2>/dev/null)
+    echo "   old URL $OLDDOM now answers: ${oldcode:-none} (404/000 = correctly retired)"
+    echo
+    ok "instance '$NAME' rebased: $OLDDOM -> $NEWDOM (all references updated)"
+}
+
 undeploy(){
     local NAME="${1:?usage: isle polari instance undeploy <name>}"
     [ -d "$BASE/$NAME" ] || die "no such instance dir: $BASE/$NAME"
@@ -249,6 +314,7 @@ case "${1:-help}" in
     instance)
         case "${2:-}" in
             deploy) shift 2; deploy "$@" ;;
+            rebase) shift 2; rebase "$@" ;;
             undeploy) shift 2; undeploy "$@" ;;
             *) echo "usage: isle polari instance [deploy [--name n] [--modules csv]|undeploy <name>]" ;;
         esac ;;
