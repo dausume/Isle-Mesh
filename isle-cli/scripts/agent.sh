@@ -160,6 +160,18 @@ case $COMMAND in
         exec "${AGENT_MANAGER}" start "$@"
         ;;
 
+    ensure)
+        # idempotent: bring the agent up if it is not already running
+        # (handoff §32 — installing the store ensures an agent so the
+        # device can host). Safe to call repeatedly.
+        if docker ps --format "{{.Names}}" | grep -qE "^isle(-vlan)?-agent$"; then
+            echo "[isle agent] already running"
+            exit 0
+        fi
+        check_agent_available
+        exec "${AGENT_MANAGER}" start "$@"
+        ;;
+
     stop)
         check_agent_available
         exec "${AGENT_MANAGER}" stop "$@"
