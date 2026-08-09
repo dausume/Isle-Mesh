@@ -79,6 +79,10 @@ publish() {
     sudo GNUPGHOME="$GNUPG" gpg --batch --pinentry-mode loopback --passphrase "" --yes --clearsign -o "$REPO/InRelease" "$REPO/Release" \
         || die "InRelease signing failed"
     sudo GNUPGHOME="$GNUPG" gpg --batch --yes --export -o "$REPO/$KEYRING_NAME"
+    # serve the remote bootstrap + the root CA next to the debs (the
+    # §5b one-flow: a fresh remote fetches these first)
+    [ -f "$SCRIPT_DIR/isle-bootstrap.sh" ] && sudo cp "$SCRIPT_DIR/isle-bootstrap.sh" "$REPO/"
+    [ -f "$CA" ] && sudo cp "$CA" "$REPO/isle-root.crt"
     sudo chmod -R a+rX "$REPO"
     ok "repo indexed + signed ($(ls "$REPO"/*.deb | wc -l) debs)"
 
