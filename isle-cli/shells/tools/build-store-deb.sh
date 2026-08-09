@@ -112,10 +112,11 @@ if [ -n "$ISLE" ]; then
         "$ISLE" trust install --yes 2>/dev/null || true
     fi
     if docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^isle-vlan-agent$'; then
-        echo "==> agent already running — this device can host apps"
+        echo "==> agent running — this device is an isle member; the store can install here"
     else
-        echo "   to HOST mesh-apps here (brings up an agent — touches"
-        echo "   network config, asks first):  sudo isle onboard --host"
+        echo "   NOTE: installing apps from the store REQUIRES this device"
+        echo "   to be an isle member (a running agent). Join when ready"
+        echo "   (touches network config, asks first):  sudo isle onboard --host"
     fi
     echo "==> ready — open 'Isle App Store' from your menu"
 else

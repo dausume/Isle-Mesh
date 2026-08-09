@@ -53,15 +53,16 @@ for s in p["steps"]: print("  $ %s" % s)
         NAME="${2:?usage: isle store install <name>}"
         RESP=$(api_get "/api/islemesh/catalog/$NAME")
         echo "$RESP" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("ok") else 1)' || { echo "no such entry: $NAME"; exit 1; }
-        # HONEST TIER GATE: a mesh-app is a container served by THIS
-        # device's agent — without one the deploy half-runs (orphan
-        # container, no cert/DNS/proxy) and then claims success.
-        KIND=$(echo "$RESP" | python3 -c 'import json,sys; print(json.load(sys.stdin)["entry"]["kind"])' 2>/dev/null)
-        if [ "$KIND" = "mesh-app" ] && ! docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^isle-vlan-agent$'; then
-            echo -e "${R}[FAIL]${N} '$NAME' is a mesh-app (a container) — this device has no isle agent to host it."
-            echo "       You can already REACH every .isle app from here."
-            echo "       To HOST apps on this device (the agent tier — touches network config):"
-            echo "         sudo isle onboard --host      # best-effort agent; real hosting = isle join"
+        # MEMBERSHIP GATE (Dustin: the whole point) — the store only
+        # installs on a device that is a member of a valid isle: a
+        # running agent connecting it. EVERY kind, not just mesh-apps
+        # (a mesh-app would half-deploy; a polari-app on a non-member
+        # is a launcher into an isle this device isn't part of).
+        if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^isle-vlan-agent$'; then
+            echo -e "${R}[FAIL]${N} this device has no isle agent — it is not a member of an isle."
+            echo "       The store installs apps ONTO isle members only."
+            echo "       Join first (brings up the agent — touches network config):"
+            echo "         sudo isle onboard --host      # best-effort today; real join = isle join"
             exit 1
         fi
         echo -e "${Y}Install '$NAME' — will run on THIS host:${N}"

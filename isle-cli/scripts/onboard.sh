@@ -116,8 +116,9 @@ if [ "$WANT_HOST" = 1 ]; then
         echo "     (reach + native-app install still work; run 'isle create'/'isle join' to host)"
     fi
 else
-    echo "   skipped (reach + native-app install don't need it)."
-    echo "   to HOST mesh-apps on this device later:  sudo isle onboard --host"
+    echo "   skipped — but NOTE: installing apps from the store on this"
+    echo "   device REQUIRES it (membership = a running agent)."
+    echo "   Join when ready:  sudo isle onboard --host"
 fi
 
 echo
