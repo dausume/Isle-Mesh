@@ -33,6 +33,7 @@ const commands = {
   trust:    { script: 'trust.sh',    desc: 'CA trust install-step (status/install/cert)' },
   certs:    { script: 'certs.sh',    desc: 'Per-domain leaf issuance from the isle CA' },
   store:    { script: 'store.sh',    desc: 'The general isle app store (list/show/install)' },
+  'apt-repo': { script: 'apt-repo.sh', desc: 'Apt-on-mesh: signed deb repo at apt.isle (publish/enable/status)' },
   shell:    { script: 'shell.sh',    desc: 'Install polari/isle apps as native shells', docker: true },
   module:   { script: 'module.sh',   desc: 'Install polari modules into the instance' },
   security: { script: 'security.sh', desc: 'ISP visibility and network hardening' },
