@@ -55,6 +55,13 @@ if [ -z "$COMPOSE" ] && [ -n "$IMAGE" ]; then
 fi
 [ -n "$COMPOSE" ] && [ -f "$COMPOSE" ] || die "--compose <file> or --image <ref> required"
 
+# HONEST TIER GATE: deploying here means serving behind THIS
+# device's agent — without one the pipeline half-runs (container up,
+# leaf/DNS fail, nothing proxies) and then reports success.
+docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^isle-vlan-agent$' \
+    || die "no isle agent on this device — mesh-apps deploy behind a local agent.
+       To host here: sudo isle onboard --host   (real hosting = isle join)"
+
 # ---- parse services (first service = default primary)
 mapfile -t SERVICES < <(python3 - "$COMPOSE" <<'PYEOF'
 import sys, yaml

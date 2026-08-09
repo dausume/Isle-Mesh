@@ -16,7 +16,7 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 API="${POLARI_ISLE_API:-https://api.polari.isle}"
 CURL="curl -skf --max-time 8"
-G="\033[0;32m"; Y="\033[1;33m"; C="\033[0;36m"; N="\033[0m"
+G="\033[0;32m"; Y="\033[1;33m"; C="\033[0;36m"; R="\033[0;31m"; N="\033[0m"
 
 api_get() { $CURL "$API$1" 2>/dev/null && return 0; $CURL --resolve api.polari.isle:443:127.0.0.1 "$API$1" 2>/dev/null; }
 
@@ -53,6 +53,17 @@ for s in p["steps"]: print("  $ %s" % s)
         NAME="${2:?usage: isle store install <name>}"
         RESP=$(api_get "/api/islemesh/catalog/$NAME")
         echo "$RESP" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("ok") else 1)' || { echo "no such entry: $NAME"; exit 1; }
+        # HONEST TIER GATE: a mesh-app is a container served by THIS
+        # device's agent — without one the deploy half-runs (orphan
+        # container, no cert/DNS/proxy) and then claims success.
+        KIND=$(echo "$RESP" | python3 -c 'import json,sys; print(json.load(sys.stdin)["entry"]["kind"])' 2>/dev/null)
+        if [ "$KIND" = "mesh-app" ] && ! docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^isle-vlan-agent$'; then
+            echo -e "${R}[FAIL]${N} '$NAME' is a mesh-app (a container) — this device has no isle agent to host it."
+            echo "       You can already REACH every .isle app from here."
+            echo "       To HOST apps on this device (the agent tier — touches network config):"
+            echo "         sudo isle onboard --host      # best-effort agent; real hosting = isle join"
+            exit 1
+        fi
         echo -e "${Y}Install '$NAME' — will run on THIS host:${N}"
         echo "$RESP" | python3 -c 'import json,sys; [print("  $ "+s) for s in json.load(sys.stdin)["entry"]["install_plan"]["steps"]]'
         if [ "${3:-}" != "--yes" ]; then
