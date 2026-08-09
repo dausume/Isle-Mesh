@@ -160,6 +160,18 @@ check_prerequisites() {
         exit 1
     fi
     log_success "Running as root"
+
+    # A host firewall silently eats the discovery beacon (UDP 7878).
+    # Opening it is part of what joining MEANS, and join is an
+    # explicit sudo action — narrate and allow.
+    if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "^Status: active"; then
+        if ! ufw status 2>/dev/null | grep -q "${DISCOVERY_PORT}/udp"; then
+            log_info "ufw is active — allowing UDP ${DISCOVERY_PORT} (isle discovery beacon)"
+            ufw allow "${DISCOVERY_PORT}/udp" comment 'isle discovery beacon' >/dev/null 2>&1 \
+                && log_success "ufw: ${DISCOVERY_PORT}/udp allowed" \
+                || log_warning "could not add ufw rule — beacon may not arrive"
+        fi
+    fi
 }
 
 # Guard: refuse if already in core or remote mode
@@ -237,6 +249,22 @@ detect_interface() {
                 exit 1
             fi
         else
+            # Strategy 1.5: a WIRED NIC already holding an isle (10.x)
+            # lease IS the isle cable in the lease-cabled deployment
+            local leased="" l_iface l_ip
+            while IFS= read -r line; do
+                l_iface=$(echo "$line" | awk '{print $1}')
+                l_ip=$(echo "$line" | awk '{print $3}')
+                case "$l_iface" in lo|docker*|veth*|br-*|isle-*|virbr*|wl*) continue ;; esac
+                [[ -d "/sys/class/net/$l_iface/wireless" ]] && continue
+                [[ "$l_ip" == 10.* ]] && leased="$leased $l_iface"
+            done < <(ip -br -4 addr show)
+            leased=$(echo "$leased" | xargs)
+            if [[ $(echo "$leased" | wc -w) -eq 1 && -n "$leased" ]]; then
+                INTERFACE="$leased"
+                log_success "Detected isle-leased interface: $INTERFACE (wired, 10.x lease)"
+            else
+
             # Strategy 2: Fallback to default route interface
             # This works when the isle cable is the main connection
             INTERFACE=$(ip route show default | awk '{print $5}' | head -n1)
@@ -253,6 +281,7 @@ detect_interface() {
             fi
             log_success "Using default route interface: $INTERFACE"
             log_warning "No dedicated isle cable detected — using main network interface"
+            fi
         fi
     fi
 
@@ -376,6 +405,8 @@ discover_isle() {
     if DISCOVERY_PORT="$DISCOVERY_PORT" TIMEOUT="$TIMEOUT" OUTPUT_FILE="$DISCOVERY_FILE" \
         bash "$listener_script"; then
         log_success "Isle discovered!"
+    elif derive_isle_from_lease; then
+        log_success "Isle derived from the interface's DHCP lease (beacon not needed)"
     else
         log_error "Failed to discover an isle"
         echo ""
@@ -403,8 +434,42 @@ discover_isle() {
     validate_no_subnet_conflict
 }
 
+# FALLBACK discovery: if the chosen interface already holds an isle
+# DHCP lease (a 10.x address from the isle router — how our deployed
+# remotes are cabled), everything the beacon would tell us is already
+# ON the interface: router = gateway, subnet = the lease's network,
+# vlan = the 10.VLAN.0.x convention. The beacon path needs socat on
+# the router AND an open host firewall; the lease is direct evidence.
+derive_isle_from_lease() {
+    local ip_cidr gw subnet vlan
+    ip_cidr=$(ip -4 -o addr show "$INTERFACE" 2>/dev/null | awk '{print $4; exit}')
+    [[ "$ip_cidr" == 10.* ]] || return 1
+    subnet=$(ip route show dev "$INTERFACE" proto kernel 2>/dev/null | awk '{print $1; exit}')
+    [[ -n "$subnet" ]] || return 1
+    gw=$(ip route show dev "$INTERFACE" 2>/dev/null | awk '/via/ {print $3; exit}')
+    [[ -n "$gw" ]] || gw="${subnet%.*/*}.1"
+    # sanity: the isle router answers DNS on :53
+    if command -v dig &>/dev/null; then
+        timeout 3 dig +short "@${gw}" openwrt.isle >/dev/null 2>&1 || true
+    fi
+    vlan=$(echo "$gw" | cut -d. -f2)
+    mkdir -p "$(dirname "$DISCOVERY_FILE")"
+    cat > "$DISCOVERY_FILE" <<EOF
+{"isle_name":"isle","vlan_id":${vlan:-10},"router_ip":"${gw}","dhcp_range":"${subnet}"}
+EOF
+    LEASE_DERIVED=1
+    log_info "  lease: ${ip_cidr} on ${INTERFACE}, router ${gw}, subnet ${subnet}"
+    return 0
+}
+
 # Check that the isle subnet doesn't conflict with existing interface IPs
 validate_no_subnet_conflict() {
+    # Lease-derived discovery: the host's own lease on this subnet IS
+    # the evidence we joined from — expected, not a conflict.
+    if [[ "${LEASE_DERIVED:-0}" == "1" ]]; then
+        log_success "Host already holds an isle lease on $INTERFACE (lease-derived join — expected)"
+        return 0
+    fi
     local isle_subnet
     isle_subnet=$(echo "$DHCP_RANGE" | cut -d'/' -f1 | sed 's/\.[0-9]*$//')  # e.g. "10.10.0"
 

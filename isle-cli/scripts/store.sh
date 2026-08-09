@@ -58,7 +58,7 @@ for s in p["steps"]: print("  $ %s" % s)
         # running agent connecting it. EVERY kind, not just mesh-apps
         # (a mesh-app would half-deploy; a polari-app on a non-member
         # is a launcher into an isle this device isn't part of).
-        if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^isle-vlan-agent$'; then
+        if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -qE '^isle-(vlan|remote)-agent$'; then
             echo -e "${R}[FAIL]${N} this device has no isle agent — it is neither an isle core nor a member."
             echo "       The store installs apps onto isle devices only. Either:"
             echo "         make THIS device its own isle (single-device isles are valid):"

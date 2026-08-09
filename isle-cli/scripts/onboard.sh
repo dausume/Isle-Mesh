@@ -106,14 +106,23 @@ echo "   → 'isle store install <polari-app>' now builds a native launcher here
 # ---- 5. host tier (optional) ----
 step "5/5 host tier"
 if [ "$WANT_HOST" = 1 ]; then
-    warn "host tier brings up an isle agent — its installer can MODIFY"
-    warn "host network config (wpa_supplicant/networkd handoff, mDNS)."
+    warn "host tier makes this device an isle member — this touches"
+    warn "network config (macvlan on the isle NIC, firewall, split-DNS)."
     warn "Do this at the machine, not over the connection it may reset."
-    if isle agent ensure 2>/dev/null; then
-        ok "agent up — this device can HOST mesh-apps"
+    if docker ps --format '{{.Names}}' 2>/dev/null | grep -qE '^isle-(vlan|remote)-agent$'; then
+        ok "agent already running — this device is an isle member"
+    elif [ "$(cat /etc/isle-mesh/agent/agent.mode 2>/dev/null)" = "core" ]; then
+        # a core that lost its agent: bring it back up
+        isle agent ensure 2>/dev/null && ok "core agent up" \
+            || warn "could not restart the core agent (isle agent ensure)"
     else
-        warn "could not bring up an agent — hosting needs the isle join/router setup"
-        echo "     (reach + native-app install still work; run 'isle create'/'isle join' to host)"
+        # a remote: the REAL join (beacon or lease-derived discovery,
+        # macvlan on the isle NIC, remote agent with its own DHCP lease)
+        if [ "$(id -u)" = 0 ]; then
+            isle join || warn "join did not complete — see: isle join --help"
+        else
+            sudo isle join || warn "join did not complete — see: isle join --help"
+        fi
     fi
 else
     echo "   skipped — but NOTE: installing apps from the store on this"

@@ -111,7 +111,7 @@ if [ -n "$ISLE" ]; then
         [ -f /etc/isle-mesh/ca/isle-root.crt ] || cp "$CA" /etc/isle-mesh/ca/isle-root.crt
         "$ISLE" trust install --yes 2>/dev/null || true
     fi
-    if docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^isle-vlan-agent$'; then
+    if docker ps --format '{{.Names}}' 2>/dev/null | grep -qE '^isle-(vlan|remote)-agent$'; then
         echo "==> agent running — this device is an isle member; the store can install here"
     else
         echo "   NOTE: installing apps from the store REQUIRES this device to"

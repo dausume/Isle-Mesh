@@ -45,6 +45,7 @@ broadcast_discovery() {
     local dev
     dev="$(ip -4 -o addr show 2>/dev/null | awk -v ip="${ROUTER_IP}/" 'index($4, ip)==1 {print $2; exit}')"
 
+    local rc=1
     case "$tool" in
         socat)
             if [ -n "$dev" ]; then
@@ -52,13 +53,21 @@ broadcast_discovery() {
             else
                 echo "$message" | socat - UDP4-DATAGRAM:255.255.255.255:${DISCOVERY_PORT},broadcast 2>/dev/null
             fi
+            rc=$?
             ;;
         nc)
             echo "$message" | nc -u -b 255.255.255.255 ${DISCOVERY_PORT} 2>/dev/null
+            rc=$?
             ;;
     esac
 
-    log_msg "Broadcasted on ${dev:-default}: $message"
+    # log HONESTLY — a "Broadcasted" line with a dead sender hid a
+    # never-working beacon (socat absent → exit 127, log said success)
+    if [ "$rc" -eq 0 ]; then
+        log_msg "Broadcasted on ${dev:-default}: $message"
+    else
+        log_msg "ERROR: broadcast FAILED (rc=$rc, tool=$tool, dev=${dev:-default}) — is $tool installed?"
+    fi
 }
 
 # Main loop
