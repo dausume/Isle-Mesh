@@ -123,12 +123,21 @@ sudo bash "$AGENT_MANAGER" register --name "$NAME" --domain "$DOMAIN" \
 
 # ---- 4. router DNS (agent's isle IP)
 AGENT_IP=$(sudo docker inspect isle-vlan-agent --format '{{(index .NetworkSettings.Networks "isle-br-0").IPAddress}}' 2>/dev/null)
+if [ -z "${AGENT_IP:-}" ]; then
+    # remote member: the REMOTE agent's macvlan DHCP lease is the
+    # address other devices reach this app through
+    AGENT_IP=$(sudo docker exec isle-remote-agent ip -4 -o addr 2>/dev/null \
+        | awk '$2 != "lo" && $4 !~ /^172\.20\./ {split($4, a, "/"); print a[1]; exit}')
+fi
+DNS_OK=0
 if [ -n "${AGENT_IP:-}" ]; then
-    sudo /usr/local/bin/isle dns register "$DOMAIN" "$AGENT_IP" >/dev/null 2>&1 \
-        && ok ".isle DNS: $DOMAIN -> $AGENT_IP" \
-        || warn "DNS registration failed (router down?) — isle dns register $DOMAIN $AGENT_IP"
+    if sudo /usr/local/bin/isle dns register "$DOMAIN" "$AGENT_IP" >/dev/null 2>&1; then
+        ok ".isle DNS: $DOMAIN -> $AGENT_IP"; DNS_OK=1
+    else
+        warn "router DNS not registrable from this device — $DOMAIN rides the join-protocol (mDNS) instead"
+    fi
 else
-    warn "agent has no isle-br-0 IP — DNS skipped"
+    warn "no agent IP found — DNS skipped"
 fi
 
 # ---- 5. engine declaration (what this app provides to polari)
@@ -149,5 +158,31 @@ PYEOF
 fi
 
 echo
-ok "'$NAME' is an isle app: https://$DOMAIN (cert issued, DNS live)"
+if [ "$DNS_OK" = 1 ]; then
+    ok "'$NAME' is an isle app: https://$DOMAIN (cert issued, DNS live)"
+else
+    ok "'$NAME' deploys behind this device's agent (${AGENT_IP:-ip pending}) — https://$DOMAIN once the router's join-protocol maps it"
+fi
 echo "   undeploy: isle app undeploy $NAME"
+
+# ---- 6. self-report: tell the isle's polari what THIS device runs
+# (instance tracking — how many duplicates exist, on which devices)
+REG=/etc/isle-mesh/agent/registry.json
+if [ -f "$REG" ]; then
+    RPT=$(mktemp)
+    python3 - "$(hostname)" "$REG" > "$RPT" 2>/dev/null <<'PYEOF'
+import json, sys
+host, reg = sys.argv[1], sys.argv[2]
+print(json.dumps({'device': host, 'registry': json.load(open(reg))}))
+PYEOF
+    if [ -s "$RPT" ] && { curl -skf --max-time 8 -X POST -H "Content-Type: application/json" \
+            --data-binary @"$RPT" https://api.polari.isle/api/islemesh/ingest/registry >/dev/null 2>&1 \
+        || curl -skf --max-time 8 --resolve api.polari.isle:443:127.0.0.1 -X POST \
+            -H "Content-Type: application/json" \
+            --data-binary @"$RPT" https://api.polari.isle/api/islemesh/ingest/registry >/dev/null 2>&1; }; then
+        ok "instances reported to the isle topology"
+    else
+        warn "topology report skipped (api.polari.isle unreachable)"
+    fi
+    rm -f "$RPT"
+fi
