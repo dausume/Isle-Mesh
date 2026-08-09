@@ -26,6 +26,9 @@ services:
       - VLAN_ID=${VLAN_ID}
       - ROUTER_IP=${ROUTER_IP}
       - ISLE_HOSTNAME=${ISLE_HOSTNAME}
+      # lets the entrypoint find the macvlan interface by MAC —
+      # docker's eth ordering across two networks is not stable
+      - VIRTUAL_MAC=${VIRTUAL_MAC}
 
     volumes:
       # Initial/template nginx config (read-only source)

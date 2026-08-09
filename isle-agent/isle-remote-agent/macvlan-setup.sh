@@ -76,10 +76,17 @@ create_network() {
     log_info "Creating macvlan network '$NETWORK_NAME' on interface '$interface'..."
     log_info "  Subnet: $subnet"
 
+    # Confine docker-IPAM's TRANSIENT static assignment (the entrypoint
+    # flushes it and DHCPs a real lease) to the subnet's top /30 —
+    # letting IPAM roam the whole subnet self-assigned the core
+    # agent's .2 on a second host: an active IP conflict.
+    local base
+    base=$(echo "$subnet" | cut -d/ -f1 | cut -d. -f1-3)
     docker network create \
         --driver macvlan \
         --opt parent="$interface" \
         --subnet "$subnet" \
+        --ip-range "${base}.252/30" \
         "$NETWORK_NAME"
 
     log_success "Macvlan network created"

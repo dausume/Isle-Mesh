@@ -58,7 +58,7 @@ fi
 # HONEST TIER GATE: deploying here means serving behind THIS
 # device's agent — without one the pipeline half-runs (container up,
 # leaf/DNS fail, nothing proxies) and then reports success.
-docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^isle-vlan-agent$' \
+docker ps --format '{{.Names}}' 2>/dev/null | grep -qE '^isle-(vlan|remote)-agent$' \
     || die "no isle agent on this device — mesh-apps deploy behind a local agent.
        To host here: sudo isle onboard --host   (real hosting = isle join)"
 

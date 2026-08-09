@@ -20,17 +20,45 @@ echo "  VLAN ID:   ${VLAN_ID:-unknown}"
 echo "  Router IP: ${ROUTER_IP:-unknown}"
 echo ""
 
+# --- Step 0: Find the macvlan (isle-facing) interface ---
+# Docker's interface ORDER is not stable across attached networks —
+# eth0 can be the INTERNAL bridge (172.20.x), which is exactly how
+# DHCP silently ran on the wrong interface while the macvlan kept
+# docker-IPAM's static self-assignment (it collided with the core
+# agent's .2). Match VIRTUAL_MAC when given; else the non-172.20 one.
+MACVLAN_IF=""
+if [ -n "${VIRTUAL_MAC:-}" ]; then
+    for d in /sys/class/net/*; do
+        n=$(basename "$d"); [ "$n" = "lo" ] && continue
+        [ "$(cat "$d/address" 2>/dev/null)" = "$VIRTUAL_MAC" ] && { MACVLAN_IF="$n"; break; }
+    done
+fi
+if [ -z "$MACVLAN_IF" ]; then
+    for d in /sys/class/net/*; do
+        n=$(basename "$d"); [ "$n" = "lo" ] && continue
+        ip -4 addr show "$n" 2>/dev/null | grep -q "inet 172\.20\." && continue
+        MACVLAN_IF="$n"; break
+    done
+fi
+MACVLAN_IF="${MACVLAN_IF:-eth0}"
+echo "  Macvlan interface: ${MACVLAN_IF}"
+echo ""
+
 # --- Step 1: Get DHCP lease via macvlan interface ---
 echo "[1/6] Obtaining DHCP lease..."
 
+# Drop docker-IPAM's static self-assignment FIRST: each docker host
+# picks it independently on the shared subnet, so keeping it risks an
+# ACTIVE IP CONFLICT (the router's DHCP is the only real arbiter).
+ip addr flush dev "$MACVLAN_IF" 2>/dev/null || true
+
 # udhcpc is built into Alpine's busybox
-# eth0 should be the macvlan interface connected to the VLAN
-if udhcpc -i eth0 -n -q -t 10 -T 3 2>&1; then
-    VLAN_IP=$(ip -4 addr show eth0 | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
+if udhcpc -i "$MACVLAN_IF" -n -q -t 10 -T 3 2>&1; then
+    VLAN_IP=$(ip -4 -o addr show dev "$MACVLAN_IF" 2>/dev/null | awk '{split($4,a,"/"); print a[1]; exit}') || true
     echo "  DHCP lease obtained: ${VLAN_IP}"
 else
-    echo "  WARNING: DHCP failed on eth0, continuing anyway..."
-    echo "  The container may not have VLAN connectivity."
+    echo "  ERROR: DHCP failed on ${MACVLAN_IF} — no isle lease."
+    echo "  Refusing a static fallback (it collides across hosts)."
     VLAN_IP="unknown"
 fi
 echo ""
@@ -64,7 +92,7 @@ host-name=$(hostname)
 domain-name=local
 use-ipv4=yes
 use-ipv6=no
-allow-interfaces=eth0
+allow-interfaces=${MACVLAN_IF}
 enable-dbus=yes
 
 [publish]
@@ -117,7 +145,7 @@ host-name=$(hostname)
 domain-name=local
 use-ipv4=yes
 use-ipv6=no
-allow-interfaces=eth0
+allow-interfaces=${MACVLAN_IF}
 enable-dbus=yes
 
 [publish]
@@ -157,7 +185,7 @@ publish_mdns_domains() {
         if [ -f "$registry" ] && [ "$VLAN_IP" != "unknown" ]; then
             # Get current VLAN IP (may change on DHCP renewal)
             local current_ip
-            current_ip=$(ip -4 addr show eth0 | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || echo "$VLAN_IP")
+            current_ip=$(ip -4 -o addr show dev "$MACVLAN_IF" 2>/dev/null | awk '{split($4,a,"/"); print a[1]; exit}'); [ -n "$current_ip" ] || current_ip="$VLAN_IP"
 
             # Extract .local domains from registry
             local domains
