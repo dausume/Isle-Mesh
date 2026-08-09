@@ -87,9 +87,11 @@ if [ "$(norm "$GOT")" != "$(norm "$FP")" ]; then
     die "CA FINGERPRINT MISMATCH — refusing to trust. Verify the fingerprint with the isle's operator."
 fi
 ok "fingerprint matches — trusting this isle"
-mkdir -p /etc/isle-mesh/ca
-cp "$TMP" /etc/isle-mesh/ca/isle-root.crt
-cp "$TMP" /usr/local/share/ca-certificates/isle-root.crt
+mkdir -p /etc/isle-mesh/ca /usr/local/share/ca-certificates
+# install -m: a plain cp of the mktemp file keeps mode 600 —
+# root-only, which broke every later unprivileged CA read (econ-core)
+install -m 644 "$TMP" /etc/isle-mesh/ca/isle-root.crt
+install -m 644 "$TMP" /usr/local/share/ca-certificates/isle-root.crt
 update-ca-certificates >/dev/null 2>&1 && ok "system store: trusted" || warn "update-ca-certificates failed"
 rm -f "$TMP"
 
