@@ -52,8 +52,10 @@ echo "[1/6] Obtaining DHCP lease..."
 # ACTIVE IP CONFLICT (the router's DHCP is the only real arbiter).
 ip addr flush dev "$MACVLAN_IF" 2>/dev/null || true
 
-# udhcpc is built into Alpine's busybox
-if udhcpc -i "$MACVLAN_IF" -n -q -t 10 -T 3 2>&1; then
+# udhcpc is built into Alpine's busybox. Send our hostname so the
+# router's lease table self-describes (dns-reconcile on the core
+# maps device → agent IP by it; without it the lease shows '*').
+if udhcpc -i "$MACVLAN_IF" -n -q -t 10 -T 3 -x hostname:"$(hostname)" 2>&1; then
     VLAN_IP=$(ip -4 -o addr show dev "$MACVLAN_IF" 2>/dev/null | awk '{split($4,a,"/"); print a[1]; exit}') || true
     echo "  DHCP lease obtained: ${VLAN_IP}"
 else
