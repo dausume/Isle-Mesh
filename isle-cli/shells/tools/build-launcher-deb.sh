@@ -115,6 +115,7 @@ Exec=/usr/bin/polari-app-shell --config $SHARE/polari-shell.json
 $ICON_LINE
 Terminal=false
 Categories=Network;
+StartupWMClass=$PKG
 EOF
 
 # ---- control: Depends on the shared runtime ----

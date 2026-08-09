@@ -44,6 +44,7 @@ jpackage \
     --main-class org.polari.shell.desktop.DesktopMain \
     --java-options '-DGDK_BACKEND=x11' \
     --java-options '--add-exports=java.desktop/sun.awt=ALL-UNNAMED' \
+    --java-options '--add-opens=java.desktop/sun.awt.X11=ALL-UNNAMED' \
     --dest "$IMG"
 # The app-image is $IMG/polari-shell/ (bin/polari-shell + lib/runtime)
 

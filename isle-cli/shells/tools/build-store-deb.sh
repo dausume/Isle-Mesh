@@ -87,6 +87,7 @@ Exec=/usr/bin/polari-app-shell --config $SHARE/polari-shell.json
 Icon=$STORE_ICON
 Terminal=false
 Categories=Network;System;
+StartupWMClass=$PKG
 EOF
 
 # ---- postinst: trust seed ONLY. The agent tier is an EXPLICIT
