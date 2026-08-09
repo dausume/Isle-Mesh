@@ -35,26 +35,49 @@ esac; done
 [ -n "$FP" ] || die "usage: sudo bash isle-bootstrap.sh --fingerprint <CA sha256> [--core <ip>] [--host]
 (the fingerprint comes from the core's 'isle core-install' output — verify it out-of-band)"
 [ "$(id -u)" = 0 ] || die "run with sudo (installs packages + trust)"
-command -v curl >/dev/null || die "curl required"
 command -v openssl >/dev/null || die "openssl required"
+command -v curl >/dev/null || command -v wget >/dev/null \
+    || die "curl or wget required"
 
 norm(){ echo "$1" | tr -d ': ' | tr '[:lower:]' '[:upper:]'; }
 
-resolve_opt(){ # $1 domain — pin to --core when .isle DNS is absent
-    if ! getent hosts "$1" >/dev/null 2>&1 && [ -n "$CORE" ]; then
-        echo "--resolve $1:443:$CORE"
+# fetch INSECURELY (pre-trust — the CA we fetch is what gets
+# fingerprint-verified); curl preferred, wget on fresh boxes
+fetch_k(){ # $1 url, $2 out
+    if command -v curl >/dev/null; then
+        curl -sk --max-time 8 -o "$2" "$1"
+    else
+        wget -q --timeout=8 --no-check-certificate -O "$2" "$1"
+    fi
+}
+# fetch AUTHENTICATED by the isle root CA
+fetch_ca(){ # $1 url, $2 out
+    if command -v curl >/dev/null; then
+        curl -sf --max-time 8 --cacert /etc/isle-mesh/ca/isle-root.crt -o "$2" "$1"
+    else
+        wget -q --timeout=8 --ca-certificate=/etc/isle-mesh/ca/isle-root.crt -O "$2" "$1"
     fi
 }
 
 echo "Isle bootstrap — making $(hostname) a mesh member (one flow)"
 
+# no .isle DNS yet (not attached to the isle's network path)? pin
+# the service names to --core so every later step (incl. apt, which
+# cannot --resolve) works; isle DNS supersedes this once joined
+for d in trust.isle apt.isle; do
+    if ! getent hosts "$d" >/dev/null 2>&1; then
+        [ -n "$CORE" ] || die ".isle DNS does not resolve here and no --core given"
+        grep -q " $d\$" /etc/hosts || echo "$CORE $d" >> /etc/hosts
+        warn ".isle DNS absent — pinned $d → $CORE in /etc/hosts"
+    fi
+done
+
 # ---- 1. the isle root CA, fingerprint-verified ----
 echo
 echo "==> 1/4 isle CA (fingerprint-verified)"
 TMP=$(mktemp)
-CURL="curl -sk --max-time 8"
-$CURL $(resolve_opt trust.isle) -o "$TMP" https://trust.isle/ca/isle-root.crt \
-    || $CURL $(resolve_opt apt.isle) -o "$TMP" https://apt.isle/isle-root.crt \
+fetch_k https://trust.isle/ca/isle-root.crt "$TMP" \
+    || fetch_k https://apt.isle/isle-root.crt "$TMP" \
     || die "cannot fetch the isle CA (is this device on the isle's network? try --core <ip>)"
 GOT=$(openssl x509 -in "$TMP" -noout -fingerprint -sha256 2>/dev/null | cut -d= -f2)
 [ -n "$GOT" ] || die "fetched file is not a certificate"
@@ -73,15 +96,8 @@ rm -f "$TMP"
 # ---- 2. apt-on-mesh ----
 echo
 echo "==> 2/4 apt-on-mesh"
-CACURL="curl -sf --max-time 8 --cacert /etc/isle-mesh/ca/isle-root.crt"
-# apt cannot --resolve — if .isle DNS is absent here, pin apt.isle
-if ! getent hosts apt.isle >/dev/null 2>&1; then
-    [ -n "$CORE" ] || die ".isle DNS does not resolve here and no --core given"
-    grep -q "apt\.isle" /etc/hosts || echo "$CORE apt.isle" >> /etc/hosts
-    warn ".isle DNS absent — pinned apt.isle → $CORE in /etc/hosts (isle DNS replaces this once joined)"
-fi
 KEYRING=/usr/share/keyrings/isle-archive-keyring.gpg
-$CACURL -o "$KEYRING" https://apt.isle/isle-archive-keyring.gpg \
+fetch_ca https://apt.isle/isle-archive-keyring.gpg "$KEYRING" \
     || die "cannot fetch the archive key from https://apt.isle (core published? isle apt-repo publish)"
 echo "deb [signed-by=$KEYRING] https://apt.isle ./" > /etc/apt/sources.list.d/isle-mesh.list
 ok "signed apt source added (https://apt.isle)"
