@@ -51,6 +51,22 @@ sudo bash "$AM" register --name polari --domain polari.isle \
 sudo bash "$AM" register --name polari-api --domain api.polari.isle \
     --container prf-isle-backend --port 3000 --protocol http >/dev/null 2>&1 && ok "api.polari.isle"
 
+# record the CORE's modules in its registry entry (modes are
+# schema-tolerant) — the store/coherence surface them per instance
+sudo python3 - "$MODULES" <<'PYMOD' 2>/dev/null && ok "modules recorded: $MODULES" || true
+import json, sys
+path = "/etc/isle-mesh/agent/registry.json"
+reg = json.load(open(path))
+app = reg.get("apps", {}).get("polari")
+if app is None:
+    raise SystemExit(1)
+modes = [m for m in (app.get("modes") or [])
+         if not str(m).startswith("modules:")]
+modes.append("modules:" + sys.argv[1])
+app["modes"] = modes
+json.dump(reg, open(path, "w"), indent=2)
+PYMOD
+
 step "3/5 .isle DNS"
 AGENT_IP=$(sudo docker inspect isle-vlan-agent --format '{{(index .NetworkSettings.Networks "isle-br-0").IPAddress}}' 2>/dev/null)
 for dom in polari.isle api.polari.isle; do

@@ -183,6 +183,24 @@ deploy(){
             && ok "$dom -> $IP" \
             || warn "$dom: router DNS not registrable here — the core's dns-reconcile maps it (~2min)"
     done
+    # record the instance's MODULES in its registry entry (modes are
+    # schema-tolerant strings) — the store/coherence surface them
+    if [ -f /etc/isle-mesh/agent/registry.json ]; then
+        sudo python3 - "$NAME" "$MODULES" <<'PYMOD' 2>/dev/null && ok "modules recorded: $MODULES" || warn "could not record modules in the registry"
+import json, sys
+name, modules = sys.argv[1], sys.argv[2]
+path = "/etc/isle-mesh/agent/registry.json"
+reg = json.load(open(path))
+app = reg.get("apps", {}).get(name)
+if app is None:
+    raise SystemExit(1)
+modes = [m for m in (app.get("modes") or [])
+         if not str(m).startswith("modules:")]
+modes.append("modules:" + modules)
+app["modes"] = modes
+json.dump(reg, open(path, "w"), indent=2)
+PYMOD
+    fi
     step "5/5 report + verify"
     self_report
     local code i
