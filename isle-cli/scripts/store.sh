@@ -59,10 +59,12 @@ for s in p["steps"]: print("  $ %s" % s)
         # (a mesh-app would half-deploy; a polari-app on a non-member
         # is a launcher into an isle this device isn't part of).
         if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^isle-vlan-agent$'; then
-            echo -e "${R}[FAIL]${N} this device has no isle agent — it is not a member of an isle."
-            echo "       The store installs apps ONTO isle members only."
-            echo "       Join first (brings up the agent — touches network config):"
-            echo "         sudo isle onboard --host      # best-effort today; real join = isle join"
+            echo -e "${R}[FAIL]${N} this device has no isle agent — it is neither an isle core nor a member."
+            echo "       The store installs apps onto isle devices only. Either:"
+            echo "         make THIS device its own isle (single-device isles are valid):"
+            echo "           sudo isle core-install              # full core; or just: isle create"
+            echo "         or join an existing isle:"
+            echo "           sudo isle onboard --host            # best-effort today; real join = isle join"
             exit 1
         fi
         echo -e "${Y}Install '$NAME' — will run on THIS host:${N}"

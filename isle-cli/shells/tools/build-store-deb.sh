@@ -114,9 +114,10 @@ if [ -n "$ISLE" ]; then
     if docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^isle-vlan-agent$'; then
         echo "==> agent running — this device is an isle member; the store can install here"
     else
-        echo "   NOTE: installing apps from the store REQUIRES this device"
-        echo "   to be an isle member (a running agent). Join when ready"
-        echo "   (touches network config, asks first):  sudo isle onboard --host"
+        echo "   NOTE: installing apps from the store REQUIRES this device to"
+        echo "   be an isle core or member (a running agent). When ready:"
+        echo "     sudo isle core-install     # make this its own isle (single-device is valid)"
+        echo "     sudo isle onboard --host   # or join an existing isle"
     fi
     echo "==> ready — open 'Isle App Store' from your menu"
 else
