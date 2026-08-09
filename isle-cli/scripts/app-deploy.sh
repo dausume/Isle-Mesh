@@ -169,8 +169,16 @@ echo "   undeploy: isle app undeploy $NAME"
 # (instance tracking — how many duplicates exist, on which devices)
 REG=/etc/isle-mesh/agent/registry.json
 if [ -f "$REG" ]; then
+    # canonical device name (same normalization as the core pusher)
+    # + device facts so coherence knows the agent state
+    HOSTN=$(hostname | sed "s/dustin-etts-mesh-core/isle-core/")
+    AGENTN=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -cE '^isle-(vlan|remote)-agent$' || true)
+    printf '{"device":"%s","facts":{"machine_name":"%s","agent_present":%s}}' \
+        "$HOSTN" "$HOSTN" "$([ "${AGENTN:-0}" -gt 0 ] && echo true || echo false)" \
+        | curl -skf --max-time 8 -X POST -H "Content-Type: application/json" \
+            --data-binary @- https://api.polari.isle/api/islemesh/ingest/device >/dev/null 2>&1 || true
     RPT=$(mktemp)
-    python3 - "$(hostname)" "$REG" > "$RPT" 2>/dev/null <<'PYEOF'
+    python3 - "$HOSTN" "$REG" > "$RPT" 2>/dev/null <<'PYEOF'
 import json, sys
 host, reg = sys.argv[1], sys.argv[2]
 print(json.dumps({'device': host, 'registry': json.load(open(reg))}))

@@ -35,6 +35,7 @@ const commands = {
   store:    { script: 'store.sh',    desc: 'The general isle app store (list/show/install)' },
   'apt-repo': { script: 'apt-repo.sh', desc: 'Apt-on-mesh: signed deb repo at apt.isle (publish/enable/status)' },
   'core-install': { script: 'core-install.sh', desc: 'ONE flow: fresh box to working isle core (5a)' },
+  polari:   { script: 'polari.sh',   desc: 'Polari instances as mesh-app installs (instance deploy/undeploy/instances)' },
   shell:    { script: 'shell.sh',    desc: 'Install polari/isle apps as native shells', docker: true },
   module:   { script: 'module.sh',   desc: 'Install polari modules into the instance' },
   security: { script: 'security.sh', desc: 'ISP visibility and network hardening' },

@@ -63,8 +63,18 @@ for line in os.environ.get("LINKS", "").splitlines():
     if len(p) < 2: continue
     k = "ethernet" if p[0].startswith("e") else ("wifi" if p[0].startswith("w") else "")
     if k: uplinks.append({"interface": p[0], "kind": k, "link_up": p[1] == "UP"})
+import subprocess
+agent = False
+try:
+    names = subprocess.run(["docker", "ps", "--format", "{{.Names}}"],
+                           capture_output=True, text=True,
+                           timeout=8).stdout
+    agent = any(n in ("isle-vlan-agent", "isle-remote-agent")
+                for n in names.split())
+except Exception:
+    pass
 print(json.dumps({"device": host, "facts": {"machine_name": host,
-    "connectivity_mode": "dual-home",
+    "connectivity_mode": "dual-home", "agent_present": agent,
     "notes": "onboarded via isle onboard"}, "uplinks": uplinks}))
 PYEOF
 
