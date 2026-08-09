@@ -70,13 +70,15 @@ services:
       start_period: 30s
 
 networks:
-  # Internal docker network for app containers to reach agent
+  # Internal docker network for app containers to reach agent.
+  # PER-HOST bridge (not shared L2) — its subnet need not match
+  # other devices, so we DON'T pin one: a fixed 172.20.0.0/16
+  # collided with a pre-existing network on a device (econ-core's
+  # odoo suite owned that pool). Let docker auto-allocate a free
+  # pool; overlap-proof on any device.
   isle-agent-net:
     driver: bridge
     name: isle-agent-net
-    ipam:
-      config:
-        - subnet: 172.20.0.0/16
 
   # Macvlan network on physical interface for VLAN connectivity
   # Created by macvlan-setup.sh before docker compose up

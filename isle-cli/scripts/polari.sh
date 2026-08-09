@@ -203,16 +203,24 @@ PYMOD
     fi
     step "5/5 report + verify"
     self_report
+    # resolve the health probe to the agent that actually serves
+    # this instance: the CORE agent is on 127.0.0.1 (host-local
+    # proxy), a REMOTE agent is its macvlan IP (127.0.0.1 would
+    # never reach it — the old 5-minute 'hang'). Short, bounded loop.
+    local IP2; IP2=$(agent_ip)
+    local RES="--resolve api.$NAME.isle:443:127.0.0.1"
+    [ -n "$IP2" ] && [ "$IP2" != "10.10.0.2" ] \
+        && RES="--resolve api.$NAME.isle:443:$IP2"
     local code i
-    for i in $(seq 1 25); do
+    for i in $(seq 1 6); do
         code=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 6 \
-            --resolve "api.$NAME.isle:443:127.0.0.1" "https://api.$NAME.isle/api/health" 2>/dev/null)
-        [ "$code" = 200 ] && break; sleep 12
+            $RES "https://api.$NAME.isle/api/health" 2>/dev/null)
+        [ "$code" = 200 ] && break; sleep 5
     done
     if [ "${code:-}" = 200 ]; then
-        ok "api.$NAME.isle/api/health -> 200 (via the local agent)"
+        ok "api.$NAME.isle/api/health -> 200"
     else
-        warn "backend not yet healthy via the local agent (last: ${code:-none}) — lazy boot can take ~1-2min; from another device: https://$NAME.isle"
+        warn "backend still booting (last: ${code:-none}) — lazy boot takes ~1-2min; it will answer at https://$NAME.isle. Not a failure; the instance is up + reported."
     fi
     echo
     ok "polari instance '$NAME' deployed as a mesh-app: https://$NAME.isle"
