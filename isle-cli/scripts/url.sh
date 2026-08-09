@@ -23,16 +23,17 @@ die(){ echo -e "${R}[FAIL]${N} $*"; exit 1; }
 
 LEDGER=/etc/isle-mesh/exposures.json
 EXPDIR=/etc/isle-mesh/exposures
+ENTRYFLAG=/etc/isle-mesh/entrypoint.enabled
 
 agent_name(){
     docker ps --format '{{.Names}}' 2>/dev/null \
         | grep -E '^isle-(vlan|remote)-agent$' | head -1
 }
 
-record(){ # $1 domain $2 port $3 action(add|del)
-    sudo python3 - "$LEDGER" "$1" "$2" "$3" <<'PYEOF'
+record(){ # $1 domain $2 port $3 action(add|del) [$4 user]
+    sudo python3 - "$LEDGER" "$1" "$2" "$3" "${4:-}" <<'PYEOF'
 import json, os, sys
-path, domain, port, action = sys.argv[1:5]
+path, domain, port, action, user = sys.argv[1:6]
 data = {}
 if os.path.exists(path):
     try:
@@ -42,21 +43,43 @@ if os.path.exists(path):
 exp = data.setdefault("exposures", {})
 if action == "add":
     exp[port] = {"internal": domain, "port": int(port),
-                 "protocol": "http"}
+                 "protocol": "http",
+                 "access": {"level": 1, "user": user}}
 else:
     exp.pop(port, None)
 json.dump(data, open(path, "w"), indent=2)
 PYEOF
 }
 
+# WHERE exposure may happen is REGULATED: only a device explicitly
+# designated as an entrypoint may open outside doors.
+entrypoint(){
+    case "${1:-status}" in
+        enable)
+            sudo touch "$ENTRYFLAG" && ok "THIS device is now a designated web entrypoint" ;;
+        disable)
+            sudo rm -f "$ENTRYFLAG" && ok "entrypoint designation removed (existing doors stay until unexposed)" ;;
+        status|*)
+            [ -f "$ENTRYFLAG" ] && ok "this device IS a designated entrypoint" \
+                || echo "not an entrypoint — outside doors refused here (isle url entrypoint enable)" ;;
+    esac
+}
+
 expose(){
-    local DOMAIN="${1:?usage: isle url expose <internal.isle> --port <p>}"; shift
-    local PORT=""
+    local DOMAIN="${1:?usage: isle url expose <internal.isle> --port <p> --user <who>}"; shift
+    local PORT="" AUSER="" APASS=""
     while [ $# -gt 0 ]; do case "$1" in
         --port) PORT="$2"; shift 2 ;;
+        --user) AUSER="$2"; shift 2 ;;
+        --password) APASS="$2"; shift 2 ;;
         *) shift ;;
     esac; done
+    [ -f "$ENTRYFLAG" ] || die "this device is NOT a designated entrypoint — exposure is regulated (isle url entrypoint enable, a deliberate step)"
     [ -n "$PORT" ] || die "--port <p> required (the OUTSIDE port for this door)"
+    # LEVEL 1 ACCESS: every door is limited to ONE person with
+    # assigned credentials (level 2 = a keycloak GROUP, once KC is
+    # an isle citizen). No credential-less doors.
+    [ -n "$AUSER" ] || die "--user <who> required — a door admits exactly ONE credentialed person (level 1)"
     echo "$DOMAIN" | grep -qE '\.isle$' || die "expose maps an INTERNAL .isle name to an outside port"
     echo "$PORT" | grep -qE '^[0-9]{2,5}$' || die "bad port: $PORT"
     local AGENT; AGENT=$(agent_name)
@@ -64,6 +87,16 @@ expose(){
 
     local DIR="$EXPDIR/$PORT"
     sudo mkdir -p "$DIR"
+    # per-door credential (shown ONCE when generated)
+    if [ -z "$APASS" ]; then
+        APASS=$(openssl rand -base64 12 | tr -d "=+/" | cut -c1-16)
+        GEN=1
+    else
+        GEN=0
+    fi
+    HASH=$(openssl passwd -apr1 "$APASS")
+    printf '%s:%s\n' "$AUSER" "$HASH" | sudo tee "$DIR/htpasswd" >/dev/null
+    sudo chmod 644 "$DIR/htpasswd"
     # gateway nginx: outside plain-http on <port> -> the agent over
     # TLS with the internal name's SNI (the isle stays contained;
     # only this declared door crosses the boundary)
@@ -72,6 +105,8 @@ events {}
 http {
   server {
     listen 80;
+    auth_basic "isle door ($DOMAIN)";
+    auth_basic_user_file /etc/nginx/htpasswd;
     location / {
       proxy_pass https://$AGENT;
       proxy_ssl_server_name on;
@@ -92,10 +127,16 @@ EOF
         --network isle-agent-net \
         -p "0.0.0.0:$PORT:80" \
         -v "$DIR/nginx.conf:/etc/nginx/nginx.conf:ro" \
+        -v "$DIR/htpasswd:/etc/nginx/htpasswd:ro" \
         nginx:alpine >/dev/null || die "gateway container failed"
-    record "$DOMAIN" "$PORT" add
+    record "$DOMAIN" "$PORT" add "$AUSER"
     local IP; IP=$(hostname -I | awk '{print $1}')
     ok "outside door OPEN: http://$IP:$PORT -> (agent) -> $DOMAIN"
+    ok "access LEVEL 1: only '$AUSER' (basic auth at the door)"
+    if [ "$GEN" = 1 ]; then
+        echo "   credential (shown ONCE — hand it to that one person):"
+        echo "     user: $AUSER    password: $APASS"
+    fi
     echo "   .isle stays contained — the outside sees only this host:port."
     echo "   close it: isle url unexpose --port $PORT"
 }
@@ -124,8 +165,12 @@ exp = data.get("exposures", {})
 if not exp:
     print("no outside doors — the isle is fully contained")
 for port, e in sorted(exp.items(), key=lambda kv: int(kv[0])):
-    print("  :%s  ->  %s  (%s)" % (port, e["internal"],
-                                   e.get("protocol", "http")))
+    acc = e.get("access", {})
+    who = ("level %s: %s" % (acc.get("level", "?"),
+                             acc.get("user") or acc.get("group", "?"))
+           if acc else "OPEN (pre-level-1 door)")
+    print("  :%s  ->  %s  (%s, %s)" % (port, e["internal"],
+                                       e.get("protocol", "http"), who))
 PYEOF
     else
         echo "no outside doors — the isle is fully contained"
@@ -135,8 +180,9 @@ PYEOF
 }
 
 case "${1:-help}" in
+    entrypoint) shift; entrypoint "$@" ;;
     expose) shift; expose "$@" ;;
     unexpose) shift; unexpose "$@" ;;
     exposures) exposures ;;
-    *) echo "usage: isle url [expose <internal.isle> --port <p>|unexpose --port <p>|exposures]" ;;
+    *) echo "usage: isle url [entrypoint enable|disable|status] [expose <internal.isle> --port <p> --user <who>|unexpose --port <p>|exposures]" ;;
 esac
