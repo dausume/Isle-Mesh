@@ -12,6 +12,7 @@
 set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SHELLS_DIR="/usr/share/isle-mesh/shells"
+SYS_STAGE="$SHELLS_DIR/debs"
 WANT_HOST=0
 [ "${1:-}" = "--host" ] && WANT_HOST=1
 G="\033[0;32m"; Y="\033[1;33m"; C="\033[0;36m"; N="\033[0m"
@@ -36,14 +37,23 @@ if getent hosts polari.isle >/dev/null 2>&1; then
 else
     warn "polari.isle does NOT resolve here — isle DNS not reaching this device"
 fi
-CODE=$(curl -skf -o /dev/null -w "%{http_code}" --max-time 6 https://api.polari.isle/api/islemesh 2>/dev/null || echo 000)
+CODE=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 6 https://api.polari.isle/api/islemesh 2>/dev/null) || CODE=000
+# a core HOST can't reach its own agent's macvlan IP (host
+# isolation) — fall back to the local proxy, like store.sh does
+API_RESOLVE=""
+if [ "$CODE" != 200 ]; then
+    C2=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 6 --resolve api.polari.isle:443:127.0.0.1 https://api.polari.isle/api/islemesh 2>/dev/null) || C2=000
+    if [ "$C2" = 200 ]; then
+        CODE=200; API_RESOLVE="--resolve api.polari.isle:443:127.0.0.1"
+    fi
+fi
 [ "$CODE" = 200 ] && ok "the isle store API answers (api.polari.isle 200)" \
     || warn "api.polari.isle did not answer ($CODE) — reach not established"
 
 # ---- 3. register this device with polari (topology) ----
 step "3/5 register this device"
 LINKS=$(ip -br link | awk '$1!~/^(lo|veth|br-|docker|virbr|isle)/{print $1" "$2}')
-LINKS="$LINKS" python3 - "$(hostname)" <<'PYEOF' 2>/dev/null | curl -skf -X POST -H "Content-Type: application/json" --data-binary @- https://api.polari.isle/api/islemesh/ingest/device >/dev/null 2>&1 \
+LINKS="$LINKS" python3 - "$(hostname)" <<'PYEOF' 2>/dev/null | curl -skf --max-time 8 $API_RESOLVE -X POST -H "Content-Type: application/json" --data-binary @- https://api.polari.isle/api/islemesh/ingest/device >/dev/null 2>&1 \
     && ok "registered in the isle topology" || warn "topology registration skipped (API unreachable)"
 import json, os, sys
 host = sys.argv[1]
@@ -66,10 +76,30 @@ else
     warn "polari-shell-core NOT installed — native launchers need it"
     echo "     install: sudo apt install <polari-shell-core deb>"
 fi
+# stage the shared-runtime deb SYSTEM-WIDE: the store UI's install
+# bridge runs via pkexec AS ROOT, whose $HOME (/root) has no staged
+# debs — shell.sh's root default is $SYS_STAGE, so fill it here.
+USER_HOME=$(getent passwd "${SUDO_USER:-$USER}" | cut -d: -f6)
+CORE_DEB=$(ls "$USER_HOME"/polari-shells/polari-shell-core_*_amd64.deb 2>/dev/null | sort -V | tail -1)
+if [ -n "$CORE_DEB" ]; then
+    if sudo mkdir -p "$SYS_STAGE" && sudo cp -u "$CORE_DEB" "$SYS_STAGE"/; then
+        ok "staged $(basename "$CORE_DEB") → $SYS_STAGE (pkexec/root installs find it)"
+    else
+        warn "could not stage the runtime deb into $SYS_STAGE"
+    fi
+elif [ -z "$(ls "$SYS_STAGE"/polari-shell-core_*_amd64.deb 2>/dev/null)" ] \
+     && ! dpkg -s polari-shell-core >/dev/null 2>&1; then
+    warn "no polari-shell-core deb found to stage (looked in $USER_HOME/polari-shells)"
+fi
 if [ -f "$SHELLS_DIR/build-launcher-deb.sh" ]; then
     ok "shell launcher tools present ($SHELLS_DIR)"
 else
     warn "launcher build tools missing at $SHELLS_DIR"
+fi
+if [ -f "$SHELLS_DIR/icons/polari-mark.png" ]; then
+    ok "app icons present (branded launchers)"
+else
+    warn "icons missing at $SHELLS_DIR/icons — launchers fall back to a generic icon"
 fi
 echo "   → 'isle store install <polari-app>' now builds a native launcher here"
 

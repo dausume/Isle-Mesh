@@ -15,7 +15,7 @@
 set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 API="${POLARI_ISLE_API:-https://api.polari.isle}"
-CURL="curl -skf"
+CURL="curl -skf --max-time 8"
 G="\033[0;32m"; Y="\033[1;33m"; C="\033[0;36m"; N="\033[0m"
 
 api_get() { $CURL "$API$1" 2>/dev/null && return 0; $CURL --resolve api.polari.isle:443:127.0.0.1 "$API$1" 2>/dev/null; }

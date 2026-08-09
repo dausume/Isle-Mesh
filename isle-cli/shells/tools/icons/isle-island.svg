@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!--
+    isle-island.svg — the isle-mesh island mark.
+    Original work for the Polari/Isle project, dedicated to the
+    public domain (CC0-1.0). See shells/icons/LICENSE.
+    Kept to solid fills + basic paths so simple SVG renderers
+    (ImageMagick MSVG) rasterize it faithfully.
+  -->
+  <!-- sky disc -->
+  <circle cx="128" cy="128" r="124" fill="#1769aa"/>
+  <!-- sea (lower half of the disc, drawn as a bounded path) -->
+  <path d="M12 128 a116 116 0 0 0 232 0 z" fill="#2a9dd6"/>
+  <!-- mesh ripples on the water -->
+  <path d="M40 158 q16 -9 32 0 t32 0 t32 0 t32 0 t32 0"
+        stroke="#bfe6fb" stroke-width="4" fill="none"
+        stroke-linecap="round" opacity="0.7"/>
+  <path d="M34 186 q16 -9 32 0 t32 0 t32 0 t32 0 t32 0 t20 0"
+        stroke="#bfe6fb" stroke-width="4" fill="none"
+        stroke-linecap="round" opacity="0.7"/>
+  <path d="M46 212 q16 -9 32 0 t32 0 t32 0 t32 0"
+        stroke="#bfe6fb" stroke-width="4" fill="none"
+        stroke-linecap="round" opacity="0.7"/>
+  <!-- island sand mound -->
+  <path d="M66 152 q62 -52 124 0 z" fill="#e2b93b"/>
+  <ellipse cx="128" cy="152" rx="62" ry="12" fill="#c9a227"/>
+  <!-- palm trunk -->
+  <path d="M124 128 q-8 -30 -3 -58 l10 0 q-5 30 3 58 z"
+        fill="#6b4f2a"/>
+  <!-- palm fronds -->
+  <path d="M126 70 q-40 -20 -64 -4 q30 -4 60 14 z" fill="#2e7d32"/>
+  <path d="M126 70 q40 -20 64 -4 q-30 -4 -60 14 z" fill="#2e7d32"/>
+  <path d="M126 70 q-22 -36 -50 -42 q26 14 44 48 z" fill="#379141"/>
+  <path d="M126 70 q22 -36 50 -42 q-26 14 -44 48 z" fill="#379141"/>
+  <path d="M126 70 q-2 -32 -2 -54 l8 0 q0 28 2 54 z" fill="#2e7d32"/>
+  <circle cx="126" cy="70" r="7" fill="#255e28"/>
+  <!-- coconuts -->
+  <circle cx="118" cy="80" r="5" fill="#6b4f2a"/>
+  <circle cx="136" cy="80" r="5" fill="#6b4f2a"/>
+  <!-- ring -->
+  <circle cx="128" cy="128" r="121" fill="none"
+          stroke="#bfe6fb" stroke-width="6"/>
+</svg>
