@@ -51,6 +51,10 @@ EOF
 
 cat > "$STAGE/DEBIAN/postinst" <<'EOF'
 #!/bin/sh
+# the old hand-built debs PACKAGED /usr/local/bin/isle — upgrading
+# from them makes dpkg delete the file and prune the then-empty
+# /usr/local/bin, so recreate it before linking
+mkdir -p /usr/local/bin
 ln -sf /usr/share/isle-mesh/isle-cli/index.js /usr/local/bin/isle
 chmod +x /usr/share/isle-mesh/isle-cli/index.js 2>/dev/null || true
 exit 0
