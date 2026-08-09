@@ -106,6 +106,9 @@ echo "   → 'isle store install <polari-app>' now builds a native launcher here
 # ---- 5. host tier (optional) ----
 step "5/5 host tier"
 if [ "$WANT_HOST" = 1 ]; then
+    warn "host tier brings up an isle agent — its installer can MODIFY"
+    warn "host network config (wpa_supplicant/networkd handoff, mDNS)."
+    warn "Do this at the machine, not over the connection it may reset."
     if isle agent ensure 2>/dev/null; then
         ok "agent up — this device can HOST mesh-apps"
     else

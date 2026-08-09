@@ -89,14 +89,15 @@ Terminal=false
 Categories=Network;System;
 EOF
 
-# ---- postinst: the AGENT-ALWAYS rule ----
+# ---- postinst: trust seed ONLY. The agent tier is an EXPLICIT
+# user step — `isle agent ensure` on an agent-less device launches
+# an interactive installer that REWRITES HOST NETWORKING
+# (wpa_supplicant/networkd handoff; it took econ-core's wifi down
+# mid-install). A maintainer script must never do that. ----
 cat > "$STAGE/DEBIAN/postinst" <<'POSTINST'
 #!/bin/sh
-# Installing the Isle App Store makes THIS device a full isle
-# member: trust the CA + ensure an agent is running, so the user
-# can host apps here, not just reach them.
 set -e
-echo "==> Isle App Store: making this device an isle member"
+echo "==> Isle App Store: trusting the isle on this device"
 CA=/usr/share/isle-app-store/isle-root.crt
 # apt runs us with a sanitized PATH that skips /usr/local/bin —
 # resolve the CLI symlink explicitly
@@ -110,9 +111,12 @@ if [ -n "$ISLE" ]; then
         [ -f /etc/isle-mesh/ca/isle-root.crt ] || cp "$CA" /etc/isle-mesh/ca/isle-root.crt
         "$ISLE" trust install --yes 2>/dev/null || true
     fi
-    # ensure an agent (idempotent; brings it up if absent)
-    "$ISLE" agent ensure 2>/dev/null || \
-        echo "   (run 'sudo isle agent ensure' to host apps here)"
+    if docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^isle-vlan-agent$'; then
+        echo "==> agent already running — this device can host apps"
+    else
+        echo "   to HOST mesh-apps here (brings up an agent — touches"
+        echo "   network config, asks first):  sudo isle onboard --host"
+    fi
     echo "==> ready — open 'Isle App Store' from your menu"
 else
     echo "   NOTE: the isle CLI is not installed on this device."
