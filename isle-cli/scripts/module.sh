@@ -9,7 +9,7 @@
 #   isle module list               modules the instance knows
 set -u
 API="${POLARI_ISLE_API:-https://api.polari.isle}"
-CURL="curl -sk --resolve api.polari.isle:443:10.10.0.2"
+CURL="curl -skf"
 INSTANCE="${POLARI_ISLE_INSTANCE:-prf-isle}"
 G="\033[0;32m"; Y="\033[1;33m"; N="\033[0m"
 ok(){ echo -e "${G}[ OK ]${N} $*"; }
