@@ -93,6 +93,11 @@ services:
       - WEBSOCKET_PORT=3001
       - POLARI_MODULES=$MODULES
       - POLARI_LAZY_BOOT=1
+      # Without this the sqlite files land in ./data -> /app/data, in the
+      # container's writable layer, and the volume below sits empty — so
+      # every recreate (including `isle polari module move`, which
+      # recreates both backends) threw the instance's data away.
+      - DATABASE_PATH=/data/polari.db
     volumes:
       - backend-data:/data
     mem_limit: 2g
