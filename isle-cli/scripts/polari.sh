@@ -410,12 +410,26 @@ app_ensure(){
     ok "ensured $APP (re-run 'isle polari app plan $APP' to confirm complete)"
 }
 
+# Move a module's TABLES from one instance database to another. The
+# instances must be quiesced first (their backends stopped) — a sqlite
+# file with a live writer attached is not safe to copy out from under.
+_move_module_data(){
+    local MOD="$1" FROM="$2" TO="$3"
+    local VFROM="prf-${FROM}_backend-data" VTO="prf-${TO}_backend-data"
+    if ! sudo docker volume inspect "$VFROM" >/dev/null 2>&1; then
+        warn "no data volume for $FROM — nothing to hand off"; return 0
+    fi
+    sudo docker volume create "$VTO" >/dev/null 2>&1
+    sudo docker run --rm         -v "$VFROM":/from -v "$VTO":/to         prf-backend:staging python3 -m polariDBmanagement.module_data_move         --module "$MOD"         --from /from/managerObject_DB.db --to /to/managerObject_DB.db         --apply --drop-source
+}
+
 move_module(){
     local MOD="${1:?usage: isle polari module move <module> --from <A> --to <B>}"; shift
-    local FROM="" TO=""
+    local FROM="" TO="" WITH_DATA=1
     while [ $# -gt 0 ]; do case "$1" in
         --from) FROM="$2"; shift 2 ;;
         --to) TO="$2"; shift 2 ;;
+        --no-data) WITH_DATA=0; shift ;;
         *) shift ;;
     esac; done
     [ -n "$FROM" ] && [ -n "$TO" ] || die "--from <A> --to <B> required"
@@ -427,7 +441,20 @@ move_module(){
     A=$(_modules_of_compose "$BASE/$FROM")
     B=$(_modules_of_compose "$BASE/$TO")
     echo ",$A," | grep -q ",$MOD," || die "'$MOD' is not on $FROM (has: ${A:-none})"
-    step "1/3 remove $MOD from $FROM"
+
+    # Quiesce BEFORE touching either the module lists or the data. The
+    # backends get recreated at the end anyway, so stopping them costs
+    # nothing and it is what makes the sqlite handoff safe.
+    if [ "$WITH_DATA" = 1 ]; then
+        step "1/5 quiesce $FROM and $TO (writes stop)"
+        (cd "$BASE/$FROM" && sudo docker compose -p "prf-$FROM" stop backend) >/dev/null 2>&1
+        (cd "$BASE/$TO" && sudo docker compose -p "prf-$TO" stop backend) >/dev/null 2>&1
+        ok "both backends stopped"
+        step "2/5 hand off $MOD's data"
+        _move_module_data "$MOD" "$FROM" "$TO" || die "data handoff failed — module lists untouched, nothing moved"
+    fi
+
+    step "remove $MOD from $FROM"
     local NEWA
     NEWA=$(echo "$A" | tr ',' '\n' | grep -vx "$MOD" | paste -sd, -)
     _set_modules "$BASE/$FROM" "$NEWA"
@@ -451,7 +478,11 @@ move_module(){
         || warn "$TO still booting (last: ${code:-none}) — it will answer at https://$TO.isle"
     echo
     ok "moved '$MOD': $FROM → $TO (module loading relocated; verify in the store/coherence)"
-    echo "   NOTE: a stateful module's DATA stays in $FROM's volume — data migration is a separate step."
+    if [ "$WITH_DATA" = 1 ]; then
+        echo "   the module's TABLES moved with it (verified row counts, dropped from $FROM)."
+    else
+        echo "   NOTE: --no-data was given — $MOD's DATA stays in $FROM's volume."
+    fi
 }
 
 instances(){
