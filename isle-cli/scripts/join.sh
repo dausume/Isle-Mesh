@@ -687,7 +687,7 @@ wait_for_health() {
 
     # Get VLAN IP
     local vlan_ip
-    vlan_ip=$(docker exec isle-remote-agent ip -4 -o addr 2>/dev/null | awk '$2 != "lo" && $4 !~ /^172\.20\./ {split($4, a, "/"); print a[1]; exit}')
+    vlan_ip=$(docker exec isle-remote-agent ip -4 -o addr 2>/dev/null | awk '$4 ~ /^10\./ {split($4, a, "/"); print a[1]; exit}')
     [ -n "$vlan_ip" ] || vlan_ip="pending"
 
     log_success "Remote agent is healthy"
@@ -757,7 +757,7 @@ EOF
 # Show completion message
 show_completion() {
     local vlan_ip
-    vlan_ip=$(docker exec isle-remote-agent ip -4 -o addr 2>/dev/null | awk '$2 != "lo" && $4 !~ /^172\.20\./ {split($4, a, "/"); print a[1]; exit}')
+    vlan_ip=$(docker exec isle-remote-agent ip -4 -o addr 2>/dev/null | awk '$4 ~ /^10\./ {split($4, a, "/"); print a[1]; exit}')
     [ -n "$vlan_ip" ] || vlan_ip="pending"
 
     echo ""

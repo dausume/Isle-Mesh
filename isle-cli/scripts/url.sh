@@ -76,6 +76,17 @@ expose(){
     esac; done
     [ -f "$ENTRYFLAG" ] || die "this device is NOT a designated entrypoint — exposure is regulated (isle url entrypoint enable, a deliberate step)"
     [ -n "$PORT" ] || die "--port <p> required (the OUTSIDE port for this door)"
+    # PORT-CONFLICT GUARD (the resource ledger, locally): refuse a
+    # host port already published, and suggest a free one — so doors
+    # scale without collision.
+    if docker ps --format '{{.Ports}}' 2>/dev/null \
+            | grep -qE "(^|[^0-9])0\.0\.0\.0:$PORT->|:::$PORT->"; then
+        local FREE
+        FREE=$(for p in $(seq 18080 18999); do
+                 docker ps --format '{{.Ports}}' 2>/dev/null \
+                   | grep -qE ":$p->" || { echo "$p"; break; }; done)
+        die "host port $PORT is already published on this device — try --port ${FREE:-<free>}"
+    fi
     # LEVEL 1 ACCESS: every door is limited to ONE person with
     # assigned credentials (level 2 = a keycloak GROUP, once KC is
     # an isle citizen). No credential-less doors.

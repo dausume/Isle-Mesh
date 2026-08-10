@@ -37,6 +37,7 @@ const commands = {
   'core-install': { script: 'core-install.sh', desc: 'ONE flow: fresh box to working isle core (5a)' },
   polari:   { script: 'polari.sh',   desc: 'Polari instances as mesh-app installs (instance deploy/rebase/undeploy/instances)' },
   url:      { script: 'url.sh',      desc: 'Selective web exposure: outside host:port doors into contained .isle services' },
+  net:      { script: 'net.sh',      desc: 'Network resource ledger: pools/ports per device (status/report/free-subnet/free-port)' },
   shell:    { script: 'shell.sh',    desc: 'Install polari/isle apps as native shells', docker: true },
   module:   { script: 'module.sh',   desc: 'Install polari modules into the instance' },
   security: { script: 'security.sh', desc: 'ISP visibility and network hardening' },

@@ -34,10 +34,12 @@ if [ -n "${VIRTUAL_MAC:-}" ]; then
     done
 fi
 if [ -z "$MACVLAN_IF" ]; then
+    # the isle macvlan is the 10.x interface (the isle DHCP range);
+    # docker internal bridges live in 172.16/12 — never hardcode a
+    # single bridge subnet (it moves when pools auto-allocate).
     for d in /sys/class/net/*; do
         n=$(basename "$d"); [ "$n" = "lo" ] && continue
-        ip -4 addr show "$n" 2>/dev/null | grep -q "inet 172\.20\." && continue
-        MACVLAN_IF="$n"; break
+        ip -4 addr show "$n" 2>/dev/null | grep -q "inet 10\." && { MACVLAN_IF="$n"; break; }
     done
 fi
 MACVLAN_IF="${MACVLAN_IF:-eth0}"
