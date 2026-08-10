@@ -1,7 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# pack.sh lives in router-init-lib/ but bundles from router-setup/ —
+# resolve the root whichever directory it is invoked from.
+_HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -d "$_HERE/router-init-lib" ]]; then
+  ROOT_DIR="$_HERE"
+else
+  ROOT_DIR="$(cd -- "$_HERE/.." && pwd)"
+fi
 OUT_DIR="$ROOT_DIR/dist"
 OUT="$OUT_DIR/router-init.sh"
 

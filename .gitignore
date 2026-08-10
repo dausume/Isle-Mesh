@@ -161,3 +161,30 @@ build/
 docs/_build/
 docs/.doctrees/
 site/
+
+# ============================================================
+# Binary Artifacts — NEVER commit these
+# ============================================================
+# Standing rule: no build artifacts in git. They are large, they
+# change on every rebuild, and git keeps every version forever.
+#
+# VM images additionally carry SECRETS once booted: dropbear host
+# private keys, /etc/shadow, TLS keys, authorized_keys. A provisioned
+# image is a running machine's disk, not a build output.
+#
+# Each artifact type gets a fetch-or-build path instead — for the
+# router image that is
+# openwrt-router/scripts/router-setup/get-router-image.sh
+# (cache -> mesh -> release -> build from upstream).
+*.qcow2
+*.img
+*.img.gz
+*.ipk
+*.deb
+*.apk
+*.tar.gz
+*.tgz
+
+# Keep the directory structure + its documentation
+!openwrt-router/scripts/router-setup/images/README.md
+!**/.gitkeep

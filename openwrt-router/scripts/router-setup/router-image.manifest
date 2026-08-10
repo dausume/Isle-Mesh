@@ -1,0 +1,47 @@
+# router-image.manifest — the single source of truth for "which image".
+#
+# Sourced as shell KEY=VALUE by get-router-image.sh and
+# build-router-image.sh. Every acquisition path (cache, mesh, release,
+# build-from-upstream) is checked against the values here, so all four
+# sources have to agree on what "the router image" is.
+#
+# This file is TRACKED in git. The images it describes are NOT — see
+# images/README.md.
+
+# ── What we produce ──────────────────────────────────────────────────
+ROUTER_IMAGE_NAME="openwrt-isle-router.qcow2"
+ROUTER_IMAGE_VERSION="1"          # bump when the build recipe changes
+ROUTER_IMAGE_DISK_SIZE="4G"       # qemu-img resize target
+
+# sha256 of the RAW content of a correctly built image (i.e.
+#   qemu-img convert -f qcow2 -O raw <image> - | sha256sum).
+# Raw content is compared instead of the qcow2 file itself because
+# qcow2 packing is not byte-stable across qemu versions, while the
+# guest-visible bytes are. Used by --verify-deep.
+ROUTER_IMAGE_RAW_SHA256="77441e930f1012e4e4a3eb43389b71790decb9679d9c47f66b6877e43d0bb59f"
+
+# sha256 of the PUBLISHED qcow2 artifact, if one has been published to
+# the mesh or a release. Empty = nothing published yet, so the mesh and
+# release steps stay disabled rather than fetching something unverified.
+# NOTE: only ever publish an image built by build-router-image.sh from
+# upstream. A router that has been booted and provisioned carries host
+# keys, /etc/shadow and TLS keys — never publish or commit one.
+ROUTER_IMAGE_PUBLISHED_SHA256=""
+
+# ── Where a prebuilt copy can be fetched from (optional) ─────────────
+# Step 2 of the chain: on-mesh, works with no internet.
+# Any plain HTTPS URL (MinIO object, apt.isle asset, ...).
+ROUTER_IMAGE_MESH_URL="${ISLE_ROUTER_IMAGE_MESH_URL:-}"
+
+# Step 3 of the chain: public internet, for someone with no isle.
+# A GitHub Release attachment or equivalent — NOT a git-tracked file.
+ROUTER_IMAGE_RELEASE_URL="${ISLE_ROUTER_IMAGE_RELEASE_URL:-}"
+
+# ── The commonly-available base we can always build from ─────────────
+# Step 4: needs only upstream + build-router-image.sh. This is the
+# fallback that works when none of our hosting is reachable.
+OPENWRT_VERSION="23.05.3"
+OPENWRT_BASE_FILE="openwrt-23.05.3-x86-64-generic-ext4-combined.img.gz"
+OPENWRT_BASE_URL="https://downloads.openwrt.org/releases/23.05.3/targets/x86/64/openwrt-23.05.3-x86-64-generic-ext4-combined.img.gz"
+# Verified against upstream's published sha256sums file (2026-08-10).
+OPENWRT_BASE_SHA256="7643950cbf6bf5d785525f300efc4e2ceaad613b5d0725886e7f5fcc5a9d18f9"
