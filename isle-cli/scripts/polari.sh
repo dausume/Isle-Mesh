@@ -303,6 +303,84 @@ undeploy(){
     ok "undeployed $NAME (config kept at $BASE/$NAME; data volume kept)"
 }
 
+# --- MODULE MOVEMENT between instances (the dynamic-placement proof)
+# An instance's modules live in its compose POLARI_MODULES env; the
+# backend lazy-boots the set. Moving a module = drop it from A's set
+# + add to B's + recreate both backends + re-record. Data for a
+# stateful module stays in its origin instance's volume (module
+# LOADING relocates; data migration is a separate, declared step).
+_modules_of_compose(){ # $1 instance dir
+    grep -oE 'POLARI_MODULES=[^ ]*' "$1/docker-compose.yml" 2>/dev/null \
+        | head -1 | cut -d= -f2
+}
+_set_modules(){ # $1 dir  $2 csv  — rewrite compose + recreate backend
+    local DIR="$1" CSV="$2" NAME
+    NAME=$(basename "$DIR")
+    sudo sed -i "s|POLARI_MODULES=[^ ]*|POLARI_MODULES=$CSV|" \
+        "$DIR/docker-compose.yml"
+    (cd "$DIR" && sudo docker compose -p "prf-$NAME" up -d) >/dev/null 2>&1 \
+        || warn "recreate of prf-$NAME had warnings"
+    # re-record the modules note in the registry entry
+    sudo python3 - "$NAME" "$CSV" <<'PYMOD' 2>/dev/null || true
+import json, sys
+name, csv = sys.argv[1], sys.argv[2]
+path = "/etc/isle-mesh/agent/registry.json"
+reg = json.load(open(path))
+app = reg.get("apps", {}).get(name)
+if app is None:
+    raise SystemExit(0)
+modes = [m for m in (app.get("modes") or [])
+         if not str(m).startswith("modules:")]
+modes.append("modules:" + csv)
+app["modes"] = modes
+json.dump(reg, open(path, "w"), indent=2)
+PYMOD
+}
+
+move_module(){
+    local MOD="${1:?usage: isle polari module move <module> --from <A> --to <B>}"; shift
+    local FROM="" TO=""
+    while [ $# -gt 0 ]; do case "$1" in
+        --from) FROM="$2"; shift 2 ;;
+        --to) TO="$2"; shift 2 ;;
+        *) shift ;;
+    esac; done
+    [ -n "$FROM" ] && [ -n "$TO" ] || die "--from <A> --to <B> required"
+    [ "$FROM" != "$TO" ] || die "--from and --to are the same instance"
+    [ -d "$BASE/$FROM" ] || die "source instance not found: $BASE/$FROM (the core polari.isle is not movable this way)"
+    [ -d "$BASE/$TO" ]   || die "target instance not found: $BASE/$TO"
+    require_member
+    local A B
+    A=$(_modules_of_compose "$BASE/$FROM")
+    B=$(_modules_of_compose "$BASE/$TO")
+    echo ",$A," | grep -q ",$MOD," || die "'$MOD' is not on $FROM (has: ${A:-none})"
+    step "1/3 remove $MOD from $FROM"
+    local NEWA
+    NEWA=$(echo "$A" | tr ',' '\n' | grep -vx "$MOD" | paste -sd, -)
+    _set_modules "$BASE/$FROM" "$NEWA"
+    ok "$FROM modules: ${NEWA:-<none>}"
+    step "2/3 add $MOD to $TO"
+    local NEWB="$B"
+    echo ",$B," | grep -q ",$MOD," || NEWB="${B:+$B,}$MOD"
+    _set_modules "$BASE/$TO" "$NEWB"
+    ok "$TO modules: $NEWB"
+    step "3/3 report + verify (lazy boot ~1-2min)"
+    self_report
+    local IP2; IP2=$(agent_ip)
+    local RES_T="--resolve api.$TO.isle:443:127.0.0.1"
+    [ -n "$IP2" ] && [ "$IP2" != "10.10.0.2" ] && RES_T="--resolve api.$TO.isle:443:$IP2"
+    local code i
+    for i in $(seq 1 8); do
+        code=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 6 $RES_T "https://api.$TO.isle/api/health" 2>/dev/null)
+        [ "$code" = 200 ] && break; sleep 5
+    done
+    [ "$code" = 200 ] && ok "$TO healthy after gaining $MOD" \
+        || warn "$TO still booting (last: ${code:-none}) — it will answer at https://$TO.isle"
+    echo
+    ok "moved '$MOD': $FROM → $TO (module loading relocated; verify in the store/coherence)"
+    echo "   NOTE: a stateful module's DATA stays in $FROM's volume — data migration is a separate step."
+}
+
 instances(){
     api_get /api/islemesh/coherence | python3 -c '
 import json, sys
@@ -324,8 +402,13 @@ case "${1:-help}" in
             deploy) shift 2; deploy "$@" ;;
             rebase) shift 2; rebase "$@" ;;
             undeploy) shift 2; undeploy "$@" ;;
-            *) echo "usage: isle polari instance [deploy [--name n] [--modules csv]|undeploy <name>]" ;;
+            *) echo "usage: isle polari instance [deploy [--name n] [--modules csv]|rebase <n> --domain d|undeploy <name>]" ;;
+        esac ;;
+    module)
+        case "${2:-}" in
+            move) shift 2; move_module "$@" ;;
+            *) echo "usage: isle polari module move <module> --from <A> --to <B>" ;;
         esac ;;
     instances) instances ;;
-    *) echo "usage: isle polari [instance deploy|instance undeploy <n>|instances]" ;;
+    *) echo "usage: isle polari [instance deploy|instance rebase|instance undeploy <n>|module move <m> --from A --to B|instances]" ;;
 esac
