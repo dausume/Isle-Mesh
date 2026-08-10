@@ -337,6 +337,74 @@ json.dump(reg, open(path, "w"), indent=2)
 PYMOD
 }
 
+# add a module to an instance (the resolver's primitive)
+add_module(){
+    local MOD="${1:?usage: isle polari module add <module> --to <instance>}"; shift
+    local TO=""
+    while [ $# -gt 0 ]; do case "$1" in
+        --to) TO="$2"; shift 2 ;; *) shift ;;
+    esac; done
+    [ -n "$TO" ] || die "--to <instance> required"
+    [ -d "$BASE/$TO" ] || die "target instance not found: $BASE/$TO"
+    require_member
+    local B NEWB
+    B=$(_modules_of_compose "$BASE/$TO")
+    if echo ",$B," | grep -q ",$MOD,"; then
+        ok "$TO already has $MOD (${B})"; return 0
+    fi
+    NEWB="${B:+$B,}$MOD"
+    step "add $MOD to $TO"
+    _set_modules "$BASE/$TO" "$NEWB"
+    self_report
+    ok "$TO modules: $NEWB (lazy boot ~1-2min; https://$TO.isle)"
+}
+
+# APP PLACEMENT: a polari-app is a module collection — plan/ensure
+# its modules are live across the isle (Dustin's convergence intent)
+app_plan(){
+    local APP="${1:?usage: isle polari app plan <app>}"
+    api_get "/api/islemesh/appplan/$APP" | python3 -c '
+import json, sys
+try: d = json.load(sys.stdin)
+except Exception: print("plan unavailable (is prf-isle up?)"); raise SystemExit(1)
+if not d.get("ok"): print(d.get("error","no such app")); raise SystemExit(1)
+print("app: %s (%s)" % (d["app"], d.get("title","")))
+print("modules needed: %s" % ", ".join(d["modules_needed"]))
+for s in d["satisfied"]:
+    print("  [ok]      %-16s on %s" % (s["module"], ", ".join(s["instances"])))
+for m in d["missing"]:
+    print("  [MISSING] %s" % m)
+if d["complete"]:
+    print("\nCOMPLETE — every module is live; the app works.")
+else:
+    print("\nplan to ensure it:")
+    for step in d["plan"]:
+        print("  $ %s" % step["cmd"])'
+}
+
+app_ensure(){
+    local APP="${1:?usage: isle polari app ensure <app> [--yes]}"
+    local YES="${2:-}"
+    local RESP; RESP=$(api_get "/api/islemesh/appplan/$APP")
+    echo "$RESP" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("ok") else 1)' \
+        || die "no such app: $APP"
+    if echo "$RESP" | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin)["complete"] else 1)'; then
+        ok "$APP already complete — every module is live"; return 0
+    fi
+    echo -e "${Y}Ensure '$APP' — will run on THIS host:${N}"
+    echo "$RESP" | python3 -c 'import json,sys; [print("  $ "+s["cmd"]) for s in json.load(sys.stdin)["plan"]]'
+    if [ "$YES" != "--yes" ]; then
+        read -r -p "Proceed? [y/N] " a; [ "$a" = y ] || [ "$a" = Y ] || { echo aborted; exit 1; }
+    fi
+    # each plan step is an isle command targeting a DEPLOYED instance
+    echo "$RESP" | python3 -c 'import json,sys; [print("%s|%s"%(s["action"],s["cmd"])) for s in json.load(sys.stdin)["plan"]]' \
+      | while IFS='|' read -r action cmd; do
+        echo -e "${C}==> $cmd${N}"
+        eval "sudo ${cmd#sudo }" || warn "step had warnings: $cmd"
+    done
+    ok "ensured $APP (re-run 'isle polari app plan $APP' to confirm complete)"
+}
+
 move_module(){
     local MOD="${1:?usage: isle polari module move <module> --from <A> --to <B>}"; shift
     local FROM="" TO=""
@@ -407,7 +475,14 @@ case "${1:-help}" in
     module)
         case "${2:-}" in
             move) shift 2; move_module "$@" ;;
-            *) echo "usage: isle polari module move <module> --from <A> --to <B>" ;;
+            add) shift 2; add_module "$@" ;;
+            *) echo "usage: isle polari module [move <m> --from A --to B|add <m> --to B]" ;;
+        esac ;;
+    app)
+        case "${2:-}" in
+            plan) shift 2; app_plan "$@" ;;
+            ensure) shift 2; app_ensure "$@" ;;
+            *) echo "usage: isle polari app [plan <app>|ensure <app> [--yes]]" ;;
         esac ;;
     instances) instances ;;
     *) echo "usage: isle polari [instance deploy|instance rebase|instance undeploy <n>|module move <m> --from A --to B|instances]" ;;
