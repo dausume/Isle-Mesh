@@ -178,3 +178,19 @@ isle-polari-deploy --pull`. isle-polari-deploy --pull pulls+retags
 from registry.isle:5000 then deploys.
 ONE-TIME pol-core trust (Dustin sudo): mkdir -p /etc/docker/certs.d/
 192.168.0.24:5000 && cp isle-root.crt there.
+
+## 2026-08-10 — dev branch + untracked-helper triage (pol-core session)
+- Created **`dev`** at the `dev-consolidation` tip (4056cba); it is
+  now the go-forward line (+ ops/recovery + this note). Push:
+  `git push -u origin dev`. `dev-consolidation` kept, unchanged.
+- Triaged the 4 root untracked helpers:
+  - RESERVED to `ops/recovery/` (committed on dev): fix-live-certs.sh
+    (cert-repair; no `isle certs repair` verb exists — promote later)
+    and verify-teardown.sh (teardown-completeness audit, reusable).
+  - RETIRED (still untracked at root, safe to rm — one-time):
+    fix-live-registry.sh (relay hardening now in-tree, migration
+    obsolete) and RUN-app-install-test.md (dated; references the
+    superseded isle-manager-app deb).
+- This session's isle CLI work (net ledger, url/expose, polari
+  instance/module/app verbs, placement resolver) is on dev, ~39
+  commits ahead of origin.
