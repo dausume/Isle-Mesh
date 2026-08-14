@@ -73,7 +73,7 @@ Version: $VERSION
 Section: admin
 Priority: optional
 Architecture: all
-Depends: nodejs, jq, openssl, curl
+Depends: nodejs, jq, openssl, curl, iw, hostapd
 Replaces: isle-manager-app (<< 0.2)
 Installed-Size: $INSTALLED_KB
 Maintainer: Isle-Mesh <isle@localhost>
