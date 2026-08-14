@@ -67,3 +67,7 @@ while read -r DOM IP; do
             || echo "dns-reconcile: FAILED $DOM -> $IP"
     fi
 done <<< "$PAIRS"
+
+# core hairpin pins ride the same timer (the exact complement of
+# the remote registrations above — device == here pins to loopback)
+"$(dirname "$0")/hosts-reconcile.sh" || true

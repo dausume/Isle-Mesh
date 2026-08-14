@@ -91,6 +91,11 @@ BOOT=/usr/share/isle-mesh/isle-cli/scripts/isle-bootstrap.sh
 BOOT_SHA=$([ -f "$BOOT" ] && sha256sum "$BOOT" | cut -d" " -f1 || echo "?")
 CORE_IP=$(hostname -I | awk '{print $1}')
 
+# core hairpin pins: every core-served .isle domain must pin to
+# loopback on THIS host (macvlan host isolation) — reconciled
+# here once and by the self-feed timer forever after
+"$SCRIPT_DIR/hosts-reconcile.sh" || true
+
 echo
 echo -e "${G}════════ ISLE CORE READY — JOIN INFO for remotes ════════${N}"
 echo "CA fingerprint (verify on every joining device):"
