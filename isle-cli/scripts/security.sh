@@ -535,6 +535,15 @@ ${CYAN}USAGE:${NC}
   isle security harden         Apply all hardening (sudo required)
   isle security harden <item>  Fix one item: ports, mdns, firewall
   isle security unharden       Remove all hardening
+  isle security creds          Deployment credentials: what exists,
+                               placeholder values, last-updated ages,
+                               STALE flags (>30d)
+  isle security gate           Non-interactive deploy check — outside
+                               doors refuse to open while this fails
+  isle security setup          The production-security WALKTHROUGH:
+                               prompts for passwords/domain/cert
+                               processes at deploy time (also the last
+                               step of isle core-install)
   isle security help           Show this help
 
 ${CYAN}WHAT IT CHECKS:${NC}
@@ -574,6 +583,11 @@ case "${1:-status}" in
         ;;
     check)
         run_check_mode
+        ;;
+    # the CREDENTIAL half — deploy-time material, walkthrough, gate
+    # (secure-creds.sh; network hardening stays in this file)
+    creds|gate|setup)
+        exec bash "$SCRIPT_DIR/secure-creds.sh" "$@"
         ;;
     harden)
         if [[ -n "${2:-}" ]]; then

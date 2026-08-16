@@ -57,6 +57,11 @@ cat > "$STAGE/DEBIAN/postinst" <<'EOF'
 mkdir -p /usr/local/bin
 ln -sf /usr/share/isle-mesh/isle-cli/index.js /usr/local/bin/isle
 chmod +x /usr/share/isle-mesh/isle-cli/index.js 2>/dev/null || true
+# security material is DEPLOY-TIME input, never shipped in the deb —
+# point at the walkthrough instead of installing any default
+echo "isle CLI installed. On a core: sudo isle core-install"
+echo "  (ends with the production-security walkthrough; any time:"
+echo "   isle security setup — passwords/domain/certs put in at deploy)"
 exit 0
 EOF
 cat > "$STAGE/DEBIAN/postrm" <<'EOF'

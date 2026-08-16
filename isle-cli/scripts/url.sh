@@ -16,6 +16,7 @@
 # with the internal name's SNI/Host. Tracked in
 # /etc/isle-mesh/exposures.json (the dependency row).
 set -u
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 G="\033[0;32m"; Y="\033[1;33m"; R="\033[0;31m"; C="\033[0;36m"; N="\033[0m"
 ok(){ echo -e "${G}[ OK ]${N} $*"; }
 warn(){ echo -e "${Y}[WARN]${N} $*"; }
@@ -56,7 +57,9 @@ PYEOF
 entrypoint(){
     case "${1:-status}" in
         enable)
-            sudo touch "$ENTRYFLAG" && ok "THIS device is now a designated web entrypoint" ;;
+            sudo touch "$ENTRYFLAG" && ok "THIS device is now a designated web entrypoint"
+            echo "   next: isle security setup — doors refuse to open until the"
+            echo "   deploy-time credentials pass the gate (isle security gate)" ;;
         disable)
             sudo rm -f "$ENTRYFLAG" && ok "entrypoint designation removed (existing doors stay until unexposed)" ;;
         status|*)
@@ -75,6 +78,13 @@ expose(){
         *) shift ;;
     esac; done
     [ -f "$ENTRYFLAG" ] || die "this device is NOT a designated entrypoint — exposure is regulated (isle url entrypoint enable, a deliberate step)"
+    # THE SECURITY GATE (fail closed): upgrading .isle to the web is the
+    # moment placeholder credentials become an internet-facing hole —
+    # refuse the door until the deploy-time material is real.
+    if ! bash "$SCRIPT_DIR/secure-creds.sh" gate >/dev/null 2>&1; then
+        bash "$SCRIPT_DIR/secure-creds.sh" creds || true
+        die "production-security gate FAILED — placeholder/missing credentials on this device. Walk through: isle security setup   (then retry the exposure)"
+    fi
     [ -n "$PORT" ] || die "--port <p> required (the OUTSIDE port for this door)"
     # PORT-CONFLICT GUARD (the resource ledger, locally): refuse a
     # host port already published, and suggest a free one — so doors
