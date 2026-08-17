@@ -1,0 +1,44 @@
+# prf-isle — LEAN polari instance served ONLY through the isle
+# (mac-2/3 first combined deployment, 2026-08-08).
+# NO published ports: the isle-vlan-agent is the sole ingress
+# (polari.isle -> frontend, api.polari.isle -> backend). sqlite,
+# no Keycloak (read-only surfaces are unauthenticated; auth
+# arrives with the full tier later).
+services:
+  backend:
+    image: prf-backend:staging
+    container_name: prf-isle-backend
+    restart: unless-stopped
+    networks: [isle-agent-net]
+    environment:
+      - DEPLOY_ENV=staging
+      - IN_DOCKER_CONTAINER=true
+      - POLARI_INSTANCE_NAME=prf-isle
+      - POLARI_INSTANCE_ID=isle
+      - DATABASE_TYPE=sqlite
+      - DATABASE_PATH=/data/polari.db
+      - OBJECT_STORAGE_ENABLED=false
+      - SSL_ENABLED=false
+      - CORS_ENABLED=true
+      - CORS_ORIGINS=https://polari.isle,http://polari.isle
+      - WEBSOCKET_ENABLED=true
+      - WEBSOCKET_PORT=3001
+      - POLARI_MODULES=${POLARI_ISLE_MODULES:-islemesh}
+      - POLARI_LAZY_BOOT=1
+    volumes:
+      - backend-data:/data
+    mem_limit: 2g
+  frontend:
+    image: prf-frontend:staging
+    container_name: prf-isle-frontend
+    restart: unless-stopped
+    networks: [isle-agent-net]
+    volumes:
+      - ./runtime-config.json:/usr/share/nginx/html/assets/runtime-config.json:ro
+    mem_limit: 128m
+    depends_on: [backend]
+volumes:
+  backend-data:
+networks:
+  isle-agent-net:
+    external: true

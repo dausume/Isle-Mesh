@@ -8,9 +8,9 @@
 # The dev LOOP (from pol-core, where the code lives) — now via the
 # MESH-LOCAL REGISTRY (fast push/pull, no 935MB save|ssh|load):
 #   pol node build backend
-#   docker tag prf-backend:staging 192.168.0.24:5000/prf-backend:staging
-#   docker push 192.168.0.24:5000/prf-backend:staging
-#   ssh isle-core isle-polari-deploy --pull   # pull + retag + deploy
+#   docker tag prf-backend:staging registry.isle:5000/prf-backend:staging
+#   docker push registry.isle:5000/prf-backend:staging
+#   ssh <core> isle-polari-deploy --pull      # pull + retag + deploy
 #
 #   isle-polari-deploy.sh [--modules <csv>] [--pull]
 set -u
@@ -23,11 +23,27 @@ while [ $# -gt 0 ]; do case "$1" in
     *) shift ;;
 esac; done
 DIR="$HOME/polari-isle"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 G="\033[0;32m"; Y="\033[1;33m"; R="\033[0;31m"; N="\033[0m"
 ok(){ echo -e "${G}[ OK ]${N} $*"; }
 step(){ echo -e "${Y}==>${N} $*"; }
 die(){ echo -e "${R}[FAIL]${N} $*"; exit 1; }
-[ -d "$DIR" ] || die "no $DIR — first-time setup writes the compose (see handoff §17)"
+# polari is a SUB-PROJECT nested in the repo (polari-isle/ — everything
+# lives inside the suite): first run SEEDS ~/polari-isle from the
+# versioned copy instead of requiring hand-made setup. The deployed
+# copy stays the working instance (rebase edits it in place); the
+# versioned dir is the source of truth for NEW deployments only.
+if [ ! -d "$DIR" ]; then
+    SEED=""
+    for s in /usr/share/isle-mesh/polari-isle "$SCRIPT_DIR/../../polari-isle"; do
+        [ -f "$s/docker-compose.yml" ] && { SEED="$s"; break; }
+    done
+    [ -n "$SEED" ] || die "no $DIR and no versioned polari-isle/ seed found (deb: /usr/share/isle-mesh/polari-isle)"
+    mkdir -p "$DIR"
+    cp "$SEED"/docker-compose.yml "$SEED"/runtime-config.json "$SEED"/push-to-polari.sh "$DIR/"
+    chmod +x "$DIR/push-to-polari.sh"
+    ok "seeded $DIR from the versioned polari sub-project ($SEED)"
+fi
 
 if [ "$PULL" = 1 ]; then
     step "0/5 pull the pushed image from the mesh registry"
@@ -75,6 +91,29 @@ done
 docker exec isle-vlan-agent sh -c "nginx -t >/dev/null 2>&1 && kill -HUP 1" 2>/dev/null
 
 step "4/5 self-feed pusher"
+# units are written here (templated per user/home) so a fresh device
+# needs no hand-made systemd files — the sub-project carries itself
+if [ ! -f /etc/systemd/system/polari-isle-push.timer ]; then
+    sudo tee /etc/systemd/system/polari-isle-push.service >/dev/null <<UNIT
+[Unit]
+Description=Feed isle state into prf-isle (push-to-polari)
+[Service]
+Type=oneshot
+User=$USER
+ExecStart=$DIR/push-to-polari.sh
+UNIT
+    sudo tee /etc/systemd/system/polari-isle-push.timer >/dev/null <<'UNIT'
+[Unit]
+Description=Feed isle state into prf-isle every 2 minutes
+[Timer]
+OnBootSec=90
+OnUnitActiveSec=120
+[Install]
+WantedBy=timers.target
+UNIT
+    sudo systemctl daemon-reload
+    ok "pusher units written (/etc/systemd/system/polari-isle-push.*)"
+fi
 sudo systemctl enable --now polari-isle-push.timer 2>/dev/null && ok "pusher timer live (2min)"
 
 step "5/5 verify"

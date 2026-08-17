@@ -29,10 +29,17 @@ trap 'rm -rf "$STAGE"' EXIT
 mkdir -p "$STAGE/DEBIAN" "$STAGE/$SHARE" "$OUTPUT"
 
 # ---- the CLI + its supporting trees (junk excluded) ----
-for d in isle-cli isle-agent mdns mesh-app-scaffolding openwrt-router; do
+# polari-isle = the polari sub-project (seeds ~/polari-isle on deploy).
+# Router IMAGES are excluded: they are fetch-or-build artifacts living
+# untracked in a working tree — a built qcow2 can carry credentials and
+# once shipped 30MB rides every deb (found 2026-08-17: hand-staged debs
+# were silently packaging them).
+for d in isle-cli isle-agent mdns mesh-app-scaffolding openwrt-router polari-isle; do
     [ -d "$REPO/$d" ] || { echo "missing $REPO/$d" >&2; exit 1; }
     tar -C "$REPO" --exclude=.git --exclude=node_modules \
-        --exclude='*.backup' -cf - "$d" | tar -C "$STAGE/$SHARE" -xf -
+        --exclude='*.backup' --exclude='*.qcow2' --exclude='*.img' \
+        --exclude='*.img.gz' --exclude='router-setup/images' \
+        -cf - "$d" | tar -C "$STAGE/$SHARE" -xf -
 done
 
 # ---- shell tools + icons (synced from polari-app-shell — see

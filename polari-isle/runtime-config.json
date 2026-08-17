@@ -1,0 +1,26 @@
+{
+  "_comment": "prf-isle: served ONLY via the isle agent (mac-2/3)",
+  "backend": {
+    "http":  { "protocol": "http",  "url": "api.polari.isle", "port": "80" },
+    "https": { "protocol": "https", "url": "api.polari.isle", "port": "443" },
+    "ws":    { "protocol": "wss",   "url": "api.polari.isle", "port": "443" },
+    "preferHttps": true
+  },
+  "frontend": {
+    "http":  { "protocol": "http",  "url": "polari.isle", "port": "80" },
+    "https": { "protocol": "https", "url": "polari.isle", "port": "443" }
+  },
+  "connection": { "retryInterval": 3000, "maxRetryTime": 60000, "timeout": 30000 },
+  "features": { "enableHttps": true, "enableRuntimeConfig": true, "allowBackendChange": false },
+  "keycloak": {
+    "_note": "no KC in the lean tier — login unavailable by design",
+    "authority": "https://auth.polari.isle/realms/Polari",
+    "clientId": "polari-frontend",
+    "realm": "Polari",
+    "redirectUri": "https://polari.isle/callback",
+    "postLogoutRedirectUri": "https://polari.isle",
+    "responseType": "code",
+    "scope": "openid profile email roles",
+    "silentRedirectUri": "https://polari.isle/assets/silent-refresh.html"
+  }
+}
