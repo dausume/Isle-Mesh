@@ -12,11 +12,12 @@
 #   isle security gate      non-interactive deploy check — exit 1 on
 #                           missing/placeholder material (url.sh refuses
 #                           to open outside doors while this fails)
-#   isle security setup     the interactive walkthrough: runs the polari
-#                           production setup shells where a polari node
-#                           lives on this device, rotates stale door
-#                           credentials, reports CA expiry, and walks the
-#                           .isle -> web-site upgrade questions
+#   isle security setup     the interactive walkthrough: the GENERIC
+#                           self-hosting preparation first (credentials,
+#                           doors, certs — provider-agnostic), then a
+#                           POST STEP asks whether a particular hosting
+#                           provider is in use and runs that provider's
+#                           additional steps (DigitalOcean today)
 #
 # Privilege: runs unprivileged; root-needed writes go through polkit
 # (pkexec) on a desktop, sudo otherwise (lib/security-ledger.sh sec_esc).
@@ -135,15 +136,70 @@ rotate_door() {  # PORT — new one-person credential for an outside door
     echo "   new password (shown ONCE — hand it to that one person): $pass"
 }
 
+# ---- provider post-steps ---------------------------------------------------
+# The walkthrough is GENERIC self-hosting first; providers are a POST step.
+# Each provider function states what is BUILT vs what is guidance — honest,
+# never pretending automation exists where it doesn't.
+
+provider_digitalocean() {
+    echo "DigitalOcean — additional steps (real machinery exists for these):"
+    echo "  1) DNS: host your domain's DNS at DO (or delegate it there) —"
+    echo "     the built cert path uses certbot's DO DNS-01 plugin."
+    echo "  2) Mint a DO API token (read+write) and have it ready as"
+    echo "     DO_API_TOKEN — it is asked for AT CERT TIME, never stored"
+    echo "     in a repo."
+    echo "  3) On the polari node, run the cert walkthrough:"
+    echo "       pol cert prod letsencrypt    (LE_DOMAIN, LE_EMAIL,"
+    echo "       DO_API_TOKEN; DNS-01 grants a WILDCARD — one cert covers"
+    echo "       every subdomain)"
+    echo "     then:  pol cert auto-renew install   (weekly cron)"
+    echo "  4) Droplet sizing note: a plain droplet stops billing when"
+    echo "     destroyed, not when powered off — destroy/renew deliberately."
+}
+
+provider_generic_vps() {
+    echo "Generic VPS / other provider — guidance (no provider automation built):"
+    echo "  - Point your domain's A/AAAA records at this host at your DNS host."
+    echo "  - Browser-trusted certs: certbot works everywhere — HTTP-01 needs"
+    echo "    port 80 reachable; DNS-01 needs your DNS host's certbot plugin"
+    echo "    (only the DigitalOcean plugin is wired into pol cert today)."
+    echo "  - Self-signed/internal CA stays fully supported: pol cert prod"
+    echo "    self-signed (clients import the root)."
+}
+
+provider_home() {
+    echo "Home / own hardware — guidance:"
+    echo "  - Your router must forward the door ports (or 80/443) to this"
+    echo "    device; your ISP may block inbound 80/443 or rotate your IP"
+    echo "    (dynamic DNS helps)."
+    echo "  - The isle's containment posture still applies: only designated"
+    echo "    entrypoints open doors (isle url entrypoint / isle url expose)."
+    echo "  - isle security harden covers the ISP-visibility side."
+}
+
+provider_post_step() {
+    echo "The general setup above is provider-agnostic. Particular providers"
+    echo "have extra steps (DNS control, API tokens, cert automation)."
+    read -p "Are you hosting with a particular provider? [do/vps/home/none] (none): " P
+    case "${P,,}" in
+        do|digitalocean|digital-ocean) provider_digitalocean ;;
+        vps|other)                     provider_generic_vps ;;
+        home|own|self)                 provider_home ;;
+        *) echo "  none selected — the generic preparation is complete." ;;
+    esac
+}
+
 setup() {
-    echo -e "${B}Isle production-security walkthrough — $(hostname)${N}"
+    echo -e "${B}Self-hosting security walkthrough — $(hostname)${N}"
     echo "Security material is put in AT DEPLOY TIME: this walkthrough asks"
     echo "for what a production deployment needs and never ships defaults."
+    echo "It prepares the GENERAL self-hosting case first; provider-specific"
+    echo "steps (DigitalOcean etc.) come as a post step at the end."
 
-    step "1/4 current state"
+    step "1/5 current state"
     creds || true
 
-    step "2/4 polari production credentials"
+    step "2/5 credentials (deploy-time input)"
     local d ran=0
     for d in $(polari_node_dirs); do
         ran=1
@@ -161,11 +217,11 @@ setup() {
     [ "$ran" = 0 ] && echo "  (no polari-rf-node checkout here — nothing to run; the lean"  \
         && echo "   isle polari carries no local KC/DB credentials)"
 
-    step "3/4 outside doors (the .isle -> web upgrade)"
-    local dir port any=0
+    step "3/5 outside doors + certificates (the .isle -> web upgrade)"
+    local dir port any=0 web=0
     for dir in "$EXPDIR"/*/; do
         [ -f "$dir/htpasswd" ] || continue
-        any=1; port=$(basename "$dir")
+        any=1; web=1; port=$(basename "$dir")
         local age; age=$(ledger_age_days "door-$port" "$dir/htpasswd")
         echo "door :$port — credential ${age:-?}d old"
         if sec_is_stale "door-$port" "$dir/htpasswd"; then
@@ -176,23 +232,27 @@ setup() {
     if [ "$any" = 0 ]; then
         echo "  no outside doors open — the isle is fully contained."
         read -p "  Will this isle be exposed as a WEB SITE from this device? (y/N): " A
-        if [[ "$A" =~ ^[Yy] ]]; then
-            if [ -f /etc/isle-mesh/entrypoint.enabled ]; then
-                ok "this device is already a designated entrypoint"
-            else
-                echo "  1) designate it:        isle url entrypoint enable"
-            fi
-            echo "  2) the gate must be clean first (isle security gate) —"
-            echo "     doors refuse to open over placeholder credentials"
-            echo "  3) open a door:          isle url expose <name.isle> --port <p> --user <who>"
-            echo "  4) a REAL domain + browser-trusted cert (Let's Encrypt via"
-            echo "     DNS-01) is the polari node's cert walkthrough:"
-            echo "       pol cert prod letsencrypt      (needs LE_DOMAIN, LE_EMAIL,"
-            echo "       DO_API_TOKEN; wildcard covers the subdomains)"
+        [[ "$A" =~ ^[Yy] ]] && web=1
+    fi
+    if [ "$web" = 1 ]; then
+        if [ -f /etc/isle-mesh/entrypoint.enabled ]; then
+            ok "this device is a designated entrypoint"
+        else
+            echo "  1) designate it:        isle url entrypoint enable"
         fi
+        echo "  2) the gate must be clean first (isle security gate) —"
+        echo "     doors refuse to open over placeholder credentials"
+        echo "  3) open a door:          isle url expose <name.isle> --port <p> --user <who>"
+        echo "  4) certificates, generically: internal/self-signed CA works"
+        echo "     everywhere (clients import the root); a browser-trusted"
+        echo "     cert needs a REAL domain you control — how, depends on"
+        echo "     your provider (the post step below)."
     fi
 
-    step "4/4 verdict"
+    step "4/5 hosting provider (post step)"
+    provider_post_step
+
+    step "5/5 verdict"
     gate || true
 }
 
