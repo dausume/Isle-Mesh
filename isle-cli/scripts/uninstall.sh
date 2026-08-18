@@ -173,6 +173,14 @@ ISLE_VOL_RE='^(isle-|polari-isle_|prf-isle-|prf-polari-)'
 ISLE_CTR_RE='^(isle-|prf-isle-|prf-polari-)'
 DEB_FAMILY="isle-mesh-cli isle-app-store isle-manager-app polari-shell-core"
 
+is_isle_core() {
+    [ "$(cat /etc/isle-mesh/agent/agent.mode 2>/dev/null)" = core ] && return 0
+    { virsh -c qemu:///system list --all --name 2>/dev/null \
+      || sudo -n virsh -c qemu:///system list --all --name 2>/dev/null; } \
+        | grep -q 'openwrt-isle' && return 0
+    return 1
+}
+
 verify_zero() {
     log_step "Verify: zero isle-mesh/polari footprint"
     local bad=0 n
@@ -187,7 +195,7 @@ verify_zero() {
              | grep -c 'openwrt-isle' || true)
         [ "${n:-0}" = 0 ] || { log_error "router VM remaining"; bad=1; }
     fi
-    n=$(dpkg -l 2>/dev/null | awk '/^ii/{print $2}' | grep -cE '^(isle-mesh-cli|isle-app-.*|isle-manager-app|polari-shell-core)$'); [ "${n:-0}" = 0 ] || { log_error "debs remaining: $n"; bad=1; }
+    n=$(dpkg -l 2>/dev/null | awk '/^ii/{print $2}' | grep -cE '^(isle-mesh-cli|isle-app-.*|isle-manager-app|polari-shell-core|polari-module-.*)$'); [ "${n:-0}" = 0 ] || { log_error "debs remaining: $n"; bad=1; }
     for d in /usr/share/isle-mesh /etc/isle-mesh; do
         [ ! -d "$d" ] || { log_error "$d still present"; bad=1; }
     done
@@ -213,6 +221,30 @@ uninstall_everything() {
         read -p "Proceed with the FULL uninstall? (yes/no): " CONFIRM
         [ "$CONFIRM" = "yes" ] || { echo "Cancelled."; exit 0; }
     fi
+
+    # ── THE CORE CASCADE (unin-7) ────────────────────────
+    # Deleting a CORE ends the isle for EVERY member device. That is
+    # not undoable: the CA, router, DNS, apt-on-mesh, and the core
+    # polari die here and cannot be regenerated as the same isle.
+    # Typed confirmation is required even with --force
+    # (ISLE_CONFIRM_DELETE=yes for automation).
+    if is_isle_core; then
+        echo ""
+        echo -e "${RED}${BOLD}╔══════════════════════════════════════════════════════════════╗${NC}"
+        echo -e "${RED}${BOLD}║  THIS DEVICE IS THE ISLE'S CORE — DELETING IT ENDS THE ISLE  ║${NC}"
+        echo -e "${RED}${BOLD}╚══════════════════════════════════════════════════════════════╝${NC}"
+        echo -e "${RED}Every member device loses its isle: DNS, the CA, apt-on-mesh, and"
+        echo -e "the core polari die with this core. THERE IS NO GOING BACK — a new"
+        echo -e "core-install creates a DIFFERENT isle (new CA); members must re-join."
+        echo -e "Members get a last-gasp ISLE-ENDING signal: their apps STOP now, and"
+        echo -e "each device's next store open asks its human about full removal.${NC}"
+        if [ "${ISLE_CONFIRM_DELETE:-}" != "yes" ]; then
+            read -p "Type exactly 'delete the isle' to continue: " PHRASE
+            [ "$PHRASE" = "delete the isle" ] || { echo "Cancelled — nothing was touched."; exit 0; }
+        fi
+        esc bash "$SCRIPTS_DIR/watch.sh" broadcast-ending || true
+    fi
+
     local BK="/var/backups/isle-mesh-purge-$(date +%Y%m%d-%H%M%S)"
     esc mkdir -p "$BK"
     [ -d /etc/isle-mesh ] && esc tar czf "$BK/etc-isle-mesh.tgz" -C /etc isle-mesh 2>/dev/null
@@ -228,8 +260,10 @@ uninstall_everything() {
     done
 
     # packages LAST — this script may delete itself out from under bash,
-    # which keeps the open file handle (safe on Linux)
-    local apps; apps=$(dpkg -l 2>/dev/null | awk '{print $2}' | grep -E '^isle-app-' | tr '\n' ' ')
+    # which keeps the open file handle (safe on Linux). The family
+    # includes every launcher (isle-app-*) AND every polari module/
+    # engine deb (polari-module-*) installed via apt-on-mesh.
+    local apps; apps=$(dpkg -l 2>/dev/null | awk '/^ii/{print $2}' | grep -E '^(isle-app-|polari-module-)' | tr '\n' ' ')
     esc apt-get purge -y $DEB_FAMILY $apps 2>/dev/null \
         || esc dpkg -P $DEB_FAMILY $apps 2>/dev/null || true
     log_success "packages purged"

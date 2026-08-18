@@ -121,6 +121,7 @@ if [ "$WANT_HOST" = 1 ]; then
     warn "Do this at the machine, not over the connection it may reset."
     if docker ps --format '{{.Names}}' 2>/dev/null | grep -qE '^isle-(vlan|remote)-agent$'; then
         ok "agent already running — this device is an isle member"
+        sudo isle watch enable 2>/dev/null && ok "isle-watch on (hears the core's ISLE-ENDING)" || true
     elif [ "$(cat /etc/isle-mesh/agent/agent.mode 2>/dev/null)" = "core" ]; then
         # a core that lost its agent: bring it back up
         isle agent ensure 2>/dev/null && ok "core agent up" \
@@ -133,6 +134,8 @@ if [ "$WANT_HOST" = 1 ]; then
         else
             sudo isle join || warn "join did not complete — see: isle join --help"
         fi
+        # members listen for the core's last-gasp ISLE-ENDING signal
+        sudo isle watch enable 2>/dev/null && ok "isle-watch on (hears the core's ISLE-ENDING)" || true
     fi
 else
     echo "   skipped — but NOTE: installing apps from the store on this"

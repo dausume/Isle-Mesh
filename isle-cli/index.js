@@ -41,6 +41,7 @@ const commands = {
   shell:    { script: 'shell.sh',    desc: 'Install polari/isle apps as native shells', docker: true },
   module:   { script: 'module.sh',   desc: 'Install polari modules into the instance' },
   security: { script: 'security.sh', desc: 'ISP visibility and network hardening' },
+  watch: { script: 'watch.sh', desc: 'Member-side ISLE-ENDING listener + core-health poll (unin-7)' },
 
   // Lifecycle
   create:    { script: 'create.sh',    desc: 'Complete setup (agent + router + sample app)' },

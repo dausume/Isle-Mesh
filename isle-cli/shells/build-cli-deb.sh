@@ -66,6 +66,10 @@ ln -sf /usr/share/isle-mesh/isle-cli/index.js /usr/local/bin/isle
 chmod +x /usr/share/isle-mesh/isle-cli/index.js 2>/dev/null || true
 # security material is DEPLOY-TIME input, never shipped in the deb —
 # point at the walkthrough instead of installing any default
+if [ "$(cat /etc/isle-mesh/agent/agent.mode 2>/dev/null)" = remote ]; then
+    bash /usr/share/isle-mesh/isle-cli/scripts/watch.sh enable >/dev/null 2>&1 || true
+    echo "isle-watch enabled (member device: listens for the core's ISLE-ENDING)"
+fi
 echo "isle CLI installed. On a core: sudo isle core-install"
 echo "  (ends with the production-security walkthrough; any time:"
 echo "   isle security setup — passwords/domain/certs put in at deploy)"
@@ -81,6 +85,15 @@ cat > "$STAGE/DEBIAN/prerm" <<'EOF'
 #!/bin/sh
 if [ "$1" = remove ]; then
     SCRIPTS=/usr/share/isle-mesh/isle-cli/scripts
+    # CORE CASCADE (unin-7): removing the core ends the isle for every
+    # member — send the last-gasp ISLE-ENDING broadcast FIRST so member
+    # watchers stop their apps and prompt their humans. (apt cannot
+    # prompt here; the interactive warning lives in `isle uninstall`.)
+    if [ "$(cat /etc/isle-mesh/agent/agent.mode 2>/dev/null)" = core ]; then
+        echo "isle-mesh-cli: THIS IS AN ISLE CORE — broadcasting ISLE-ENDING to members"
+        bash "$SCRIPTS/watch.sh" broadcast-ending || true
+    fi
+    systemctl disable --now isle-watch >/dev/null 2>&1 || true
     echo "isle-mesh-cli: stopping the mesh (data is preserved; purge erases it)"
     bash "$SCRIPTS/destroy.sh" --force >/dev/null 2>&1 || true
     bash "$SCRIPTS/network-handback.sh" || true
@@ -105,7 +118,7 @@ if [ "$1" = purge ]; then
             docker run --rm -v "$v":/v:ro -v "$BK":/b alpine                 tar czf "/b/$v.tgz" -C /v . >/dev/null 2>&1                 && docker volume rm "$v" >/dev/null 2>&1                 && echo "isle-mesh-cli purge: volume $v backed up + removed"
         done
     fi
-    for unit in polari-isle-push isle-trust-update isle-host-agent isle-mesh-boot; do
+    for unit in polari-isle-push isle-trust-update isle-host-agent isle-mesh-boot isle-watch; do
         systemctl stop "$unit.timer" "$unit.service" >/dev/null 2>&1 || true
         systemctl disable "$unit.timer" "$unit.service" >/dev/null 2>&1 || true
         rm -f "/etc/systemd/system/$unit.service" "/etc/systemd/system/$unit.timer"
@@ -127,7 +140,7 @@ Version: $VERSION
 Section: admin
 Priority: optional
 Architecture: all
-Depends: nodejs, jq, openssl, curl, iw, hostapd
+Depends: nodejs, jq, openssl, curl, iw, hostapd, socat
 Replaces: isle-manager-app (<< 0.2)
 Installed-Size: $INSTALLED_KB
 Maintainer: Isle-Mesh <isle@localhost>
