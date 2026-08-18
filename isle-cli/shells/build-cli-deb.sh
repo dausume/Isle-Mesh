@@ -71,12 +71,54 @@ echo "  (ends with the production-security walkthrough; any time:"
 echo "   isle security setup — passwords/domain/certs put in at deploy)"
 exit 0
 EOF
+# prerm (unin-2): plain `apt remove` must leave NO running mesh behind —
+# the standard route does the same steps as the terminal (stop timers,
+# full runtime teardown, network ownership handback), DATA PRESERVED
+# (/etc/isle-mesh + docker volumes survive for a reinstall). Guarded to
+# `remove` only (never fires on upgrade), and every step tolerates
+# failure — an uninstall must never wedge dpkg.
+cat > "$STAGE/DEBIAN/prerm" <<'EOF'
+#!/bin/sh
+if [ "$1" = remove ]; then
+    SCRIPTS=/usr/share/isle-mesh/isle-cli/scripts
+    echo "isle-mesh-cli: stopping the mesh (data is preserved; purge erases it)"
+    bash "$SCRIPTS/destroy.sh" --force >/dev/null 2>&1 || true
+    bash "$SCRIPTS/network-handback.sh" || true
+    echo "isle-mesh-cli: mesh stopped, networking handed back to the OS."
+    echo "  data kept: /etc/isle-mesh + docker volumes (apt purge erases them)"
+fi
+exit 0
+EOF
+
+# postrm (unin-2): `purge` additionally erases config/state. It runs
+# AFTER package files are gone, so it is fully self-contained. Volumes:
+# backup-then-delete (accepted Q1) into /var/backups/isle-mesh-<date>.
 cat > "$STAGE/DEBIAN/postrm" <<'EOF'
 #!/bin/sh
 [ "$1" = remove ] && rm -f /usr/local/bin/isle
+if [ "$1" = purge ]; then
+    BK="/var/backups/isle-mesh-purge-$(date +%Y%m%d-%H%M%S)"
+    mkdir -p "$BK"
+    [ -d /etc/isle-mesh ] && tar czf "$BK/etc-isle-mesh.tgz" -C /etc isle-mesh 2>/dev/null
+    if command -v docker >/dev/null 2>&1; then
+        for v in $(docker volume ls --format '{{.Name}}' 2>/dev/null             | grep -E '^(isle-|polari-isle_|prf-isle-|prf-polari-)'); do
+            docker run --rm -v "$v":/v:ro -v "$BK":/b alpine                 tar czf "/b/$v.tgz" -C /v . >/dev/null 2>&1                 && docker volume rm "$v" >/dev/null 2>&1                 && echo "isle-mesh-cli purge: volume $v backed up + removed"
+        done
+    fi
+    for unit in polari-isle-push isle-trust-update isle-host-agent isle-mesh-boot; do
+        systemctl stop "$unit.timer" "$unit.service" >/dev/null 2>&1 || true
+        systemctl disable "$unit.timer" "$unit.service" >/dev/null 2>&1 || true
+        rm -f "/etc/systemd/system/$unit.service" "/etc/systemd/system/$unit.timer"
+    done
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    rm -rf /etc/isle-mesh /usr/share/isle-mesh /var/lib/isle-mesh /var/log/isle-mesh
+    rm -f /etc/apt/sources.list.d/isle-mesh.list /etc/dnsmasq.d/split-dns.conf
+    sed -i '/\.isle$/d;/\.isle /d' /etc/hosts 2>/dev/null || true
+    echo "isle-mesh-cli purge: config/state erased; backups at $BK"
+fi
 exit 0
 EOF
-chmod 755 "$STAGE/DEBIAN/postinst" "$STAGE/DEBIAN/postrm"
+chmod 755 "$STAGE/DEBIAN/postinst" "$STAGE/DEBIAN/prerm" "$STAGE/DEBIAN/postrm"
 
 INSTALLED_KB=$(du -sk "$STAGE/usr" | cut -f1)
 cat > "$STAGE/DEBIAN/control" <<EOF

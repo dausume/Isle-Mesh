@@ -17,6 +17,12 @@
 #   isle uninstall              Remove the app (if present) AND the CLI tool
 #   isle uninstall --cli-only   Remove only the CLI tool
 #   isle uninstall --app-only   Remove only the desktop app
+#   isle uninstall --everything THE FULL WIPE: backup → destroy --purge →
+#                               network handback → volumes (backup-then-
+#                               delete) → apt purge of every isle package
+#                               → verify. Identical steps via terminal,
+#                               desktop (apt), or the store UI (polkit).
+#   isle uninstall --verify     Zero-footprint sweep (read-only)
 #   isle uninstall --force      Skip the confirmation prompt
 #   isle uninstall --help
 #############################################################################
@@ -34,10 +40,14 @@ APP_ONLY=false
 CLI_ONLY=false
 FORCE=false
 
+EVERYTHING=false
+VERIFY=false
 for arg in "$@"; do
     case "$arg" in
         --app-only) APP_ONLY=true ;;
         --cli-only) CLI_ONLY=true ;;
+        --everything) EVERYTHING=true ;;
+        --verify) VERIFY=true ;;
         --force|-f) FORCE=true ;;
         --help|-h|help)
             sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
@@ -141,6 +151,97 @@ remove_cli() {
 
     [ -n "$target" ] && log_info "(The source it pointed at — $(dirname "$(dirname "$target")") — was NOT deleted.)"
 }
+
+# ── The ONE engine: --everything / --verify (unin-3) ─────
+# These ARE the terminal steps; the desktop route (apt) runs the same
+# scripts from the deb's prerm/postrm, and the store UI runs exactly
+# this verb via polkit. One engine, three doors.
+SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# privilege: polkit when a desktop session can prompt, sudo otherwise —
+# the same flow works smoothly with and without a UI.
+esc() {
+    if [ "$(id -u)" = 0 ]; then "$@"
+    elif [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && command -v pkexec >/dev/null 2>&1; then
+        pkexec "$@"
+    else
+        sudo "$@"
+    fi
+}
+
+ISLE_VOL_RE='^(isle-|polari-isle_|prf-isle-|prf-polari-)'
+ISLE_CTR_RE='^(isle-|prf-isle-|prf-polari-)'
+DEB_FAMILY="isle-mesh-cli isle-app-store isle-manager-app polari-shell-core"
+
+verify_zero() {
+    log_step "Verify: zero isle-mesh/polari footprint"
+    local bad=0 n
+    n=$(docker ps -a --format '{{.Names}}' 2>/dev/null | grep -cE "$ISLE_CTR_RE"); [ "${n:-0}" = 0 ] || { log_error "containers remaining: $n"; bad=1; }
+    n=$(docker volume ls --format '{{.Name}}' 2>/dev/null | grep -cE "$ISLE_VOL_RE"); [ "${n:-0}" = 0 ] || { log_error "volumes remaining: $n (data — remove via purge/backup)"; bad=1; }
+    n=$(docker images --format '{{.Repository}}' 2>/dev/null | grep -cE '^(isle-|prf-)'); [ "${n:-0}" = 0 ] || { log_warning "images remaining: $n (harmless; docker rmi to clear)"; }
+    if command -v virsh >/dev/null 2>&1; then
+        # read-only check must never hang on a password prompt: try
+        # unprivileged (libvirt group), then non-interactive sudo, else skip
+        n=$( { virsh -c qemu:///system list --all --name 2>/dev/null \
+               || sudo -n virsh -c qemu:///system list --all --name 2>/dev/null; } \
+             | grep -c 'openwrt-isle' || true)
+        [ "${n:-0}" = 0 ] || { log_error "router VM remaining"; bad=1; }
+    fi
+    n=$(dpkg -l 2>/dev/null | awk '/^ii/{print $2}' | grep -cE '^(isle-mesh-cli|isle-app-.*|isle-manager-app|polari-shell-core)$'); [ "${n:-0}" = 0 ] || { log_error "debs remaining: $n"; bad=1; }
+    for d in /usr/share/isle-mesh /etc/isle-mesh; do
+        [ ! -d "$d" ] || { log_error "$d still present"; bad=1; }
+    done
+    systemctl is-active --quiet NetworkManager 2>/dev/null \
+        && log_success "network owner: NetworkManager (active)" \
+        || log_warning "NetworkManager not active — check who owns the interfaces"
+    [ "$bad" = 0 ] && log_success "VERIFIED: nothing of isle-mesh/polari remains on this device" \
+                   || log_error "footprint remains (above)"
+    return $bad
+}
+
+uninstall_everything() {
+    echo -e "${BOLD}${BLUE}Full uninstall — mesh runtime, network handback, data, packages${NC}"
+    echo "Steps (identical via terminal, desktop, or the store UI's polkit):"
+    echo "  1. backup   /etc/isle-mesh + data volumes → /var/backups/isle-mesh-purge-<date>"
+    echo "  2. destroy  --purge --force   (apps, agent, router, config footprint)"
+    echo "  3. network-handback           (wifi ownership, stale leases, split-DNS)"
+    echo "  4. volumes  backup-then-delete"
+    echo "  5. packages apt purge: $DEB_FAMILY + isle-app-*"
+    echo "  6. verify   zero-footprint sweep"
+    echo -e "${YELLOW}Code checkouts are NEVER touched. Third-party systems (odoo) are spared.${NC}"
+    if [ "$FORCE" = false ]; then
+        read -p "Proceed with the FULL uninstall? (yes/no): " CONFIRM
+        [ "$CONFIRM" = "yes" ] || { echo "Cancelled."; exit 0; }
+    fi
+    local BK="/var/backups/isle-mesh-purge-$(date +%Y%m%d-%H%M%S)"
+    esc mkdir -p "$BK"
+    [ -d /etc/isle-mesh ] && esc tar czf "$BK/etc-isle-mesh.tgz" -C /etc isle-mesh 2>/dev/null
+    log_success "backup dir: $BK"
+
+    esc bash "$SCRIPTS_DIR/destroy.sh" --purge --force || true
+    esc bash "$SCRIPTS_DIR/network-handback.sh" || true
+
+    for v in $(docker volume ls --format '{{.Name}}' 2>/dev/null | grep -E "$ISLE_VOL_RE"); do
+        docker run --rm -v "$v":/v:ro -v "$BK":/b alpine tar czf "/b/$v.tgz" -C /v . >/dev/null 2>&1 \
+            && docker volume rm "$v" >/dev/null 2>&1 \
+            && log_success "volume $v backed up + removed"
+    done
+
+    # packages LAST — this script may delete itself out from under bash,
+    # which keeps the open file handle (safe on Linux)
+    local apps; apps=$(dpkg -l 2>/dev/null | awk '{print $2}' | grep -E '^isle-app-' | tr '\n' ' ')
+    esc apt-get purge -y $DEB_FAMILY $apps 2>/dev/null \
+        || esc dpkg -P $DEB_FAMILY $apps 2>/dev/null || true
+    log_success "packages purged"
+
+    verify_zero || true
+    echo ""
+    log_success "Full uninstall complete. Backups: $BK"
+    exit 0
+}
+
+if [ "$VERIFY" = true ]; then verify_zero; exit $?; fi
+if [ "$EVERYTHING" = true ]; then uninstall_everything; fi
 
 # ── Banner + plan ────────────────────────────────────────
 echo -e "${BOLD}${BLUE}╔═══════════════════════════════════════════════════════════════╗${NC}"

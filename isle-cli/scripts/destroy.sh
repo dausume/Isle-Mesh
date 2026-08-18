@@ -196,6 +196,27 @@ if [ -n "$MESH_APPS" ]; then
 else
     echo -e "${BLUE}  → No mesh applications found${NC}"
 fi
+
+# EXACT-family container sweep (unin-0): deployed apps carry no label and
+# their compose files live under /etc/isle-mesh, not PROJECT_ROOT — the
+# 2026-08-17 manual purge found NINE app containers still running after a
+# destroy. Exact name families only (never fuzzy-match packages or
+# containers: the aisleriot lesson).
+for cf in /etc/isle-mesh/apps/*/docker-compose*.yml /etc/isle-mesh/polari/*/docker-compose*.yml; do
+    [ -f "$cf" ] || continue
+    echo -e "${BLUE}  → compose down: $(dirname "$cf")${NC}"
+    (cd "$(dirname "$cf")" && docker compose -f "$(basename "$cf")" down 2>/dev/null) || true
+done
+for c in $(docker ps -a --format '{{.Names}}' 2>/dev/null \
+    | grep -E '^(isle-(apt|odoo|whoami|registry|trust-page|sample-app|expose)([-_].*)?|prf-isle-.*|prf-polari-.*)$'); do
+    echo -e "${BLUE}  → removing container ${c}${NC}"
+    docker rm -f "$c" >/dev/null 2>&1 || true
+done
+# self-feed + trust timers stop firing the moment the mesh goes
+for t in polari-isle-push.timer isle-trust-update.timer; do
+    sudo systemctl stop "$t" 2>/dev/null || true
+    sudo systemctl disable "$t" 2>/dev/null || true
+done
 echo ""
 
 # Exit early if apps-only mode
@@ -306,6 +327,15 @@ if [ "$KEEP_ROUTER" = false ]; then
     else
         echo -e "${BLUE}  → Libvirt/virsh not installed, skipping router${NC}"
     fi
+
+    # Leftover isle bridges (br-my-isle survived a live destroy on
+    # 2026-08-17). Exact names/prefixes only — never docker's br-<hash>.
+    for br in $(ip -br link show type bridge 2>/dev/null | awk '{print $1}' \
+        | grep -E '^(br-my-isle$|isle-br-|br-mgmt$)'); do
+        sudo ip link set "$br" down 2>/dev/null || true
+        sudo ip link delete "$br" 2>/dev/null \
+            && echo -e "${BLUE}  → removed leftover bridge ${br}${NC}" || true
+    done
 else
     echo -e "${BOLD}${CYAN}[3/3] Skipping router (--keep-router specified)${NC}"
 fi
@@ -359,6 +389,15 @@ if [ "$PURGE" = true ]; then
     sudo systemctl restart systemd-resolved 2>/dev/null || true
     echo -e "${BLUE}  → removed DNS split config${NC}"
 
+    # Self-feed/trust timer unit files, .isle hosts pins, on-mesh apt source
+    for unit in polari-isle-push isle-trust-update; do
+        sudo rm -f "/etc/systemd/system/${unit}.service" "/etc/systemd/system/${unit}.timer" 2>/dev/null || true
+    done
+    sudo systemctl daemon-reload 2>/dev/null || true
+    sudo sed -i '/\.isle$/d;/\.isle /d' /etc/hosts 2>/dev/null || true
+    sudo rm -f /etc/apt/sources.list.d/isle-mesh.list 2>/dev/null || true
+    echo -e "${BLUE}  → removed timer units, .isle hosts pins, on-mesh apt source${NC}"
+
     # mDNS broadcast + host-agent runtime scripts and domain list
     # (NOTE: /usr/local/bin/isle-mesh holds installed scripts; /usr/local/bin/isle
     #  is the CLI symlink and is intentionally NOT touched.)
@@ -403,6 +442,11 @@ if [ "$PURGE" = true ]; then
         echo -e "    • /etc/docker/daemon.json was modified (cgroup driver) — review before reverting."
     fi
     systemctl is-enabled libvirtd >/dev/null 2>&1 && echo -e "    • libvirtd left enabled + 'libvirt' group membership (shared dep — usually keep)."
+    echo -e "    • network OWNERSHIP handback (wifi takeover on remotes, stale isle"
+    echo -e "      leases, ~isle NM split-DNS) is a separate deliberate step:"
+    echo -e "        sudo bash $PROJECT_ROOT/isle-cli/scripts/network-handback.sh"
+    echo -e "      (the deb's uninstall runs it for you; destroy alone does not,"
+    echo -e "      so a re-create keeps working without re-joining)"
 
     echo -e "${GREEN}  ✓ Footprint purged — the isle CLI was kept${NC}"
     [ "$PURGE_APPS" = true ] && echo -e "${GREEN}  ✓ Installed isle-apps uninstalled${NC}" || true
