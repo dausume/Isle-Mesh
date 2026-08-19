@@ -21,30 +21,38 @@ install_and_configure_packages() {
     log_warning "Some packages may have failed to install (this is often OK if already installed)"
   fi
 
-  # Configure and start avahi-daemon
-  log_info "Configuring avahi-daemon..."
-
-  router_ssh \
-      "uci set avahi.@avahi[0].enable_reflector='1' && \
-       uci set avahi.@avahi[0].enable_dbus='yes' && \
-       uci commit avahi && \
-       /etc/init.d/avahi-daemon enable && \
-       /etc/init.d/avahi-daemon start" 2>/dev/null
-
-  if [[ $? -eq 0 ]]; then
-    log_success "avahi-daemon configured and started"
-  else
-    log_warning "Failed to configure avahi-daemon (may need manual configuration)"
-  fi
-
-  # Enable dbus (required for avahi)
+  # Enable dbus FIRST (avahi requires it), then avahi. Both steps are
+  # deliberately non-fatal — and must be WRITTEN that way: the packed
+  # router-init.sh runs under `set -e`, so the old bare-command-then-
+  # check-$? shape died silently on the first failure (the 2026-08-19
+  # fresh-box run: this OpenWrt image's avahi has NO UCI section, so
+  # `uci set avahi.@avahi[0]` was an instant fatal). Every remote step
+  # sits in an if-condition, and the UCI path falls back to the conf
+  # file avahi actually ships with.
   log_info "Enabling dbus service..."
-  router_ssh "/etc/init.d/dbus enable && /etc/init.d/dbus start" 2>/dev/null
-
-  if [[ $? -eq 0 ]]; then
+  if router_ssh "/etc/init.d/dbus enable && /etc/init.d/dbus start" 2>/dev/null; then
     log_success "dbus service enabled and started"
   else
     log_warning "Failed to start dbus service"
+  fi
+
+  log_info "Configuring avahi-daemon..."
+  if router_ssh \
+      "uci -q set avahi.@avahi[0].enable_reflector='1' && \
+       uci -q set avahi.@avahi[0].enable_dbus='yes' && \
+       uci -q commit avahi" 2>/dev/null; then
+    log_success "avahi configured via UCI"
+  elif router_ssh \
+      "[ -f /etc/avahi/avahi-daemon.conf ] && \
+       sed -i 's/^#*enable-reflector=.*/enable-reflector=yes/' /etc/avahi/avahi-daemon.conf" 2>/dev/null; then
+    log_success "avahi configured via /etc/avahi/avahi-daemon.conf (no UCI section on this image)"
+  else
+    log_warning "Failed to configure avahi-daemon (may need manual configuration)"
+  fi
+  if router_ssh "/etc/init.d/avahi-daemon enable && /etc/init.d/avahi-daemon restart" 2>/dev/null; then
+    log_success "avahi-daemon enabled and started"
+  else
+    log_warning "avahi-daemon did not start (mDNS reflection degraded, not fatal)"
   fi
 
   # Verify services are running
