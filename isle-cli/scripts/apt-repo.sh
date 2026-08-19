@@ -42,12 +42,23 @@ ensure_key() {
 }
 
 publish() {
-    local FROM="$HOME/polari-shells"
+    # deb sources, first hit wins: --from, the hand-staged dir (the
+    # INVOKING user's home — under sudo $HOME is /root, finding #6),
+    # then the from-code build output (.generated/debs of a suite
+    # checkout) — the normal fresh-box world after build-polari-isle-deb
+    local UH; UH="$(getent passwd "${SUDO_USER:-$USER}" | cut -d: -f6)"
+    local FROM=""
     while [ $# -gt 0 ]; do case "$1" in
         --from) FROM="$2"; shift 2 ;;
         *) shift ;;
     esac; done
-    [ -d "$FROM" ] || die "no deb source dir: $FROM"
+    if [ -z "$FROM" ]; then
+        for c in "$UH/polari-shells" "$UH/polari-suite/.generated/debs" \
+                 "$HOME/polari-shells"; do
+            ls "$c"/*.deb >/dev/null 2>&1 && { FROM="$c"; break; }
+        done
+    fi
+    [ -n "$FROM" ] && [ -d "$FROM" ] || die "no deb source dir found (looked: ~/polari-shells, ~/polari-suite/.generated/debs; or pass --from <dir>)"
     ensure_key
     sudo mkdir -p "$REPO"
 
