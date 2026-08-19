@@ -22,7 +22,11 @@ while [ $# -gt 0 ]; do case "$1" in
     --pull) PULL=1; shift ;;
     *) shift ;;
 esac; done
-DIR="$HOME/polari-isle"
+# the deployment lives in the INVOKING user's home (core-install runs
+# under sudo/pkexec where $HOME is /root — the deployment must not)
+DEPLOY_USER="${SUDO_USER:-$USER}"
+USER_HOME="$(getent passwd "$DEPLOY_USER" | cut -d: -f6)"
+DIR="${USER_HOME:-$HOME}/polari-isle"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 G="\033[0;32m"; Y="\033[1;33m"; R="\033[0;31m"; N="\033[0m"
 ok(){ echo -e "${G}[ OK ]${N} $*"; }

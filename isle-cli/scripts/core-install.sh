@@ -65,8 +65,10 @@ step "3/7 prf-isle (lean polari: $MODULES)"
 if docker ps --format '{{.Names}}' | grep -q '^prf-isle-backend$'; then
     ok "prf-isle already up"
 else
-    [ -d "$HOME/polari-isle" ] || die "no ~/polari-isle — first-time compose comes from the §17 setup (isle-polari-deploy needs it)"
-    isle-polari-deploy --modules "$MODULES" || die "prf-isle deploy failed"
+    # no pre-check on ~/polari-isle: the deploy script SEEDS it from the
+    # versioned polari-isle/ sub-project on first run (the old die-guard
+    # predated the seeding — finding #5, 2026-08-19)
+    bash "$SCRIPT_DIR/isle-polari-deploy.sh" --modules "$MODULES" || die "prf-isle deploy failed"
 fi
 
 # ---- 4. the store shell on this box + staged runtime ----
