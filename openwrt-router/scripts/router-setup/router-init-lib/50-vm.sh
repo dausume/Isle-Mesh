@@ -2,9 +2,18 @@
 # BEGIN: 50-vm.sh
 if [[ -n "${_VM_SH_SOURCED:-}" ]]; then return 0; fi; _VM_SH_SOURCED=1
 
-# Source template engine if not already loaded
+# Source template engine if not already loaded.
+# This part runs from TWO homes: standalone at
+# router-setup/router-init-lib/ (lib = ../../lib) and INLINED into the
+# packed scripts/router-init.sh (lib = ./lib, a sibling subdir) — the
+# 2026-08-19 fresh-box install died on the second shape. Try both.
 if [[ -z "${_TEMPLATE_ENGINE_SH:-}" ]]; then
-    LIB_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../lib" && pwd)"
+    _VM_HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+    if [[ -f "$_VM_HERE/lib/template-engine.sh" ]]; then
+        LIB_DIR="$_VM_HERE/lib"
+    else
+        LIB_DIR="$(cd -- "$_VM_HERE/../../lib" && pwd)"
+    fi
     source "$LIB_DIR/template-engine.sh"
 fi
 
