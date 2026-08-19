@@ -50,7 +50,13 @@ fi
 
 # ---- 2. the isle CA, trusted locally ----
 step "2/7 isle CA"
-[ -f "$CA" ] || die "no isle root CA at $CA — the CA is issued during isle setup (see security/); core-install expects it"
+if [ ! -f "$CA" ]; then
+    # fresh core (finding #4, 2026-08-19): trust material is deploy-time
+    # input — mint the self-contained isle CA right here, never ship one
+    warn "no isle CA yet — minting a self-contained one (isle certs init-ca)"
+    bash "$SCRIPT_DIR/certs.sh" init-ca || die "CA mint failed — cannot continue without trust material"
+fi
+[ -f "$CA" ] || die "no isle root CA at $CA even after init-ca — investigate"
 isle trust install --yes >/dev/null 2>&1 && ok "CA trusted locally ($(openssl x509 -in "$CA" -noout -fingerprint -sha256 | cut -d= -f2 | cut -c1-23)…)" \
     || warn "local trust import had warnings (isle trust status)"
 
