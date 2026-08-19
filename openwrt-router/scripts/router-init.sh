@@ -188,11 +188,10 @@ setup_router_ssh_key() {
     fi
   fi
 
-  # Generate new SSH key
+  # Generate new SSH key (if-wrapped: the packed script runs under
+  # set -e, so a bare command + $?-check dies before the check)
   log_info "Generating new SSH key for router communication..."
-  sudo ssh-keygen -t rsa -b 4096 -f "$ISLE_SSH_KEY" -N "" -C "isle-router-key" >/dev/null 2>&1
-
-  if [[ $? -eq 0 ]]; then
+  if sudo ssh-keygen -t rsa -b 4096 -f "$ISLE_SSH_KEY" -N "" -C "isle-router-key" >/dev/null 2>&1; then
     log_success "SSH key generated: $ISLE_SSH_KEY"
 
     # Set proper permissions
