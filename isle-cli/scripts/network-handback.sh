@@ -65,6 +65,19 @@ ip -br -4 addr show 2>/dev/null \
     done
 done
 
+# ---- 2b. re-assert per-link DNS (found live 2026-08-20): after the
+# ownership shuffle, systemd-resolved can be left with NO DNS scope on
+# an NM-managed link (SERVFAIL on everything) until the connection
+# re-activates. Reapply device config so NM re-pushes its lease DNS —
+# reapply is non-disruptive (no reassociation/DHCP release).
+if [ "$NM_ACTIVE" = 1 ] && command -v nmcli >/dev/null 2>&1; then
+    nmcli -t -f DEVICE,STATE device 2>/dev/null | awk -F: '$2=="connected"{print $1}' \
+      | grep -vE '^(lo|docker|veth|br-|virbr)' | while read -r dev; do
+        nmcli device reapply "$dev" >/dev/null 2>&1 \
+            && ok "reapplied NM config on $dev (lease DNS re-pushed to resolved)"
+    done
+fi
+
 # ---- 3. ~isle split-DNS out of NetworkManager profiles ----
 if [ "$NM_ACTIVE" = 1 ] && command -v nmcli >/dev/null 2>&1; then
     nmcli -t -f NAME connection show 2>/dev/null | while read -r c; do
