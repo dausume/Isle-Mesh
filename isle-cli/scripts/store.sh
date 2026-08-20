@@ -12,6 +12,9 @@
 #   isle store list                 browse published entries
 #   isle store show <name>          entry detail + its install plan
 #   isle store install <name>       run the plan (asks first)
+#   isle store uninstall <name>     remove THIS device's copy
+#                                   (--purge = also erase its data,
+#                                    backed up first — unin-4)
 set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 API="${POLARI_ISLE_API:-https://api.polari.isle}"
@@ -128,5 +131,93 @@ print("%s-%d" % (e["name"], n))')
         done
         echo -e "${G}installed ${DUP_NAME:-$NAME}${N}"
         ;;
-    *) echo "usage: isle store [list|show <name>|install <name> [--yes]]"; exit 1 ;;
+    uninstall)
+        # unin-4: the per-app teardown verb — the ONE engine step the
+        # store UI's Uninstall buttons run via pkexec (zero teardown
+        # logic in the UI). Scope is THIS DEVICE only: the mesh-app
+        # deployment here and/or the launcher deb here. Debian
+        # semantics: plain uninstall PRESERVES data (volumes + the
+        # app's /etc/isle-mesh/apps config survive; reinstalling
+        # picks them up); --purge erases them, BACKED UP FIRST
+        # (Q1 policy — same backup-then-delete as `isle uninstall
+        # --everything`, per-app scale).
+        NAME="${2:?usage: isle store uninstall <name> [--purge] [--yes]}"
+        echo "$NAME" | grep -qE '^[a-z0-9][a-z0-9-]{0,63}$' || { echo "not an app name: $NAME"; exit 1; }
+        PURGE=false; YES=false
+        for a in "${@:3}"; do case "$a" in
+            --purge) PURGE=true ;;
+            --yes)   YES=true ;;
+            *) echo "unknown flag: $a"; exit 1 ;;
+        esac; done
+        # privilege: the UI invokes this whole verb under pkexec
+        # (already root); a terminal user may not be — same esc
+        # pattern as uninstall.sh (root direct / pkexec / sudo).
+        esc() {
+            if [ "$(id -u)" = 0 ]; then "$@"
+            elif [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && command -v pkexec >/dev/null 2>&1; then pkexec "$@"
+            else sudo "$@"
+            fi
+        }
+        # what of $NAME exists on THIS device
+        MESH=false; [ -d "/etc/isle-mesh/apps/$NAME" ] && MESH=true
+        PKG=""
+        for k in isle polari; do
+            # "install ok installed" only — an rc (removed, config
+            # kept) package must not count as installed here
+            if dpkg-query -W -f '${Status}' "$k-app-$NAME" 2>/dev/null | grep -q 'install ok installed'; then
+                PKG="$k-app-$NAME"; break
+            fi
+        done
+        if [ "$MESH" = false ] && [ -z "$PKG" ]; then
+            echo -e "${Y}nothing of '$NAME' is installed on this device${N} (no /etc/isle-mesh/apps/$NAME, no isle-app-/polari-app- deb)."
+            echo "Other devices' copies are theirs to remove — uninstall runs where the app lives."
+            exit 1
+        fi
+        VOLS=$(docker volume ls --format '{{.Name}}' 2>/dev/null | grep "^isle-${NAME}_" || true)
+        echo -e "${Y}Uninstall '$NAME' from THIS device — will run:${N}"
+        [ "$MESH" = true ] && echo "  $ isle app undeploy $NAME    # compose down + agent unregister"
+        [ -n "$PKG" ]      && echo "  $ apt-get remove $PKG        # the launcher deb"
+        if [ "$PURGE" = true ]; then
+            [ -n "$VOLS" ] && echo "  + data volumes BACKED UP to /var/backups/, then deleted:" && echo "$VOLS" | sed 's/^/      /'
+            [ "$MESH" = true ] && echo "  + /etc/isle-mesh/apps/$NAME erased; DNS entry ${NAME}.isle dropped"
+        else
+            { [ -n "$VOLS" ] || [ "$MESH" = true ]; } && echo "  (data PRESERVED — volumes + app config survive; reinstalling picks them up. --purge erases, backup first.)"
+        fi
+        if [ "$YES" != true ]; then
+            read -r -p "Proceed? [y/N] " a; [ "$a" = y ] || [ "$a" = Y ] || { echo aborted; exit 1; }
+        fi
+        if [ "$MESH" = true ]; then
+            bash "$SCRIPT_DIR/app.sh" undeploy "$NAME" || true
+        fi
+        if [ -n "$PKG" ]; then
+            # wrapper `<pkg> down` stops the launcher's own containers
+            # (same per-app step destroy.sh runs) before apt removal
+            command -v "$PKG" >/dev/null 2>&1 && "$PKG" down 2>/dev/null || true
+            if [ "$PURGE" = true ]; then esc apt-get purge -y "$PKG" || esc dpkg -P "$PKG" || true
+            else esc apt-get remove -y "$PKG" || esc dpkg -r "$PKG" || true
+            fi
+            esc rm -f "/etc/isle-mesh/agent/installed-apps/$NAME.env" 2>/dev/null || true
+        fi
+        if [ "$PURGE" = true ]; then
+            if [ -n "$VOLS" ]; then
+                BK="/var/backups/isle-mesh-app-$NAME-$(date +%Y%m%d-%H%M%S)"
+                esc mkdir -p "$BK"
+                for v in $VOLS; do
+                    esc docker run --rm -v "$v":/v:ro -v "$BK":/b alpine tar czf "/b/$v.tgz" -C /v . >/dev/null 2>&1 \
+                        && esc docker volume rm "$v" >/dev/null 2>&1 \
+                        && echo -e "${G}volume $v backed up + removed${N} → $BK/$v.tgz"
+                done
+            fi
+            [ "$MESH" = true ] && esc rm -rf "/etc/isle-mesh/apps/$NAME" \
+                && bash "$SCRIPT_DIR/dns.sh" unregister "$NAME" 2>/dev/null || true
+        fi
+        # honest final report: removed / preserved / how to finish
+        echo -e "${G}uninstalled $NAME from this device${N}"
+        if [ "$PURGE" != true ]; then
+            LEFT=$(docker volume ls --format '{{.Name}}' 2>/dev/null | grep "^isle-${NAME}_" | tr '\n' ' ')
+            [ -n "$LEFT" ] && echo "  preserved: volumes $LEFT(erase: isle store uninstall $NAME --purge)"
+            [ "$MESH" = true ] && echo "  preserved: /etc/isle-mesh/apps/$NAME + DNS ${NAME}.isle (a reinstall reuses them)"
+        fi
+        ;;
+    *) echo "usage: isle store [list|show <name>|install <name> [--yes]|uninstall <name> [--purge] [--yes]]"; exit 1 ;;
 esac

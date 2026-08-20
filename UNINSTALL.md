@@ -31,6 +31,22 @@ remote whose wifi was taken over by the join, plain member).
   containers, volumes, images, router VM, packages, directories all
   gone, and names which service owns your network.
 
+## The store's buttons (unin-4) — the UI runs the same steps via polkit
+
+Each button in the store shell is ONE pkexec invocation of the verb
+printed beside it — the UI holds zero teardown logic, and the page
+shows the terminal equivalent next to every button:
+
+| button (app detail) | exactly what runs |
+|---|---|
+| **Uninstall** | `pkexec isle store uninstall <name> --yes` — this device's copy only; **data preserved** (volumes + `/etc/isle-mesh/apps/<name>` survive for a reinstall) |
+| **Uninstall + erase data** | `pkexec isle store uninstall <name> --yes --purge` — volumes **backed up** to `/var/backups/isle-mesh-app-<name>-<date>/` first, then deleted; app config + `<name>.isle` DNS dropped |
+| **Remove isle-mesh…** (page footer) | opens a terminal running `pkexec isle uninstall --everything` — the verb is interactive, so its yes/no and the core-cascade typed confirmation happen in that terminal; a stray click removes nothing |
+
+`isle store uninstall` acts on THIS device only: the mesh-app
+deployment here and/or the launcher deb here (it says so honestly
+when neither exists). Other devices remove their own copies.
+
 ## What the engine handles per device shape (conditionals, not
 separate scripts)
 

@@ -32,7 +32,7 @@ const commands = {
   dns:      { script: 'dns.sh',      desc: 'Router DNS management (.isle domains)' },
   trust:    { script: 'trust.sh',    desc: 'CA trust install-step (status/install/cert)' },
   certs:    { script: 'certs.sh',    desc: 'Per-domain leaf issuance from the isle CA' },
-  store:    { script: 'store.sh',    desc: 'The general isle app store (list/show/install)' },
+  store:    { script: 'store.sh',    desc: 'The general isle app store (list/show/install/uninstall)' },
   'apt-repo': { script: 'apt-repo.sh', desc: 'Apt-on-mesh: signed deb repo at apt.isle (publish/enable/status)' },
   'core-install': { script: 'core-install.sh', desc: 'ONE flow: fresh box to working isle core (5a)' },
   polari:   { script: 'polari.sh',   desc: 'Polari instances as mesh-app installs (instance deploy/rebase/undeploy/instances)' },
