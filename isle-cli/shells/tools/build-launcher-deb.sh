@@ -9,14 +9,25 @@
 #   build-launcher-deb.sh --name <app> --title "<Title>" \
 #       --url https://<app>.isle [--kind polari|isle] \
 #       [--instance-name <n>] [--ca <root.pem>] [--icon <png>] \
+#       [--scope instance|app] [--app-name <PolariAppDefinition>] \
+#       [--start-route </route>] [--capabilities <csv>] \
+#       [--registration <polari-shell.json>] \
 #       [--version 0.1.0] [--output dist]
 #
-# The config is the shell's registration document (ShellConfig):
-# one instance, its web UI URL, optional pinned CA. No runtime, no
-# jars — that all lives in polari-shell-core.
+# The config is the shell's registration document (ShellConfig).
+# sep-2: --registration bakes the CANONICAL document (from
+# GET /api/appstore/{shell}/registration?download=1 — the one
+# generator, appstore_payloads.registration_document) verbatim; the
+# generated fallback below covers offline/isle-only builds and now
+# carries scope/appName/startRoute/capabilities instead of
+# hardcoding scope=instance. No runtime, no jars — that all lives
+# in polari-shell-core.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+SELF_DIR="$(cd "$(dirname "$0")" && pwd)"  # assets beside the script (both layouts)
 NAME=""; TITLE=""; URL=""; KIND="isle"; INSTANCE=""; CA=""; ICON=""
+SCOPE="instance"; APP_NAME=""; START_ROUTE=""; CAPABILITIES=""
+REGISTRATION=""
 VERSION=0.1.0; OUTPUT="$ROOT/dist"
 while [ $# -gt 0 ]; do case "$1" in
     --name) NAME="$2"; shift 2 ;;
@@ -26,15 +37,49 @@ while [ $# -gt 0 ]; do case "$1" in
     --instance-name) INSTANCE="$2"; shift 2 ;;
     --ca) CA="$2"; shift 2 ;;
     --icon) ICON="$2"; shift 2 ;;
+    --scope) SCOPE="$2"; shift 2 ;;
+    --app-name) APP_NAME="$2"; shift 2 ;;
+    --start-route) START_ROUTE="$2"; shift 2 ;;
+    --capabilities) CAPABILITIES="$2"; shift 2 ;;
+    --registration) REGISTRATION="$2"; shift 2 ;;
     --version) VERSION="$2"; shift 2 ;;
     --output) OUTPUT="$2"; shift 2 ;;
-    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,23p' "$0"; exit 0 ;;
     *) echo "unknown arg: $1" >&2; exit 1 ;;
 esac; done
-[ -n "$NAME" ] || { echo "--name required"; exit 1; }
-[ -n "$URL" ]  || { echo "--url required"; exit 1; }
+
+if [ -n "$REGISTRATION" ]; then
+    [ -f "$REGISTRATION" ] || { echo "--registration: no such file: $REGISTRATION" >&2; exit 1; }
+    # Validate + derive NAME/TITLE/scope from the canonical document
+    # (mirrors ShellConfig.looksValid, incl. sep-1 scope coherence).
+    DERIVED=$(python3 - "$REGISTRATION" <<'PYEOF'
+import json, sys
+doc = json.load(open(sys.argv[1]))
+app = doc.get('app') or {}
+ok = (doc.get('kind') == 'polari-shell-registration'
+      and doc.get('schemaVersion') == 1
+      and (doc.get('instances') or [])
+      and (app.get('scope') != 'app' or app.get('appName')))
+if not ok:
+    sys.exit('not a valid polari-shell-registration v1 '
+             '(kind/schemaVersion/instances/scope-appName coherence)')
+print(app.get('name', ''))
+print(app.get('title', ''))
+print((doc['instances'][0] or {}).get('webUrl', ''))
+PYEOF
+) || { echo "$DERIVED" >&2; exit 1; }
+    [ -n "$NAME" ] || NAME="$(echo "$DERIVED" | sed -n 1p)"
+    [ -n "$TITLE" ] || TITLE="$(echo "$DERIVED" | sed -n 2p)"
+    [ -n "$URL" ] || URL="$(echo "$DERIVED" | sed -n 3p)"
+fi
+[ -n "$NAME" ] || { echo "--name required (or a --registration carrying app.name)"; exit 1; }
+[ -n "$REGISTRATION" ] || [ -n "$URL" ] || { echo "--url required"; exit 1; }
 [ -n "$TITLE" ] || TITLE="$NAME"
 [ -n "$INSTANCE" ] || INSTANCE="$NAME"
+case "$SCOPE" in instance|app) ;; *) echo "--scope must be instance|app" >&2; exit 1 ;; esac
+if [ "$SCOPE" = "app" ] && [ -z "$APP_NAME" ]; then
+    echo "--scope app requires --app-name (nothing to clamp to)" >&2; exit 1
+fi
 
 PKG="${KIND}-app-$(printf '%s' "$NAME" | tr '[:upper:]_' '[:lower:]-' | tr -cd 'a-z0-9.-')"
 SHARE="/usr/share/$PKG"
@@ -47,18 +92,21 @@ mkdir -p "$OUTPUT"
 
 # ---- the shell config: a REAL ShellConfig registration document
 # (kind/schemaVersion/app/instances — validated by core's
-# ShellConfig.looksValid). CA PEM is EMBEDDED (tls.caPem list), the
-# shell's own pinning model — not a path. Built with python so the
-# multi-line PEM escapes correctly.
-API_URL="$URL"
-case "$NAME" in
-    # convention: an <app>.isle web app's API is api.<app>.isle when
-    # that's how it was deployed; caller can override via --api later
-    *) API_URL="$URL" ;;
-esac
-python3 - "$NAME" "$TITLE" "$URL" "$INSTANCE" "$KIND" "${CA:-}" > "$STAGE$SHARE/polari-shell.json" <<'PYEOF'
+# ShellConfig.looksValid). sep-2: the CANONICAL document is baked
+# verbatim when --registration is given (the deb builder is a
+# CONSUMER of the one generator, never a second writer of served
+# docs); the generated fallback covers offline builds. CA PEM is
+# EMBEDDED (tls.caPem list), the shell's own pinning model — not a
+# path. Built with python so the multi-line PEM escapes correctly.
+if [ -n "$REGISTRATION" ]; then
+    cp "$REGISTRATION" "$STAGE$SHARE/polari-shell.json"
+else
+python3 - "$NAME" "$TITLE" "$URL" "$INSTANCE" "$KIND" "${CA:-}" \
+    "$SCOPE" "$APP_NAME" "$START_ROUTE" "$CAPABILITIES" \
+    > "$STAGE$SHARE/polari-shell.json" <<'PYEOF'
 import json, sys
-name, title, url, instance, kind, ca = sys.argv[1:7]
+(name, title, url, instance, kind, ca,
+ scope, app_name, start_route, capabilities) = sys.argv[1:11]
 ca_pem = []
 if ca:
     try:
@@ -68,9 +116,12 @@ if ca:
 doc = {
     "kind": "polari-shell-registration",
     "schemaVersion": 1,
-    "app": {"name": name, "title": title, "scope": "instance",
-            "appName": "", "startRoute": "", "brandColor": "",
-            "icon": ""},
+    "app": {"name": name, "title": title, "scope": scope,
+            "appName": app_name, "startRoute": start_route,
+            "brandColor": "", "icon": "",
+            "capabilities": [c.strip()
+                             for c in capabilities.split(',')
+                             if c.strip()]},
     "instances": [{
         "id": instance,
         "displayName": title,
@@ -93,10 +144,11 @@ doc = {
 }
 print(json.dumps(doc, indent=2))
 PYEOF
+fi
 
 # ---- icon: --icon wins; else the POLARI MARK is the default for
 # every isle/polari app (Dustin) ----
-DEFAULT_ICON="$ROOT/shells/icons/polari-mark.png"
+DEFAULT_ICON="$SELF_DIR/icons/polari-mark.png"
 [ -n "$ICON" ] && [ -f "$ICON" ] || ICON="$DEFAULT_ICON"
 if [ -f "$ICON" ]; then
     cp "$ICON" "$STAGE/usr/share/icons/hicolor/256x256/apps/$PKG.png"

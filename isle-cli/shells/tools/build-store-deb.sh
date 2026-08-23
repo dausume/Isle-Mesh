@@ -16,6 +16,10 @@
 #       [--version 0.1.0] [--output dist]
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# assets sit BESIDE this script in both layouts (app-shell/shells
+# and the vendored isle-cli/shells/tools copy — reinstall-dedup
+# rule 2026-08-23: ONE canonical source, synced by the bundle build)
+SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 URL="https://polari.isle/isle"
 CA=""; VERSION=0.1.0; OUTPUT="$ROOT/dist"
 while [ $# -gt 0 ]; do case "$1" in
@@ -35,7 +39,7 @@ rm -rf "$STAGE"; mkdir -p "$STAGE/DEBIAN" "$STAGE$SHARE" \
     "$STAGE/usr/share/icons/hicolor/256x256/apps" "$OUTPUT"
 
 # the ISLAND mark (CC0, shells/icons) is the store's icon
-ISLAND="$ROOT/shells/icons/isle-island.png"
+ISLAND="$SELF_DIR/icons/isle-island.png"
 if [ -f "$ISLAND" ]; then
     cp "$ISLAND" \
         "$STAGE/usr/share/icons/hicolor/256x256/apps/$PKG.png"
@@ -73,8 +77,8 @@ print(json.dumps({
         # deb is built, so the config carries FILE REFERENCES the
         # shell resolves at every launch (absent = not yet minted;
         # present = pinned trust with no user action). Found live
-        # 2026-08-21: first store open after a flawless install
-        # failed PKIX because caPem was baked empty.
+        # 2026-08-21 (finding #8): first store open after a
+        # flawless install failed PKIX because caPem baked empty.
         "tls": {"caPem": ca_pem, "caSha256": "",
                 "caFile": ["/etc/isle-mesh/ca/isle-root.crt",
                            "/usr/local/share/ca-certificates/isle-root.crt"]},
@@ -85,13 +89,20 @@ print(json.dumps({
 PYEOF
 [ -n "$CA_ARG" ] && [ -f "$CA_ARG" ] && cp "$CA_ARG" "$STAGE$SHARE/isle-root.crt"
 
+# ---- first-open launcher (the two-doors wrapper) ----
+# On a member the wrapper is a plain exec of the shell; on a fresh
+# device it offers core-install / join via polkit — the UI runs the
+# SAME terminal steps (see shells/store-launch.sh header).
+cp "$SELF_DIR/store-launch.sh" "$STAGE$SHARE/store-launch.sh"
+chmod 755 "$STAGE$SHARE/store-launch.sh"
+
 # ---- .desktop ----
 cat > "$STAGE/usr/share/applications/$PKG.desktop" <<EOF
 [Desktop Entry]
 Type=Application
 Name=Isle App Store
 Comment=Install and manage isle-mesh apps on this device
-Exec=/usr/bin/polari-app-shell --config $SHARE/polari-shell.json
+Exec=$SHARE/store-launch.sh
 Icon=$STORE_ICON
 Terminal=false
 Categories=Network;System;
@@ -145,7 +156,7 @@ Version: $VERSION
 Section: web
 Priority: optional
 Architecture: all
-Depends: polari-shell-core, policykit-1
+Depends: polari-shell-core, policykit-1, zenity
 Recommends: isle-mesh-cli
 Installed-Size: $INSTALLED_KB
 Maintainer: Polari <polari@localhost>
