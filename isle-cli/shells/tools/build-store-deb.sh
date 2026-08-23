@@ -69,7 +69,15 @@ print(json.dumps({
                  "scope": "openid profile email roles",
                  "shellRedirectUri": "polari://oauth/callback",
                  "loginHint": ""},
-        "tls": {"caPem": ca_pem, "caSha256": ""},
+        # caFile: the isle CA is minted by core-install AFTER this
+        # deb is built, so the config carries FILE REFERENCES the
+        # shell resolves at every launch (absent = not yet minted;
+        # present = pinned trust with no user action). Found live
+        # 2026-08-21: first store open after a flawless install
+        # failed PKIX because caPem was baked empty.
+        "tls": {"caPem": ca_pem, "caSha256": "",
+                "caFile": ["/etc/isle-mesh/ca/isle-root.crt",
+                           "/usr/local/share/ca-certificates/isle-root.crt"]},
         "reachability": {"scope": "mesh", "networkKind": "",
                          "networkName": "isle mesh",
                          "hint": {"cidrs": [], "probeUrl": url}},
