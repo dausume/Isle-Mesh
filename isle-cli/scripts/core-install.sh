@@ -89,7 +89,19 @@ fi
 
 # ---- 5. apt-on-mesh (deb supply for remotes) ----
 step "5/7 apt-on-mesh"
-isle apt-repo publish | tail -2
+# `| tail -2` used to EAT the exit status — a failed publish looked
+# like a green step and left the isle with no apt.isle at all
+# (finding #9a, Dustin's 2026-08-21 install). Capture + check.
+APT_LOG=$(mktemp)
+if isle apt-repo publish >"$APT_LOG" 2>&1; then
+    tail -2 "$APT_LOG"
+else
+    cat "$APT_LOG"
+    warn "apt-on-mesh publish FAILED — the join door and the"
+    warn "download page (https://apt.isle/) will not exist until:"
+    warn "    sudo isle apt-repo publish"
+fi
+rm -f "$APT_LOG"
 
 # ---- 6. verify + JOIN INFO ----
 step "6/7 verify"

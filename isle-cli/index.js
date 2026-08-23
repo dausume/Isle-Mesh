@@ -94,11 +94,16 @@ const makeExecutable = (filePath) => {
   try {
     execSync(`chmod +x ${filePath}`);
   } catch (err) {
-    console.error(`Failed to make ${filePath} executable.`);
+    // best-effort only — see validateScripts
   }
 };
 
-// Ensure every command's script exists and is executable.
+// Ensure every command's script exists and is READABLE. Scripts run
+// via `bash <path>`, so the executable bit is cosmetic — the old
+// hard-fail here blocked ALL non-root commands whenever the deb
+// shipped one 644 script (watch.sh, found live 2026-08-23: the
+// self-chmod cannot touch root-owned /usr/share files). chmod stays
+// as best-effort tidying; only a missing/unreadable script is fatal.
 const validateScripts = () => {
   let ok = true;
   const seen = new Set();
@@ -107,16 +112,13 @@ const validateScripts = () => {
     if (seen.has(filePath)) continue;
     seen.add(filePath);
     try {
+      fs.accessSync(filePath, fs.constants.R_OK);
       const stats = fs.statSync(filePath);
       if ((stats.mode & fs.constants.S_IXUSR) === 0) {
         makeExecutable(filePath);
-        if ((fs.statSync(filePath).mode & fs.constants.S_IXUSR) === 0) {
-          console.error(`Error: Script ${filePath} is still not executable.`);
-          ok = false;
-        }
       }
     } catch (err) {
-      console.error(`Error: Script ${filePath} does not exist.`);
+      console.error(`Error: Script ${filePath} is missing or unreadable.`);
       ok = false;
     }
   }

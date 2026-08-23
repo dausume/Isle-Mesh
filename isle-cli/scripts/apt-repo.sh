@@ -94,8 +94,54 @@ publish() {
     # §5b one-flow: a fresh remote fetches these first)
     [ -f "$SCRIPT_DIR/isle-bootstrap.sh" ] && sudo cp "$SCRIPT_DIR/isle-bootstrap.sh" "$REPO/"
     [ -f "$CA" ] && sudo cp "$CA" "$REPO/isle-root.crt"
+    # ---- the HUMAN landing page (finding #9c, 2026-08-23):
+    # https://apt.isle/ was a bare-nginx 403 — an average user sent
+    # here (the store's join door, printed instructions) had no way
+    # to discover the debs, the CA, or what to do. Regenerated on
+    # every publish from what is actually served.
+    local FPR
+    FPR=$(openssl x509 -in "$CA" -noout -fingerprint -sha256 \
+          2>/dev/null | cut -d= -f2 || echo "unavailable")
+    DEB_ROWS=$(cd "$REPO" && for f in *.deb; do
+        printf '<tr><td><a href="%s">%s</a></td><td>%s</td></tr>' \
+            "$f" "$f" "$(du -h "$f" | cut -f1)"; done)
+    sudo tee "$REPO/index.html" >/dev/null <<HTMLEOF
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Isle apt repository</title>
+<style>
+ body{font-family:system-ui,sans-serif;max-width:46rem;margin:2rem auto;
+      padding:0 1rem;line-height:1.5;color:#222}
+ code,pre{background:#f4f4f4;padding:.15rem .35rem;border-radius:4px}
+ pre{padding:.6rem;overflow-x:auto}
+ table{border-collapse:collapse;width:100%}
+ td{padding:.3rem .6rem;border-bottom:1px solid #eee}
+ .fpr{word-break:break-all;font-size:.85em}
+</style></head><body>
+<h1>This isle's software</h1>
+<p>Signed apt repository served by this isle's core.
+   Everything here is installable two ways:</p>
+<h2>Join this isle (new device)</h2>
+<pre>curl -ko isle-bootstrap.sh https://apt.isle/isle-bootstrap.sh
+# VERIFY its sha256 against the core's printout, then:
+sudo bash isle-bootstrap.sh --fingerprint '&lt;from the core&gt;'</pre>
+<p>The CA fingerprint is the trust anchor — always compare it.
+   This core's CA (<a href="isle-root.crt">isle-root.crt</a>)
+   fingerprint:</p>
+<p class="fpr"><code>$FPR</code></p>
+<h2>Already a member — apt route</h2>
+<pre>isle apt-repo enable
+sudo apt update &amp;&amp; sudo apt install isle-app-store</pre>
+<h2>Packages served</h2>
+<table>$DEB_ROWS</table>
+<p>Index files: <a href="Packages">Packages</a> ·
+   <a href="Release">Release</a> ·
+   <a href="isle-archive-keyring.gpg">archive keyring</a></p>
+</body></html>
+HTMLEOF
     sudo chmod -R a+rX "$REPO"
-    ok "repo indexed + signed ($(ls "$REPO"/*.deb | wc -l) debs)"
+    ok "repo indexed + signed ($(ls "$REPO"/*.deb | wc -l) debs) + landing page"
 
     # serve: an nginx on the agent net at apt.isle (bind-mounted, so
     # re-publish is live without redeploy)
@@ -115,7 +161,16 @@ EOF
             --domain apt.isle || die "apt.isle deploy failed"
         ok "apt.isle deployed"
     fi
+    # finding #9b: the CORE host itself cannot reach its own agent
+    # (macvlan isolation) and the catalog-driven hairpin reconcile
+    # only helps once the app reaches the catalog — pin here too,
+    # same precedent as enable_client. Idempotent.
+    if ! getent hosts apt.isle >/dev/null 2>&1; then
+        echo "127.0.0.1 apt.isle" | sudo tee -a /etc/hosts >/dev/null
+        ok "core hairpin: pinned apt.isle -> 127.0.0.1 in /etc/hosts"
+    fi
     echo "clients: isle apt-repo enable && sudo apt update"
+    echo "humans:  https://apt.isle/  (debs + CA + join instructions)"
 }
 
 fetch_repo() { # $1 path, $2 outfile
