@@ -40,6 +40,7 @@ const commands = {
   net:      { script: 'net.sh',      desc: 'Network resource ledger: pools/ports per device (status/report/free-subnet/free-port)' },
   shell:    { script: 'shell.sh',    desc: 'Install polari/isle apps as native shells', docker: true },
   module:   { script: 'module.sh',   desc: 'Install polari modules into the instance' },
+  apps:     { script: 'apps.sh',     desc: 'App-deb generation (build-debs) — thin verb over the polari framework builder' },
   security: { script: 'security.sh', desc: 'ISP visibility and network hardening' },
   watch: { script: 'watch.sh', desc: 'Member-side ISLE-ENDING listener + core-health poll (unin-7)' },
 
