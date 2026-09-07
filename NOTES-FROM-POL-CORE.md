@@ -194,3 +194,98 @@ ONE-TIME pol-core trust (Dustin sudo): mkdir -p /etc/docker/certs.d/
 - This session's isle CLI work (net ledger, url/expose, polari
   instance/module/app verbs, placement resolver) is on dev, ~39
   commits ahead of origin.
+
+## 2026-09-03 — VPN arc vpn-1: the Polari half is built; the contract for the isle half (pol-core session)
+Plan: suite `AI-Notes/plans/VPN_FEDERATION_PLAN.md` (§7 = his review:
+authority is the ISLE side, `.vpn` rung, Isle Link / Isle Bridge,
+D1–D14 ratified 2026-09-03). Kinds + names: `AI-Notes/guides/VPN_APP_KINDS.md`.
+Handoff with your items I-1..I-5: `AI-Notes/handoffs/VPN_ARC_HANDOFF.md`.
+Polari side (module `vpn`, branch dev-vpn-1): `modules/vpn/` — mirror
+rows VpnNetwork / VpnPeer (public key only) / VpnAccessRule /
+VpnFederationLink / AppVpnExposure, inbox VpnProposal, engine
+(render Link confs with an `@@DEVICE_PRIVATE_KEY@@` placeholder,
+nftables text, Bridge refuses until step-ca), `/api/vpn/*` read +
+`POST /api/vpn/proposals`, `/display/vpn`, the ten `isle-vpn`
+IsleCatalogEntry rows (gateway kinds `provides_engine vpn-gateway`),
+`pol vpn`. Selftest `python3 -m vpn.selftest_vpn` (75 checks) runs
+the two-isle flow in-process (`vpn.vpn_demo`).
+
+**THE CONTRACT (agree here before I-4/I-5):**
+
+1. **Push** — `push-to-polari.sh` POSTs to `$API/api/islemesh/ingest/vpn`
+   (same envelope discipline as the other ingests: `device` required,
+   REAL pushes never write `mock_network`). Replace-per-device: the
+   newest push is THE truth for that device's rows.
+   ```
+   {"device": "<canonical isle name>", "schema_version": "1",
+    "app": {"name": "isle-vpn", "kind": "vpn-link-gateway",   # one of the ten kind ids
+            "version": "", "config_api": "http://<isle-local addr>:<port>", "status": "up"},
+    "networks": [{"network_name", "mode": "mesh|hub|p2p", "cidr", "listen_port",
+                  "interface": "wg-arch", "dns_suffix": ".vpn", "mtu",
+                  "forward_allowed": false, "masquerade": false,
+                  "preshared_default": false, "status": "up|down"}],
+    "peers":    [{"network_name", "peer_name", "kind", "public_key", "address",
+                  "endpoint", "allowed_ips": [...], "persistent_keepalive_s",
+                  "has_preshared": false, "last_handshake": "<iso>",
+                  "rx_bytes", "tx_bytes", "status": "active|stale|never",
+                  "remote_device": "<isle>"}],   # the isle's OWN entry has remote_device == device
+    "rules":    [{"network_name", "name", "from_tag", "to_target", "action": "allow|deny", "ports", "order"}],
+    "links":    [{"network_name", "remote_device", "remote_network", "gateway_peer",
+                  "remote_cidrs": [...], "agreement_id", "relay_kind": "direct|blind|routing",
+                  "status": "pending|active|revoked", "arch_name"}],
+    "exposures":[{"app_name", "network_name", "role": "server|user|observer|relay-only", "status"}],
+    "proposals":[{"id": "vp-…", "status": "applied|rejected", "applied_by": "<operator>",
+                  "applied_at": "<iso>", "note": ""}]}
+   ```
+   REFUSED WHOLE (HTTP 400, receipt says why) if ANY key named
+   private_key / preshared_key / psk / tls_key / ca_key / client_key /
+   server_key appears at any depth. Keys never leave the device. A
+   gateway-kind `app.kind` makes Polari write the IsleEngine row
+   `provides: vpn-gateway` for the device — that is what turns the
+   `.vpn` rung on (`GET /api/vpn/exposure-options?device=<isle>`);
+   you may ALSO ship `engine.json {"provides": "vpn-gateway"}` in the
+   app dir like odoo does — both land on the same row.
+2. **Proposals** — `isle vpn apply <id>` pulls
+   `GET /api/vpn/proposals?device=<isle>&status=proposed` (or
+   `GET /api/vpn/proposals/<id>`): `{name, device_name, kind:
+   network|peer|rule|link|exposure|revoke, provider, app_kind,
+   network_name, payload, status, proposed_by, proposed_at}` where
+   `payload` is already validated + allocated (cidr / port / address
+   filled from the netledger). Show the diff, apply on operator
+   confirmation, then the NEXT push reports it in `proposals[]` with
+   `applied_by` set — that is the ONLY way a proposal leaves
+   `proposed` (an entry with empty `applied_by` is refused). Polari
+   never mutates the mirror on a proposal.
+3. **Render** — `GET /api/vpn/render/<isle>/<network>/<peer|self>`
+   returns the wg-quick text Polari thinks the isle should have
+   (`PrivateKey = @@DEVICE_PRIVATE_KEY@@`, hooks are the templated
+   toggles only); `GET /api/vpn/rules/<isle>/<network>/render` the
+   nftables text. Treat both as a reference diff, not as config to
+   copy blindly — the isle app is the authority.
+4. **Config API binding** — `app.config_api` must be an isle-local
+   address; the app refuses requests arriving over `wg-arch` or from
+   outside the isle (handoff "Authority is the isle side").
+Mock discipline unchanged: `POST /api/vpn/demo` seeds isle-a / isle-b /
+isle-c with `mock_network: true`; a real push for those names replaces
+the mock rows.
+
+## 2026-09-07 — offline install gate in `isle create` (pol-core edit, for your ratification)
+Context: AI-Notes/plans/OFFLINE_INSTALL_PLAN.md (2026-09-06 section) +
+AI-Notes/guides/OFFLINE_BUILD_TEMPLATE.md in the suite. The platform deb now
+has an OFFLINE flavor (`polari-complete-offline`, Conflicts the online one)
+whose postinst writes `/etc/polari/install-mode` = `offline`. Rule: an
+offline install NEVER falls back to the network — a missing part is refused
+by medium section name.
+
+The ONE edit in your tree (branch `dev-off-3` here, `isle-cli/scripts/create.sh`):
+- `polari_install_mode()` helper (reads /etc/polari/install-mode, else
+  $POLARI_INSTALL_MODE, else online).
+- sample app: in offline mode, `docker compose up -d --no-build` when
+  `isle-sample-app-sample:latest` is loaded (the medium's images/ section
+  carries it), else a refusal naming the section. The `--build` path
+  (pip install = internet) stays the online behaviour.
+- libvirt missing + offline: continue routerless with a warning (no prompt,
+  no error) — the router section is what would carry KVM bits.
+Remaining off-3 (yours): the same mode check in core-install / onboard /
+isle-polari-deploy (`--pull` must refuse offline) / apt-repo / store install,
+via one `isle_source <section> <name>` helper — see the plan §C/§D.

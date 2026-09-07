@@ -24,6 +24,15 @@ SAMPLE_APP_NAME="sample"
 SAMPLE_DOMAIN="sample.local"  # Using .local for mDNS; nginx will auto-add .isle variant
 SAMPLE_APP_DIR="/tmp/isle-sample-app"
 
+# Install mode (OFFLINE_INSTALL_PLAN.md §C): ONE file written by the
+# platform deb's postinst — `offline` means every fetch resolves to the
+# medium or refuses by section name; reachability is never consulted.
+polari_install_mode() {
+    local m
+    m=$(cat /etc/polari/install-mode 2>/dev/null | tr -d '[:space:]')
+    echo "${m:-${POLARI_INSTALL_MODE:-online}}"
+}
+
 show_help() {
     echo -e "${BOLD}Isle Create${NC} - One-Command Complete Setup"
     echo -e ""
@@ -172,7 +181,13 @@ check_prerequisites() {
         echo "Install with:"
         echo "  sudo apt-get install qemu-kvm libvirt-daemon-system libvirt-clients"
         echo ""
-        if [[ -t 0 ]]; then
+        if [ "$(polari_install_mode)" = offline ]; then
+            # OFFLINE (OFFLINE_INSTALL_PLAN.md §C): the router needs KVM
+            # + the medium's router/ section; without libvirt there is
+            # nothing to fetch and nothing to ask — continue routerless,
+            # stated. Never a network fallback.
+            confirm=y; log_warning "offline install-mode: no libvirt — continuing WITHOUT the router (single-device isle; router section unused)"
+        elif [[ -t 0 ]]; then
             read -p "Do you want to continue without the router? (y/N): " confirm
         else
             confirm=""; log_error "libvirt missing and no terminal — cannot build the router (install qemu-kvm + libvirt)"
@@ -774,7 +789,25 @@ EOF
         fi
     fi
 
-    if $DOCKER_COMPOSE_CMD up -d --build; then
+    # OFFLINE (OFFLINE_INSTALL_PLAN.md §C, the no-fallback rule): the
+    # build step runs `pip install` = the internet. In offline
+    # install-mode the image must come from the medium's images/
+    # section (docker-loaded by install-offline.sh); present → start
+    # it WITHOUT building; absent → refuse naming the section. Never
+    # try the network to "help".
+    if [ "$(polari_install_mode)" = offline ]; then
+        if docker image inspect isle-sample-app-sample:latest >/dev/null 2>&1; then
+            if $DOCKER_COMPOSE_CMD up -d --no-build; then
+                log_success "Sample app started from the offline medium's image (no build)"
+            else
+                log_error "Failed to start sample app from the offline image"
+                exit 1
+            fi
+        else
+            log_error "offline: image isle-sample-app-sample:latest not loaded — it belongs to the medium's images/ section (docker load it, or install the online package)"
+            exit 1
+        fi
+    elif $DOCKER_COMPOSE_CMD up -d --build; then
         log_success "Sample app deployed successfully"
     else
         log_error "Failed to deploy sample app"
