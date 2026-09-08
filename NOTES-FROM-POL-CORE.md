@@ -289,3 +289,39 @@ The ONE edit in your tree (branch `dev-off-3` here, `isle-cli/scripts/create.sh`
 Remaining off-3 (yours): the same mode check in core-install / onboard /
 isle-polari-deploy (`--pull` must refuse offline) / apt-repo / store install,
 via one `isle_source <section> <name>` helper — see the plan §C/§D.
+
+## 2026-09-08 — hardware apps: the `isle vm` contract (hw-app-1, your half)
+Polari now carries hardware apps as rows and renders what the isle applies:
+- `GET /api/hardwareapps/render/<name>` → `{domainXml, uciScript, passthrough,
+  refusals, image:{ref, sha256Raw}, requiresTier}`. `domainXml` is your
+  `base-vm.xml` generalised (q35, host-passthrough, 8 pcie-root-ports, virtio
+  disk at /var/lib/libvirt/images/<name>.qcow2, one virtio NIC per bridge in
+  order, then usb `hostdev` / macvtap `interface type='direct'` per
+  passthrough). `uciScript` is the isle-vlan-router-config idiom as one sh
+  (network → dhcp → firewall zone → wireless); the PSK is read from
+  `/etc/isle-mesh/<uci>.psk` on the guest (deploy-time, never rendered).
+  `refusals` non-empty = do not define (e.g. image not sha-pinned).
+- Store rows of kind `hardware-app` carry an install plan of
+  `isle vm define <name> --from-polari` → `isle vm start <name>` →
+  `isle vm status <name>`; kind `hardware-extension-app` (reticulum) →
+  `isle vm status <host>` → `isle vm extend <host> --with <name>`.
+- Requested verbs (extract from router-init-lib 40/50/60 + the attach libs;
+  the router stays woven into the isle as is — it becomes the first caller
+  with no behaviour change):
+  `isle vm define <name> --from-polari` (fetch render; refuse on refusals;
+  stage the image from the router image chain by `image.ref` + verify
+  `sha256Raw`; write /etc/isle-mesh/vm/<name>.xml; virsh define; autostart)
+  `isle vm start|stop|undefine|status <name>` (status also POSTs a
+  HardwareAppState to /api/islemesh/ingest/device-style: vm_state, ip,
+  uptime, probe_ok)
+  `isle vm attach-usb <name> <vendor:product>` / `attach-nic <name> <iface>`
+  (set DeviceLink.owner = <name>; exclusive)
+  `isle vm push-uci <name>` (scp + run the uciScript over the router SSH
+  key idiom)
+  `isle vm extend <host> --with <name>` (reticulum: load the sidecar into
+  the guest + start it; details in RETICULUM plan §5c-e / HARDWARE_APPS_PLAN §2)
+  `agent.tier=hardware` via `isle onboard --host --hardware`; core qualifies.
+- Guests today: `isle-relay` (relay segment VLAN 30 / 10.30.0.0/24, AP
+  `isle-relay`, forwards into the isle, bearer port 4242 open) and
+  `isle-guestnet` (VLAN 20 / 10.20.0.0/24, AP `isle-guest`, forward=REJECT,
+  client isolation, allow-list from GuestNetworkExposure rows).
