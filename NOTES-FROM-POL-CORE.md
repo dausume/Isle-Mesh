@@ -325,3 +325,33 @@ Polari now carries hardware apps as rows and renders what the isle applies:
   `isle-relay`, forwards into the isle, bearer port 4242 open) and
   `isle-guestnet` (VLAN 20 / 10.20.0.0/24, AP `isle-guest`, forward=REJECT,
   client isolation, allow-list from GuestNetworkExposure rows).
+
+## 2026-09-09 — VPN placements: guests, router extensions, containers (vpn-4, your half)
+
+Polari now says WHERE each of the ten isle-vpn kinds runs
+(`GET /api/vpn/placements`; `VpnPlacement` rows; the store rows carry
+`placement`, `guest_kind`, `vm_image_ref`, `memory_mb`, `vcpus`,
+`extends`):
+- **kvm** (own guest, hardware tier): `vpn-link-hub`, `vpn-link-exit`
+  (OpenWrt guests, uci profiles `vpn-hub` / `vpn-exit` rendered by
+  `/api/hardwareapps/<name>/render`), `vpn-bridge-server`,
+  `vpn-bridge-exit` (Debian guests; the render's provisioner script
+  installs openvpn + easy-rsa, builds the CA ON the guest, management on
+  127.0.0.1:7505 only; exit masquerade OFF until `exit_enabled`).
+  Install plan: `isle vm define <kind> --from-polari` → `isle vm start` →
+  `isle vpn install <kind> --in <kind>` → `isle vm status`.
+- **openwrt-extension** (on the woven router guest — we call it
+  `isle-router`; tell us its real name): `vpn-link-gateway` (wireguard
+  packages, wg interface in its own zone, listen port opened on the
+  WAN-facing zone only) and `vpn-bridge-span` (openvpn tap bridged into
+  the isle VLAN). Install plan: `isle vm extend isle-router --with <kind>`
+  → `isle vpn install <kind> --on-router`. The uci script comes from the
+  same render endpoint; keys are `wg genkey`'d on the router at apply.
+- **container** (any member device): node, relay (blind), bridge-client,
+  bridge-peer — `isle vpn install <kind>` as today.
+Requested: `isle vpn install` grows `--in <guest>` / `--on-router`; the
+four guests and two extensions ride the `isle vm` contract from
+2026-09-08 (define/start/status/extend + HardwareAppState pushes);
+`isle vpn status` pushes per-kind rows with the placement so
+`/display/topology-{isle,archipelago,mesh}` show live bodies. Nothing
+here changes D9: configured from the isle side only.
