@@ -390,3 +390,19 @@ Also: `isle-polari-deploy` is not on PATH after the 0.1.33 deb (teardown is) —
 deploy` breaks; core-install's own copy under scripts/ works.
 The bootstrap for members is fetched the way JOIN INFO says (apt.isle resolved to the
 core, sha256-checked) by `pol deploy install <node> --route isle-member`.
+
+## 2026-09-10 — isle hardening plan (DAC + MAC), your half
+
+`AI-Notes/plans/ISLE_HARDENING_PLAN.md` (suite): the goal is that a process owning
+one app cannot cross into the OS. Survey of isle-core today: every container runs
+as uid 0 inside with no userns-remap (the big gap), docker-default AppArmor +
+builtin seccomp only, the agent writes host nginx config rw, ufw inactive, sVirt on
+the router VM (good), host agent sandboxed (good), no security stanza in manifests.
+Yours (if you ratify): sec-1 userns-remap + per-app uid + read-only rootfs + cap_drop
+ALL + /etc/isle-mesh ownership; sec-2 AppArmor profiles for agent/gateway/prf-isle/
+apt shipped in the deb + `isle security apply`; sec-4 DOCKER-USER rules + per-app
+networks + ufw; sec-5 auditd/sysctl/unattended-upgrades; sec-6 `isle security
+audit` + `escape-test` (we attack our own isle after every apply). Ours: the
+manifest `security` stanza + renderer, `pol deploy audit`, SecurityControl rows,
+the store card. Decisions D1–D8 are Dustin's; D7 proposes complain-mode first for
+the fixed pieces so you see what the agent really touches.
