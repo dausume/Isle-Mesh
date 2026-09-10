@@ -372,3 +372,21 @@ checkout) instead of the installed material — so `isle url expose` WITHOUT sud
 is refused by the gate even though the isle is deployable. Either the gate
 should resolve the installed root regardless of the caller, or `isle url
 expose` should elevate (it already sudo's for the ledger). Your call.
+
+## 2026-09-10 — full wipe + unattended core-install driven from pol-core over ssh (worked); two leftovers
+
+`pol deploy uninstall isle-core --route isle-core --yes` (= `sudo ISLE_CONFIRM_DELETE=yes
+isle uninstall --everything --force`) then `pol deploy install isle-core --route isle-core
+--yes` (= scp polari-complete_0.1.33 → apt install → `sudo isle core-install
+--skip-security`): router VM back, agent healthy, polari.isle 200, store 16 apps, JOIN
+INFO printed (new CA D6:9F:DB:E3…). Two things for you:
+1. the verify after `--everything` still lists `/usr/share/isle-mesh` present (packages
+   purged, but the tree stays) — either the purge should remove it or verify should not
+   count it.
+2. core-install step 4 warned "no isle-app-store deb staged (~/polari-shells)" — the
+   store shell is not part of what polari-complete leaves on disk after a wipe, so an
+   unattended reinstall ends without the desktop door until someone builds/stages it.
+Also: `isle-polari-deploy` is not on PATH after the 0.1.33 deb (teardown is) — `pol dev
+deploy` breaks; core-install's own copy under scripts/ works.
+The bootstrap for members is fetched the way JOIN INFO says (apt.isle resolved to the
+core, sha256-checked) by `pol deploy install <node> --route isle-member`.
