@@ -355,3 +355,20 @@ four guests and two extensions ride the `isle vm` contract from
 `isle vpn status` pushes per-kind rows with the placement so
 `/display/topology-{isle,archipelago,mesh}` show live bodies. Nothing
 here changes D9: configured from the isle side only.
+
+## 2026-09-10 — exposure loop tested over SSH from pol-core (isle url); one gate inconsistency
+
+Ran on isle-core, remotely, as a member would from a terminal:
+`isle url expose` while not an entrypoint → refused (correct) → `sudo isle url
+entrypoint enable` → `sudo isle url expose polari.isle --port 18443 --user tester`
+→ door live (`isle-expose-18443 0.0.0.0:18443->80/tcp`); from pol-core: 401
+without credentials, 200 (PolariPlatform) with them → `sudo isle url unexpose
+--port 18443` + `sudo isle url entrypoint disable` → connection refused, "the
+isle is fully contained". Containment holds both ways.
+One inconsistency for you: `isle security gate` answers differently by user.
+As root it says "clean — deployable material only"; as the login user it FAILS,
+looking at `/home/detts/polari-suite/polari-rf-node/prf-keycloak/…env` (the dev
+checkout) instead of the installed material — so `isle url expose` WITHOUT sudo
+is refused by the gate even though the isle is deployable. Either the gate
+should resolve the installed root regardless of the caller, or `isle url
+expose` should elevate (it already sudo's for the ledger). Your call.
