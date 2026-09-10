@@ -406,3 +406,20 @@ audit` + `escape-test` (we attack our own isle after every apply). Ours: the
 manifest `security` stanza + renderer, `pol deploy audit`, SecurityControl rows,
 the store card. Decisions D1–D8 are Dustin's; D7 proposes complain-mode first for
 the fixed pieces so you see what the agent really touches.
+
+## 2026-09-10 — security survey findings for the isle (from the hardening plan + os-security)
+
+Two things the proxy/network survey found on your side:
+1. `isle url expose` publishes `0.0.0.0:<port>:80` — the outside leg of a door is PLAIN
+   HTTP with basic auth, so the one credential travels unencrypted. The gateway container
+   should terminate TLS (the isle CA leaf for the device, or a public cert when the device
+   has a name) — until then the docs say "open doors only across a VPN / trusted network".
+2. `os-security/` (suite) renders per-app AppArmor profiles + seccomp + DOCKER-USER + ufw
+   + sysctl + audit rules per scenario (`isle` scenario declares the agent, gateway,
+   prf-isle, apt as fixed pieces). `pol deploy audit isle-core` today: verdict OPEN
+   (12 pass / 13 fail): containers on docker-default, no per-app profiles, DOCKER-USER
+   empty, ufw inactive, sshd on all interfaces, /etc/isle-mesh 755, no auditd. The
+   escape-test under a real enforced profile on isle-core blocked all 14 attempts, so the
+   profiles work; applying them at `isle app install` (security_opt + cap_drop + read_only
+   from the rendered compose fragment) and running `apply.sh --scenario isle` are the
+   isle-side phases (sec-1/2/4/5). The sudoers groups are at polari-cli/shells/groups/.
