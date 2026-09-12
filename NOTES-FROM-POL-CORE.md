@@ -448,3 +448,17 @@ checked on isle-core with throwaway profiles (loaded and unloaded in the same sc
    would break, with the rule for each; empty list = the gate for enforce, one app at a time.
 6. His rule: nothing is tested on the droplet; the home machines (pol-core, econ-core, isle-core) via app
    deployments are the test bed.
+
+## 2026-09-12 evening — what is now LOADED on isle-core (warn-only), and one env line for polari-isle
+
+- `pol deploy harden isle-core` ran from pol-core: the node-wide union profile (`docker-default`, rendered from the isle
+  scenario's fixed pieces, keeps docker's stock denies) is loaded in COMPLAIN over every container; 65 `isle-app-*`
+  profiles are loaded in complain (inert until you attach them via security_opt); seccomp lists staged in
+  `/etc/polari/seccomp/` (inert; `<kind>.json` = SCMP_ACT_LOG, `<kind>.enforce.json` = ERRNO — `open` added, python +
+  nginx proven under the enforce lists). Firewall/host/DAC rings NOT applied (printed). Files: `/etc/apparmor.d/isle-app-*`,
+  `/etc/apparmor.d/docker-default`, `/tmp/os-security-isle/`. Revert everything MAC: `pol deploy harden isle-core --revert`
+  (stock docker-default back) + `apparmor_parser -R /etc/apparmor.d/isle-app-*`. Harvest: `sudo python3
+  /tmp/os-security-isle/allowed.py --since 1d --rules`.
+- Please set `POLARI_DEPLOY_ROUTE=isle` in polari-isle/docker-compose.yml's backend environment: the core now tells users
+  when a hardware app's hardware half cannot work on a deployment (swarm/dev → "Polari side only"); on the isle the
+  route is `isle` and no notice is shown (the isle decides per device via agent tier + hwmap).
