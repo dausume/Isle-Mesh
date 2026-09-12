@@ -423,3 +423,28 @@ Two things the proxy/network survey found on your side:
    profiles work; applying them at `isle app install` (security_opt + cap_drop + read_only
    from the rendered compose fragment) and running `apply.sh --scenario isle` are the
    isle-side phases (sec-1/2/4/5). The sudoers groups are at polari-cli/shells/groups/.
+
+## 2026-09-12 — os-security: the template is an allow-list now; what the isle-side apply must know
+
+Findings from the first sec-1a slice (suite branch dev-sec-1, ISLE_HARDENING_PLAN §13, ledger §18), all
+checked on isle-core with throwaway profiles (loaded and unloaded in the same script; nothing left behind):
+1. AppArmor enforces EXPLICIT `deny` rules even in complain mode, quietly. "Warn-only" therefore means an
+   allow-list profile: `os-security/templates/apparmor/app.j2` is one now — the image `rmix`, the declared
+   writable paths, the declared network and capabilities, the runtime's signals; complain keeps only docker's
+   stock denies (no regression vs today), enforce adds Polari's. Never add a `deny` outside the enforce block.
+2. The isle route keeps per-app attachment through the rendered compose fragment
+   (`out/isle/compose/<app>.security.yml`: security_opt apparmor + seccomp + no-new-privileges, cap_drop ALL,
+   read_only, tmpfs, pids_limit) — plain docker honours all of it. (Swarm does not: `docker stack deploy`
+   drops security_opt, so the suite's server route uses a node-wide docker-default replacement instead.)
+3. Always load with `apparmor_parser -r --skip-cache`: the parser cache is keyed by basename and a
+   complain→enforce reload of the same file name was skipped as "same as current profile".
+4. The escape test (`os-security/escape-test.sh`) now has two passes: full confinement, and `--alone`
+   (profile only). The full pass blocks 14/14 with ZERO AppArmor lines — the container flags do it all; the
+   profile alone in enforce blocks 11/14 (cannot stop reading a host bind — DAC/userns-remap's job — nor
+   keyctl/bpf — seccomp's). The `worker` seccomp allow-list BREAKS python on musl (alpine images: "Error
+   relocating python3"), so do not attach a rendered seccomp list to prf-isle-backend until the seccomp
+   warn mode (SCMP_ACT_LOG, harvested from type=1326 lines) has run a day — coming as sec-1c.
+5. Harvest: `python3 os-security/allowed.py --since 1d --profile isle-app-<name> --rules` = what enforcing
+   would break, with the rule for each; empty list = the gate for enforce, one app at a time.
+6. His rule: nothing is tested on the droplet; the home machines (pol-core, econ-core, isle-core) via app
+   deployments are the test bed.
