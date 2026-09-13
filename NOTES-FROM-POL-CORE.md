@@ -462,3 +462,26 @@ checked on isle-core with throwaway profiles (loaded and unloaded in the same sc
 - Please set `POLARI_DEPLOY_ROUTE=isle` in polari-isle/docker-compose.yml's backend environment: the core now tells users
   when a hardware app's hardware half cannot work on a deployment (swarm/dev → "Polari side only"); on the isle the
   route is `isle` and no notice is shown (the isle decides per device via agent tier + hwmap).
+
+## 2026-09-13 — the purge, and the hand-back rule (his, after isle-core lost DNS)
+
+isle-core was wiped from pol-core today: rings reverted, `isle uninstall --everything --force`, deb purged,
+docker emptied, all paths removed (your own backup is under /var/backups/isle-mesh-purge-20260913-*). The
+uninstall printed "Full uninstall complete" — and left the box unable to resolve names: NetworkManager still
+held the router's DNS servers, but systemd-resolved had no DNS scope on the wifi link (the resolver pieces
+were restarted under a live connection and the link's DNS was never re-pushed). `nmcli connection up` fixed
+it. HIS RULE: "we need to ensure that our auto-install is smoothly handing back a user a fully working
+default functionality Ubuntu or we may leave an everyday user stranded not knowing what to do."
+The hand-back contract for the isle CLI (yours), mirrored on pol deploy / the ISO (ours):
+1. an INSTALL-TIME journal of every OS-level change with its prior value (NM profiles + fields, resolved
+   drop-ins / per-link DNS, /etc/hosts, sysctl, sudoers, units, apt sources, AppArmor, groups, daemon.json,
+   libvirt networks, firewall) — uninstall replays it in reverse; "hand the device back" is not enough;
+2. after removing resolver pieces: `nmcli device reapply <dev>` on every active connection (re-pushes DNS
+   without dropping the link — a `connection up` would cut the ssh session the uninstall runs over);
+3. a PROOF before the word "complete": default route present, a public name resolves, apt reaches its
+   mirror, the desktop's connections autoconnect, no isle/polari residue; any failure → say what is broken
+   + the one command, exit non-zero;
+4. `isle rescue network` — an OFFLINE reset of resolver + profiles to Ubuntu defaults (a store door too).
+Also seen: the uninstall's own verify flagged `/usr/share/isle-mesh` still present and 6 images "harmless"
+— the proof should treat residue as failure. Polari side: a `handback` audit ring + a CI install→uninstall→proof
+test in a throwaway VM.
