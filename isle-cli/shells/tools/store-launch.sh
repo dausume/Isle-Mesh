@@ -92,6 +92,7 @@ CHOICE=$(zenity --question \
     --text "This device is not part of an isle yet.\n\nThe store installs apps only on isle members (the running agent IS membership). Single-device isles are first-class — you can be your own isle.\n\nBoth doors run the exact terminal steps (privilege via polkit)." \
     --ok-label "Create my own isle" \
     --extra-button "Join an existing isle" \
+    --extra-button "Set up a public server" \
     --extra-button "Just browse" \
     --width 460 2>/dev/null)
 RC=$?
@@ -107,6 +108,18 @@ echo; read -p 'Done — press Enter to close and open the store...'" \
         || zenity --error --text "No terminal emulator found. Run in any terminal:\n  sudo isle core-install" 2>/dev/null
     agent_up && open_shell
     zenity --info --text "The isle is not up yet — the store opens in browse mode.\nFinish setup any time:  sudo isle core-install" 2>/dev/null
+    open_shell
+elif [ "$CHOICE" = "Set up a public server" ]; then
+    # DOOR 3: the SERVER route (pol prod — the lean swarm profile). The
+    # guide is a terminal walkthrough with menus; the store only opens it.
+    if command -v pol >/dev/null 2>&1; then
+        term_run "echo 'Production server guide — the same command the terminal route uses:'; echo '  pol prod guide'; echo; \
+pol prod guide; echo; read -p 'Done — press Enter to close...'" \
+            || zenity --error --text "No terminal emulator found. Run in any terminal:\n  pol prod guide" 2>/dev/null
+    else
+        zenity --info --title "Set up a public server" --width 520 \
+            --text "A public server is the developer route (docker swarm, a small VM).\n\nOn the server, with the suite checkout installed (Developer getting started in the docs):\n   pol prod guide\n\nIt asks for the domain, the certificate (auto-generated or provider-issued and auto-approved), logins, modules and installers, then deploys." 2>/dev/null
+    fi
     open_shell
 elif [ "$CHOICE" = "Join an existing isle" ]; then
     zenity --info --title "Join an existing isle" --width 520 \
