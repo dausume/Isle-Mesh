@@ -6,7 +6,9 @@
 # arrives with the full tier later).
 services:
   backend:
-    image: prf-backend:staging
+    # the PUBLISHED image by default (a deb from the website must work without a local build — 2026-09-13 finding);
+    # a developer overrides both with polari-isle/.env (POLARI_IMAGE_REPO= POLARI_IMAGE_TAG=staging) for local images
+    image: ${POLARI_IMAGE_REPO:-ghcr.io/dausume/}prf-backend:${POLARI_IMAGE_TAG:-polari-v2026.09.12-core}
     container_name: prf-isle-backend
     restart: unless-stopped
     networks: [isle-agent-net]
@@ -29,7 +31,7 @@ services:
       - backend-data:/data
     mem_limit: 2g
   frontend:
-    image: prf-frontend:staging
+    image: ${POLARI_IMAGE_REPO:-ghcr.io/dausume/}prf-frontend:${POLARI_IMAGE_TAG:-polari-v2026.09.12-core}
     container_name: prf-isle-frontend
     restart: unless-stopped
     networks: [isle-agent-net]

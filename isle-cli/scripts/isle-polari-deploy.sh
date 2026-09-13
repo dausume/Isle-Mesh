@@ -45,6 +45,8 @@ if [ ! -d "$DIR" ]; then
     [ -n "$SEED" ] || die "no $DIR and no versioned polari-isle/ seed found (deb: /usr/share/isle-mesh/polari-isle)"
     mkdir -p "$DIR"
     cp "$SEED"/docker-compose.yml "$SEED"/runtime-config.json "$SEED"/push-to-polari.sh "$DIR/"
+    # the release image tag the deb was built for (POLARI_IMAGE_REPO/TAG); absent = the compose defaults (published images)
+    [ -f "$SEED/.env" ] && cp "$SEED/.env" "$DIR/.env"
     chmod +x "$DIR/push-to-polari.sh"
     ok "seeded $DIR from the versioned polari sub-project ($SEED)"
 fi

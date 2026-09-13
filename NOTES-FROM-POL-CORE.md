@@ -485,3 +485,26 @@ The hand-back contract for the isle CLI (yours), mirrored on pol deploy / the IS
 Also seen: the uninstall's own verify flagged `/usr/share/isle-mesh` still present and 6 images "harmless"
 — the proof should treat residue as failure. Polari side: a `handback` audit ring + a CI install→uninstall→proof
 test in a throwaway VM.
+
+## 2026-09-13 — the website deb on a wiped core: what worked, what did not (ledger §27)
+
+`polari-complete_0.1.34_amd64.deb` from https://polari-systems.org installs cleanly and `isle core-install` builds the isle
+(router VM, agent, mDNS, CA, discovery). Bugs found on the way — yours to fix in the isle CLI:
+1. `isle core-install --help` IGNORES the flag and starts a real install; run as a non-root user it gets through the
+   prerequisite checks and dies at `/etc/dnsmasq.d/split-dns.conf: Permission denied`. Unknown flags must print help and
+   exit; non-root must refuse before touching anything.
+2. `polari-isle/docker-compose.yml` hardcoded `prf-backend:staging` / `prf-frontend:staging` → `pull access denied` on
+   every machine without a local build (i.e. every real user). FIXED in the suite's Isle-Mesh copy (now the only live
+   copy — isle-core's ~/polari-suite was wiped): images default to `ghcr.io/dausume/prf-*:polari-v2026.09.12-core`,
+   overridable by `polari-isle/.env`. The deb build should stamp the release tag into that .env.
+3. The "complete" deb does not carry the isle-app-store deb → 4/7 "no isle-app-store deb staged (~/polari-shells)",
+   5/7 apt-on-mesh publish FAILS → https://apt.isle and the JOIN DOOR do not exist after a website install. Members
+   cannot join a core installed this way. Ship the store deb in polari-complete (or publish apt-on-mesh from the
+   installed files), and make 5/7 a hard failure with the sentence, not a WARN.
+4. `arp: command not found` (router.sh:87) → "Could not determine router IP address" in `isle status` and
+   `isle router status`; add net-tools to Depends or use `ip neigh`.
+5. `isle app list` under sudo prints the "your user is not in the docker group" warning and no list.
+6. `isle dns list` prints an empty list right after polari.isle / api.polari.isle were registered (3/5 said OK).
+7. `isle status`: "Broadcast domains file not found: /etc/isle-mesh/domains-to-broadcast.txt" on a fresh core.
+8. 1/7 printed "[FAIL] on a NEW core: isle certs init-ca" and "leaf issuance failed for sample.local" before the CA
+   existed (ordering: the CA is minted in 2/7) — reorder or silence the expected first-run failure.
