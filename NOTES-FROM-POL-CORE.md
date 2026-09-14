@@ -625,3 +625,11 @@ Built on our side (modules/appstore/custom/app_forms.py, the deb builder, /api/a
   manifests of isle_relay + isle_guestnet are now kind hardware-app (tier hardware); printcam extends voron.
 - CLI: `pol apps access <m> [--flavor online|offline] [--from] [-o]`, `--form` on status|request|fetch,
   `pol apps usb write --forms install,access`.
+
+## 2026-09-14 — the dev posture verb exists on our side
+`os-security/posture.sh` (shipped by `pol deploy posture <node> dev|production|status`) writes /etc/polari/posture.json,
+applies isle-scoped relaxations (sshd Match Address drop-in for root-with-key from the isle cidr; sysctl drop-ins),
+arms a revert timer, prints the dev warning, refuses on /etc/polari/production-route. `isle posture …` can wrap the
+same script (it installs itself to /usr/local/lib/polari/posture.sh); `isle install --mode dev` should call
+`posture.sh dev --for <n>` or write the same file; the isle's own cidr should be passed as `--cidr` (the script's
+fallback is the LAN of the default route).
