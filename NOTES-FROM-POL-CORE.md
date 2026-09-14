@@ -532,3 +532,10 @@ point) and per-app `wheels[]` + `shared_wheels{}` (a library carried by several 
 installed ONCE: the instance's pip --no-index skips what is present). His three cases the door must serve: apps only;
 all of Polari as an app alongside other apps (the platform deb first, only if missing); a bulk install of many apps
 from one stick. Later the ISO may roll the same folder up at build (POLARI_ISO_PLAN addendum) — both stay independent.
+Addendum 2 (his ask, same day): the stick PROMPTS. Root `autorun.sh` (the desktop's x-content/unix-software prompt —
+only from ext4, FAT mounts with showexec) execs `polari-apps/on-insert.sh`: Install / Not now / Wipe the stick; after
+`install-apps.sh --verify` says confirmed finished, the index's `after_install` policy (ask|wipe|keep) applies;
+`wipe-stick.sh` is guarded (removable/USB only, never a system disk, named, --yes). The store door and `isle` should use
+these same scripts (they are on the stick: `--answer install|no|wipe`, `--after`) — one implementation. The isle-core
+side: the platform deb should ENABLE the watcher (`pol apps usb watch --enable` = a systemd --user unit) so a plugged
+stick asks on any filesystem once Polari is installed; and `isle usb prepare` = `wipe-stick.sh --fs ext4`.
