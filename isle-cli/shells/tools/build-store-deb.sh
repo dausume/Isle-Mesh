@@ -95,6 +95,9 @@ PYEOF
 # SAME terminal steps (see shells/store-launch.sh header).
 cp "$SELF_DIR/store-launch.sh" "$STAGE$SHARE/store-launch.sh"
 chmod 755 "$STAGE$SHARE/store-launch.sh"
+# the ONE privileged entry point behind the doors (pkexec): core-install --mode, join --tier, posture, stick
+cp "$SELF_DIR/store-setup.sh" "$STAGE$SHARE/store-setup.sh"
+chmod 755 "$STAGE$SHARE/store-setup.sh"
 
 # ---- .desktop ----
 cat > "$STAGE/usr/share/applications/$PKG.desktop" <<EOF
