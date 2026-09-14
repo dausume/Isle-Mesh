@@ -580,3 +580,15 @@ His rule (same day): setup choices are CLI VERBS FIRST, and the UI WRAPS them. S
    HARDWARE → the core's topology shows econ-core as a hardware member and a Hardware App's install plan lands there.
    Pre-condition on OUR side: republish the deb (the published 0.1.34 still hardcodes prf-*:staging images; the
    build now stamps the ghcr tag into polari-isle/.env).
+
+## 2026-09-14 — the store's setup flow REVISED (his ask): every door wraps a CLI verb through pkexec
+`shells/tools/store-launch.sh` (synced from polari-app-shell) now offers: Create my own isle (→ MODE question
+Production / Development with the standing dev warning), Join an existing isle (→ TIER question Light / Host /
+Hardware in plain words, then the fingerprint, then ONE verb), Install apps from a USB stick (the stick's own
+prompt), Set up a public server, Just browse. A plugged-in app stick is offered first even on a member.
+ONE privileged entry point: `store-setup.sh` (pkexec) — `core-install --mode`, `join --fingerprint --tier [--core]`,
+`posture`, `stick`. It runs YOUR verbs and detects, by grepping the verb's script for the flag case, whether the
+installed isle CLI accepts `--mode` / `--tier`; until it does, it records the mode in /etc/polari/posture.json +
+polari-isle/.env (the compose now passes POLARI_POSTURE) and joins HARDWARE as `--host` with an honest warning.
+Yours to add so the helper stops falling back: `core-install --mode production|dev` (writes the same posture file),
+`isle-bootstrap.sh --tier light|host|hardware` + `onboard --tier`, and the hardware tier itself.

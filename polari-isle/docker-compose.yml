@@ -26,6 +26,7 @@ services:
       - WEBSOCKET_ENABLED=true
       - WEBSOCKET_PORT=3001
       - POLARI_MODULES=${POLARI_ISLE_MODULES:-islemesh}
+      - POLARI_POSTURE=${POLARI_POSTURE:-production}   # dev|production: the store's install-mode door writes it to .env; dev shows the standing warning
       - POLARI_LAZY_BOOT=1
     volumes:
       - backend-data:/data
