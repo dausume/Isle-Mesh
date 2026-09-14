@@ -527,3 +527,8 @@ Yours (the isle CLI + the store shell):
    needed") listing index.json's apps with their hardware notices; install through `install-apps.sh` (pkexec),
    then admit. Offline always; never fetch when a stick is present.
 3. A core offered a stick: `isle apt-repo publish --from <mount>/polari-apps` so members get the apps on-mesh.
+Addendum (same day): index.json also carries `installers[]` (the platform deb, `from` = the core or the distribution
+point) and per-app `wheels[]` + `shared_wheels{}` (a library carried by several apps — on the stick more than once,
+installed ONCE: the instance's pip --no-index skips what is present). His three cases the door must serve: apps only;
+all of Polari as an app alongside other apps (the platform deb first, only if missing); a bulk install of many apps
+from one stick. Later the ISO may roll the same folder up at build (POLARI_ISO_PLAN addendum) — both stay independent.
