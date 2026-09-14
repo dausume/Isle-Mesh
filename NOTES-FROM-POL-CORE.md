@@ -508,3 +508,22 @@ test in a throwaway VM.
 7. `isle status`: "Broadcast domains file not found: /etc/isle-mesh/domains-to-broadcast.txt" on a fresh core.
 8. 1/7 printed "[FAIL] on a NEW core: isle certs init-ca" and "leaf issuance failed for sample.local" before the CA
    existed (ordering: the CA is minted in 2/7) — reorder or silence the expected first-run failure.
+
+## 2026-09-13 — the USB app stick (his rulings): the store's "From a USB stick" door is yours
+
+His rulings: Polari LOOKS for a prepared USB stick, the stick is the ADVISED path for app installs, and a stick
+is ALWAYS the offline flavour. Built on our side: `pol apps usb list | write <mount> [--apps all|a,b] [--from <core>]
+| install [<mount>]` (polari-cli/scripts/lib/apps_usb.py + install-apps.sh). The stick layout — the contract:
+  <mount>/polari-apps/index.json      {schema: "polari-app-stick/1", created, source, flavor: "offline",
+                                       installers: [{file, bytes, sha256}], apps: [{module, file, bytes, sha256,
+                                       verified, carries, engines, hardware (the notice text or "")}]}
+  <mount>/polari-apps/*.deb           the platform installer(s) + polari-app-<module>-offline_*.deb
+  <mount>/polari-apps/install-apps.sh presence-checked: skips what dpkg says is present, installs the rest OFFLINE
+Yours (the isle CLI + the store shell):
+1. `isle usb create <mount> --apps all|a,b` = the same stick from an isle core (its apt-on-mesh pool + the API);
+   keep `isle usb create` non-destructive as it is.
+2. The store's "From a USB stick" door: on open, look for a mounted removable drive carrying
+   polari-apps/index.json; when found, make it the FIRST offer ("Install from your Polari stick — no internet
+   needed") listing index.json's apps with their hardware notices; install through `install-apps.sh` (pkexec),
+   then admit. Offline always; never fetch when a stick is present.
+3. A core offered a stick: `isle apt-repo publish --from <mount>/polari-apps` so members get the apps on-mesh.
