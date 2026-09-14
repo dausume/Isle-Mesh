@@ -539,3 +539,10 @@ only from ext4, FAT mounts with showexec) execs `polari-apps/on-insert.sh`: Inst
 these same scripts (they are on the stick: `--answer install|no|wipe`, `--after`) — one implementation. The isle-core
 side: the platform deb should ENABLE the watcher (`pol apps usb watch --enable` = a systemd --user unit) so a plugged
 stick asks on any filesystem once Polari is installed; and `isle usb prepare` = `wipe-stick.sh --fs ext4`.
+
+## 2026-09-14 — ssh is for permission groups, never root (his ruling)
+`PermitRootLogin no` always; `AllowGroups polari-ops polari-dev polari-observe`; each group its own
+/etc/sudoers.d/polari-<group> command list (never NOPASSWD: ALL); Match Group scoping (observe = ForceCommand,
+no forwarding). The isle CLI creates the groups + sudoers files at install, puts the installer in polari-ops, and the
+hand-back journal removes only what it created. The audit (os-security/audit.sh) now checks `ssh-groups` and
+`sudo-scoped` — both warn-only. Dev posture (plan §16) = time-boxed group membership AND root over ssh (his ruling: allowed in dev only — key-only, Match Address <isle cidr>, time-boxed, reverts on expiry/reboot).
