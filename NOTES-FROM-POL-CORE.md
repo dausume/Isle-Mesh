@@ -546,3 +546,10 @@ stick asks on any filesystem once Polari is installed; and `isle usb prepare` = 
 no forwarding). The isle CLI creates the groups + sudoers files at install, puts the installer in polari-ops, and the
 hand-back journal removes only what it created. The audit (os-security/audit.sh) now checks `ssh-groups` and
 `sudo-scoped` — both warn-only. Dev posture (plan §16) = time-boxed group membership AND root over ssh (his ruling: allowed in dev only — key-only, Match Address <isle cidr>, time-boxed, reverts on expiry/reboot).
+
+## 2026-09-14 — dev-mode vs production-mode installs; the standing dev warning (his rulings)
+`isle install --mode dev|production` (and the deb's debconf question) must set POLARI_POSTURE on the instance and write
+`/etc/polari/posture.json` (`{"posture":"dev","until":"<UTC>","relaxations":[...],"applied_by":"..."}`) — the
+inventory reads it and the core derives the assurance (secure | dev until | unsecured). In DEV MODE every join/peer/
+connect verb prints his warning verbatim: "any connection to systems that are not your own is extremely dangerous" —
+the text is security_notices.DEV_MODE_TEXT on our side; keep it identical. Production mode refuses dev relaxations.
