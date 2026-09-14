@@ -604,3 +604,24 @@ Yours: `isle onboard --tier access|host|hardware` writing the tier into the agen
 access member lists ONLY shells (every hosted app as "Add to this computer" = its launcher) and `isle app install`
 REFUSES hosting kinds there with the sentence from tier_reach ("this device is ACCESS ONLY …"); `isle status` +
 the core's topology show the tier; the launcher deb gets `Polari-Kind: access-app` in its control.
+
+## 2026-09-14 — two FORMS of every app, refusals at install, access apps that find their target (his rulings)
+Built on our side (modules/appstore/custom/app_forms.py, the deb builder, /api/apps?form=, /api/access):
+- INSTALL form `polari-app-<m>[-offline]`: hardware apps + expansions carry a `preinst` that refuses BEFORE anything
+  is installed — on a lightweight isle: "the isle you are on is a lightweight isle, based on docker swarm, you need
+  to install a full isle version of Polari to install hardware apps"; not the hardware tier (no /dev/kvm+libvirt);
+  an expansion without its base ("<m> expands <base>, which is not installed here — install <base> first").
+  Detection in the preinst: full isle = /etc/isle-mesh (+ ca); swarm-only = docker swarm active AND no /etc/isle-mesh.
+  POLARI_ALLOW_POLARI_SIDE=1 = a developer's override (the 2026-09-12 ruling). YOURS: make `isle app install` run
+  dpkg so the preinst governs (never unpack first), and print the refusal verbatim.
+- ACCESS form `polari-access-<m>[-offline]` (kind access-app; every app, online + offline; offline carries the
+  polari-shell-core deb when the core staged it): a .desktop + `/usr/share/polari-access/<m>/open.sh`. open.sh FINDS
+  the app: (1) `GET https://api.polari.isle/api/access/<m>` → url; (2) the conventional addresses
+  (`https://polari.isle/app/<m>`, `https://<m>.isle`); (3) asks the person to pick from the isle's .isle addresses —
+  it reads `isle dns list` (first column = names) — then remembers in ~/.config/polari/access/<m>.url.
+  YOURS: keep `isle dns list` printing one name per line first column; the store on any member lists BOTH forms
+  (install for host/hardware, access for everyone); on an access member only the access form is offered.
+- The pages group Software apps / Hardware apps / each hardware app's Expansions (details subsection); the
+  manifests of isle_relay + isle_guestnet are now kind hardware-app (tier hardware); printcam extends voron.
+- CLI: `pol apps access <m> [--flavor online|offline] [--from] [-o]`, `--form` on status|request|fetch,
+  `pol apps usb write --forms install,access`.
