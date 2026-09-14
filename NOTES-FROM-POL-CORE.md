@@ -592,3 +592,15 @@ installed isle CLI accepts `--mode` / `--tier`; until it does, it records the mo
 polari-isle/.env (the compose now passes POLARI_POSTURE) and joins HARDWARE as `--host` with an honest warning.
 Yours to add so the helper stops falling back: `core-install --mode production|dev` (writes the same posture file),
 `isle-bootstrap.sh --tier light|host|hardware` + `onboard --tier`, and the hardware tier itself.
+
+## 2026-09-14 — the ACCESS-ONLY tier and the `access-app` kind (his ruling)
+Tiers are now access | host | hardware (the store door says "Access only", and `store-setup.sh join --tier access`
+= today's plain `isle onboard`; 'light' stays an alias). ACCESS ONLY = only app SHELLS are installed (launchers:
+.desktop + icon + polari-shell.json, the build-launcher-deb.sh output) and only shells may ever be installed there —
+no Polari app, no container (docker swarm polari apps), no KVM guest (isle kvm polari apps); the device USES the apps
+the isle hosts. Polari side built: manifest kind `access-app` (APP_KINDS), `moduleService/tier_reach.py`
+(tiers_for / tier_notice / access_form), the apps API's `hosts_on` + `access_form` + `notice_on_access` per app.
+Yours: `isle onboard --tier access|host|hardware` writing the tier into the agent/registration; the store on an
+access member lists ONLY shells (every hosted app as "Add to this computer" = its launcher) and `isle app install`
+REFUSES hosting kinds there with the sentence from tier_reach ("this device is ACCESS ONLY …"); `isle status` +
+the core's topology show the tier; the launcher deb gets `Polari-Kind: access-app` in its control.
