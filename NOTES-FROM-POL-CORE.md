@@ -553,3 +553,30 @@ hand-back journal removes only what it created. The audit (os-security/audit.sh)
 inventory reads it and the core derives the assurance (secure | dev until | unsecured). In DEV MODE every join/peer/
 connect verb prints his warning verbatim: "any connection to systems that are not your own is extremely dangerous" —
 the text is security_notices.DEV_MODE_TEXT on our side; keep it identical. Production mode refuses dev relaxations.
+
+## 2026-09-14 — the member setup walkthrough: a TIER choice, as CLI verbs wrapped by the UI (his asks)
+
+His two questions today: (1) does a non-core setup ask the user "hardware use but heavier" vs "lighter but no
+hardware through this machine", made clear in the setup walkthrough? (2) can the SAME website deb install on a
+second machine and connect to the core as a HARDWARE member? Today the answer to both is NO:
+- `isle onboard` knows only `--host` (a hosting member: agent + containers) vs nothing; there is no hardware tier on
+  the isle side (agent.tier=hardware, `isle vm` verbs — requested 2026-09-08, still open), and nothing explains the
+  trade-off to the person.
+- The store's door 2 ("Join an existing isle") shows a TEXT telling the person to curl the bootstrap and run it by
+  hand with `[--host]` — it wraps nothing and offers no choice.
+His rule (same day): setup choices are CLI VERBS FIRST, and the UI WRAPS them. So:
+1. `isle onboard --tier light|host|hardware` (and `isle-bootstrap.sh --tier …`). With no flag, an interactive
+   three-way question in plain words, the same words the UI shows:
+     LIGHT     — "Reach the isle's apps from this computer. Lightest: nothing runs here."
+     HOST      — "Also run apps here for the isle (containers). Heavier: an agent + Docker stay running."
+     HARDWARE  — "Also let hardware apps use THIS machine's devices (KVM/passthrough, radios, printers, GPIO).
+                  Heaviest: libvirt + the agent; the machine must stay on. Needed for any Hardware App."
+   Each answer prints what it will install and what it will keep running, then asks once.
+2. The store's door 2 = the same three cards (zenity/kdialog) → runs the verb with the chosen `--tier`; the
+   fingerprint step stays the trust anchor, but the door fetches + checks the bootstrap itself.
+3. `isle status` and the core's isle topology show each member's tier (the inventory's role field already
+   distinguishes isle-core / isle-member; add `tier`).
+4. The test he wants (owed on both sides): website deb → core on isle-core, the SAME deb → econ-core, door 2 with
+   HARDWARE → the core's topology shows econ-core as a hardware member and a Hardware App's install plan lands there.
+   Pre-condition on OUR side: republish the deb (the published 0.1.34 still hardcodes prf-*:staging images; the
+   build now stamps the ghcr tag into polari-isle/.env).
