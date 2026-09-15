@@ -643,3 +643,18 @@ The ACCESS form (the shell) is for every tier — a member remote-controls a har
 `moduleService/tier_reach.py: install_allowed(app, tier)` is the one rule; the catalogue page and /api/apps?tier=
 show the forms accordingly. The store door offers Access only / Isle member / Hardware (core = Create my own isle);
 `store-setup.sh join --tier member` maps to your `--host`. YOURS: `isle app install` refusing by the same rule.
+
+## 2026-09-15 — the ISO module is built on our side; what its first boot expects from the isle CLI
+`modules/iso` builds an unattended Ubuntu Server ISO (subiquity autoinstall) that installs polari-complete OFFLINE from
+the ISO's own `polari/debs`, writes `/etc/polari/posture.json` and `/etc/polari/plan.json`
+(`{"role": core|member|hardware|access|server, "shape": detect|desktop|headless, "join_core": "", "join_fingerprint": "",
+"join_tier": "", "look": "...", "apps": [...]}`), and runs `/usr/local/lib/polari/first-boot.sh` once. That script:
+1. writes `/etc/polari/detected.json` (display, kvm, iommu, nics, tpm) and sets graphical/multi-user by detection;
+2. role core → `ISLE_ASSUME_YES=1 isle core-install --skip-security` (must run fully unattended: no prompt, no --help
+   trap; the isle security walkthrough comes later through `pol deploy harden`);
+3. role member/hardware/access → fetches `https://<join_core or apt.isle>/isle-bootstrap.sh` and runs it with
+   `--fingerprint <fp> [--core <ip>] [--host]` (access = no --host). When `--tier` exists it should be used instead;
+4. installs the carried apps with `install-apps.sh --no-platform`, then disables itself.
+YOURS: keep core-install and isle-bootstrap unattended-safe; `isle profile derive <device>` may read plan.json;
+report `detected.json` + the join to the core (the DeviceProbe row flips from planned to joined). The ISO carries
+the CA FINGERPRINT only (D-P4 join tokens are still his decision).
