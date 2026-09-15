@@ -633,3 +633,13 @@ arms a revert timer, prints the dev warning, refuses on /etc/polari/production-r
 same script (it installs itself to /usr/local/lib/polari/posture.sh); `isle install --mode dev` should call
 `posture.sh dev --for <n>` or write the same file; the isle's own cidr should be passed as `--cidr` (the script's
 fallback is the LAN of the default route).
+
+## 2026-09-14 — tiers are access | member | hardware | core; what each may INSTALL (his rules)
+`host` is now an alias of `member` (a normal isle member); the core is its own tier (the isle core hosts everything,
+incl. CORE-EXCLUSIVE apps — `agentTier: core` in the manifest: appstore, islemesh, security, polariapps, resources,
+testing, terms, suiteapps, hardwareapps). Rules for the INSTALL form: access → never (shells only); member → web
+apps only (no hardware apps, no core-exclusive apps); hardware → everything except core-exclusive; core → everything.
+The ACCESS form (the shell) is for every tier — a member remote-controls a hardware app through its shell.
+`moduleService/tier_reach.py: install_allowed(app, tier)` is the one rule; the catalogue page and /api/apps?tier=
+show the forms accordingly. The store door offers Access only / Isle member / Hardware (core = Create my own isle);
+`store-setup.sh join --tier member` maps to your `--host`. YOURS: `isle app install` refusing by the same rule.

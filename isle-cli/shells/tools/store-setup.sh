@@ -6,7 +6,7 @@
 # installed isle CLI does not accept yet, honestly (it says so).
 #
 #   store-setup.sh core-install --mode production|dev [isle core-install args...]
-#   store-setup.sh join --fingerprint <CA sha256> --tier access|host|hardware [--core <ip>]   (access = shells only, hosts nothing; 'light' = alias)
+#   store-setup.sh join --fingerprint <CA sha256> --tier access|member|hardware [--core <ip>]   (access = shells only; member = a normal isle member; 'host'/'light' = aliases)
 #   store-setup.sh posture production|dev [--until <UTC>]       write /etc/polari/posture.json (+ polari-isle/.env)
 #   store-setup.sh stick [<mountpoint>]                          run a Polari app stick's own prompt (Install / Not now / Wipe)
 # DRY=1 prints the commands instead of running them (tests).
@@ -58,8 +58,8 @@ case "$VERB" in
         FP=""; TIER=access; CORE=""
         while [ $# -gt 0 ]; do case "$1" in --fingerprint) FP="$2"; shift 2 ;; --tier) TIER="$2"; shift 2 ;; --core) CORE="$2"; shift 2 ;; *) shift ;; esac; done
         [ -n "$FP" ] || die "join needs --fingerprint <CA sha256> (from the core's 'isle core-install' printout)"
-        [ "$TIER" = light ] && TIER=access
-        case "$TIER" in access|host|hardware) ;; *) die "--tier access | host | hardware" ;; esac
+        [ "$TIER" = light ] && TIER=access; [ "$TIER" = host ] && TIER=member
+        case "$TIER" in access|member|hardware) ;; *) die "--tier access | member | hardware" ;; esac
         SRC="https://${CORE:-apt.isle}/isle-bootstrap.sh"; TMP=$(mktemp)
         echo "Join — tier: $TIER. Fetching the bootstrap from your core: $SRC"
         if [ "${DRY:-0}" = 1 ]; then echo "+ curl -fsSk $SRC -o $TMP"; else curl -fsSk "$SRC" -o "$TMP" || die "could not fetch $SRC — is this computer on the isle's network? (--core <ip> if apt.isle does not resolve yet)"; fi
@@ -67,10 +67,10 @@ case "$VERB" in
         BARGS=(--fingerprint "$FP"); [ -n "$CORE" ] && BARGS+=(--core "$CORE")
         case "$TIER" in
             access) echo "access only: this computer gets the shells (launchers) and reaches the isle's apps; it hosts nothing (plain 'isle onboard')" ;;
-            host) BARGS+=(--host) ;;
+            member) BARGS+=(--host) ;;   # the isle CLI's flag for a hosting member
             hardware)
                 if cli_accepts isle-bootstrap --tier || cli_accepts onboard --tier; then BARGS+=(--tier hardware)
-                else BARGS+=(--host); warn "this isle CLI has no HARDWARE tier yet — joining as HOST; hardware apps will say they cannot reach this machine's devices until the isle side ships the tier"; fi ;;
+                else BARGS+=(--host); warn "this isle CLI has no HARDWARE tier yet — joining as an isle MEMBER; hardware apps will say they cannot reach this machine's devices until the isle side ships the tier"; fi ;;
         esac
         run bash "$TMP" "${BARGS[@]}"; rm -f "$TMP"
         [ "$TIER" = hardware ] && ok "requested tier: hardware (recorded for the core's topology once the tier exists)"
@@ -84,5 +84,5 @@ for d in json.load(sys.stdin)["blockdevices"]:
         [ -n "$MP" ] && [ -f "$MP/polari-apps/on-insert.sh" ] || die "no Polari app stick is plugged in (a stick carries polari-apps/index.json; make one: pol apps usb write)"
         run bash "$MP/polari-apps/on-insert.sh" "$@" ;;
     *)
-        echo "usage: store-setup.sh core-install --mode production|dev | join --fingerprint <sha256> --tier access|host|hardware [--core <ip>] | posture production|dev [--until] | stick [<mount>]"; exit 1 ;;
+        echo "usage: store-setup.sh core-install --mode production|dev | join --fingerprint <sha256> --tier access|member|hardware [--core <ip>] | posture production|dev [--until] | stick [<mount>]"; exit 1 ;;
 esac

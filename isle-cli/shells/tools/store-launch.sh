@@ -6,7 +6,7 @@
 # exists — install MODES, member TIERS, the USB app stick:
 #   1. Create my own isle        -> mode question (Production / Development + the standing dev warning)
 #                                   -> pkexec store-setup.sh core-install --mode <m>   (a terminal: the walkthrough asks there)
-#   2. Join an existing isle     -> tier question (Access only / Host / Hardware, in plain words) + the core's CA fingerprint
+#   2. Join an existing isle     -> tier question (Access only / Isle member / Hardware, in plain words; the core = Create my own isle) + the core's CA fingerprint
 #                                   -> pkexec store-setup.sh join --fingerprint <fp> --tier <t>
 #   3. Install apps from a USB stick -> the stick's own prompt (Install / Not now / Wipe) — offline, presence-checked
 #   4. Set up a public server    -> pol prod guide in a terminal (the developer route)
@@ -133,11 +133,11 @@ echo; read -p 'Done — press Enter to close and open the store...'" \
 elif [ "$CHOICE" = "Join an existing isle" ]; then
     # DOOR 2: the TIER question in plain words, then the core's CA fingerprint (the trust anchor), then ONE verb
     TIER_ANSWER=$(zenity --question --title "Join an existing isle — what should this computer do?" --width 600 \
-        --text "<b>Access only</b> — use the isle's apps from this computer. Only app SHELLS (launchers that open an app hosted elsewhere on the isle) can be installed here; nothing is hosted and nothing keeps running. Lightest.\n\n<b>Host</b> — also run apps here for the isle (Polari apps and containers). Heavier: an agent and Docker stay running.\n\n<b>Hardware</b> — also let hardware apps use THIS machine's devices (KVM/passthrough, radios, printers, GPIO). Heaviest: libvirt + the agent; the machine must stay on. Needed for any Hardware App.\n\nYou can change this later." \
-        --ok-label "Access only" --extra-button "Host" --extra-button "Hardware" --extra-button "Back" 2>/dev/null)
+        --text "<b>Access only</b> — use the isle's apps from this computer. Only app SHELLS (launchers that open an app hosted elsewhere on the isle) can be installed here; nothing is hosted and nothing keeps running. Lightest.\n\n<b>Isle member</b> — also run apps here for the isle (Polari apps and containers; not hardware apps, not the core-only apps). Heavier: an agent and Docker stay running.\n\n<b>Hardware</b> — also let hardware apps use THIS machine's devices (KVM/passthrough, radios, printers, GPIO). Heaviest: libvirt + the agent; the machine must stay on. Needed for any Hardware App.\n\nYou can change this later." \
+        --ok-label "Access only" --extra-button "Isle member" --extra-button "Hardware" --extra-button "Back" 2>/dev/null)
     TRC=$?
     if [ "$TIER_ANSWER" = "Back" ]; then exec "$0"; fi
-    TIER=access; [ "$TIER_ANSWER" = "Host" ] && TIER=host; [ "$TIER_ANSWER" = "Hardware" ] && TIER=hardware
+    TIER=access; [ "$TIER_ANSWER" = "Isle member" ] && TIER=member; [ "$TIER_ANSWER" = "Hardware" ] && TIER=hardware
     FP=$(zenity --entry --title "Join an existing isle — the core's fingerprint" --width 560 \
         --text "On your isle's CORE device, 'sudo isle core-install' printed the JOIN INFO with the CA FINGERPRINT (sha256).\nType or paste it here — it is the trust anchor; always compare it with the core's printout, never with a message someone sent you." 2>/dev/null)
     [ -n "$FP" ] || open_shell
