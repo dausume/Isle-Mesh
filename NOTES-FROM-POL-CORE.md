@@ -658,3 +658,70 @@ the ISO's own `polari/debs`, writes `/etc/polari/posture.json` and `/etc/polari/
 YOURS: keep core-install and isle-bootstrap unattended-safe; `isle profile derive <device>` may read plan.json;
 report `detected.json` + the join to the core (the DeviceProbe row flips from planned to joined). The ISO carries
 the CA FINGERPRINT only (D-P4 join tokens are still his decision).
+
+## 2026-09-20 — ci-3: the CI pipeline now installs an isle from the deb on every push to `test`, and these are what it found
+
+polari-jenkins' isle-test job stands a throwaway Ubuntu 24.04 guest up on isle-core (nested KVM), installs
+`polari-complete` from the debs THAT RUN built, runs `isle core-install`, verifies, runs the module selftests
+inside `prf-isle-backend`, and then runs `isle uninstall --everything` as a de jure test of the hand-back. It
+runs unattended, with no tty, on every push to `test`. These are the isle-CLI findings it produces. They are
+yours; nothing here was worked around in a way that hides them.
+
+**1. `polari-complete` does not Depend on the things `isle create` cannot run without.**
+Its control file is `Depends: curl, hostapd, iw, jq, libnss3-tools, nodejs, openssl, policykit-1, socat, zenity`
+— no docker, no libvirt/qemu, no dnsmasq. But `isle-cli/scripts/create.sh` hard-exits without docker
+(`create.sh:114-120`), and without `virsh` it asks a question (`create.sh:178-198`) that `ISLE_ASSUME_YES` is
+NOT consulted for: with no tty it logs *"libvirt missing and no terminal"* and exits 1; with `ssh -t` it hangs
+on the prompt. So a deb taken from the website cannot install an isle on a clean Ubuntu 24.04 unless the
+person already knew to `apt install qemu-kvm libvirt-daemon-system dnsmasq docker.io docker-compose-v2`
+first. The pipeline installs them itself, in `polari-jenkins/isle/guest-install.sh`, and says in that file that
+it is compensating for a missing dependency rather than fixing one. **Ours to ask, yours to decide:** either
+those belong in `Depends`/`Recommends`, or `core-install` should install them the way
+`router-init-lib/20-prereqs.sh` already installs its own.
+
+**2. `ISLE_ASSUME_YES` is not honoured at the libvirt gate.** Same lines as above. Every other prompt in
+`create.sh` and `agent-manager.sh` respects it; that one does not.
+
+**3. `/etc/dnsmasq.d` is written before anything guarantees it exists.** `ensure_isle_dns()` appends
+`server=/.isle/$ROUTER_ISLE_IP` to `/etc/dnsmasq.d/split-dns.conf` under `set -e`, and stock Ubuntu 24.04 has
+no `/etc/dnsmasq.d` until the `dnsmasq` package is installed. A `mkdir -p` there would cost nothing.
+
+**4. `isle core-install --help` starts a real install.** The arg loop is
+`while [ $# -gt 0 ]; do case "$1" in --modules) …;; --skip-security) …;; *) shift;; esac; done` — unknown
+flags are silently swallowed, `--help` included. (Already logged as bug #1 on 2026-09-13; still true.)
+
+**5. `core-install` exits 0 whatever happened.** It ends on `echo`s with no explicit `exit`, so its status is
+the status of the last echo. Nothing calling it can use its exit code. The pipeline therefore asserts on the
+two HTTP 200s instead —
+`curl -sk --resolve api.polari.isle:443:127.0.0.1 https://api.polari.isle/api/health` and
+`--resolve polari.isle:443:127.0.0.1 https://polari.isle/isle` — which is what
+`isle-polari-deploy.sh` itself does. An explicit non-zero exit on a failed step would let callers be simpler.
+
+**6. `uninstall.sh`'s `DEB_FAMILY` does not name `polari-complete`.** It is
+`isle-mesh-cli isle-app-store isle-manager-app polari-shell-core` — the four VIRTUAL names that
+`polari-complete` *Provides*, not the real package. `apt-get purge` of a Provides name does not remove the
+providing package, which is exactly why 2026-09-19's uninstall on isle-core left `polari-complete 0.1.34`
+installed and `/usr/share/isle-mesh` with it (§75 finding 1). On a box installed the polari-complete way —
+which is now every box the pipeline tests, and the way the website tells people to install — the family list
+is wrong for the only package that is actually there.
+
+**7. `polari-isle/docker-compose.yml`'s own override advice cannot work.** The comment says
+*"a developer overrides both with polari-isle/.env (POLARI_IMAGE_REPO= POLARI_IMAGE_TAG=staging)"*, but the
+interpolation is `${POLARI_IMAGE_REPO:-ghcr.io/dausume/}` — with `:-`, an EMPTY value in `.env` still takes
+the default, so `POLARI_IMAGE_REPO=` leaves the images pointing at ghcr. Only a non-empty prefix overrides.
+The pipeline uses `POLARI_IMAGE_REPO=localhost/` and re-tags accordingly. `${POLARI_IMAGE_REPO-…}` (no colon)
+would make the comment true.
+
+**8. The override has to go in the SEED, not the user directory.** `isle-polari-deploy.sh` copies
+`/usr/share/isle-mesh/polari-isle/` into `~<SUDO_USER>/polari-isle` only when that directory does not exist —
+so pre-creating `~/polari-isle` to drop a `.env` in SKIPS the seed of `docker-compose.yml` and
+`runtime-config.json` too. Writing `/usr/share/isle-mesh/polari-isle/.env` before the first `core-install` is
+the only override that always takes. Worth documenting; a `--image-repo/--image-tag` pair on `core-install`
+would be better.
+
+**9. On our side, for symmetry:** `pol modules selftest` could not find an isle's backend at all —
+`core_backend_container()` matched `prf-backend` and `polari-node_backend` exactly and never
+`prf-isle-backend`, so on a polari-complete box it died advising `pol suite up / pol node up`. Fixed in
+`polari-cli/scripts/lib/core-api.sh`. Note that `pol` is not installed by `polari-complete` at all, so the
+pipeline's in-guest runner still execs `docker exec prf-isle-backend python3 -m <suite>` directly, using the
+same discovery expression.
