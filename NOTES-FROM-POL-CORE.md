@@ -725,3 +725,52 @@ would be better.
 `polari-cli/scripts/lib/core-api.sh`. Note that `pol` is not installed by `polari-complete` at all, so the
 pipeline's in-guest runner still execs `docker exec prf-isle-backend python3 -m <suite>` directly, using the
 same discovery expression.
+
+### 2026-09-20, later — reproduced on a second full run (`polari-isle-test` #10, sha `9bcbd897`)
+
+The pipeline's own ssh defect (finding 1) is fixed on our side, so this run read every part of the cycle
+instead of stopping at the install. That makes it the first clean reading, and it says the uninstall
+findings are **not** a one-off: the same five lines came back, on a fresh cloud-image guest, from a core
+that had installed and verified perfectly.
+
+What the install and verify said first, so you know the state that was being uninstalled:
+
+    install: ok in 1080s — the isle answers from inside the guest: /api/health 200 and /isle 200,
+             0s after core-install returned
+             by step: prereqs=383s images=54s deb=70s core=573s online=0s
+             containers: prf-isle-frontend, prf-isle-backend, isle-sample-app, isle-vlan-agent
+    verify:  pass — all 8 checks pass
+             pass: routes: the isle front page — https://polari.isle/ -> 200
+             pass: routes: the isle hub — https://polari.isle/isle -> 200
+             pass: api: /api/health online — 200; modules: 1 of 1 online (100.0%)
+             pass: dns: polari.isle resolves in the guest
+             pass: store: the catalogue answers — Isle app store — 28 apps
+             pass: router guest: openwrt-isle-router — libvirt domain state: running (nested KVM)
+             pass: containers: agent + backend + frontend — all three running
+             pass: CA: the isle root exists — SHA256 F7:74:D8:9E:…:C8:BB
+
+Then `isle uninstall --everything` exited **0**, and its own verify said:
+
+    - [!] images remaining: 5 (harmless; docker rmi to clear)
+    - [✗] /usr/share/isle-mesh still present
+    - [✗] footprint remains (above)
+    - hand-back proof: /usr/share/isle-mesh gone — /usr/share/isle-mesh is still present
+    - hand-back proof: /etc/polari gone — /etc/polari is still present
+
+That exit status is the part worth fixing first: a command that verifies itself and finds two `[✗]` rows
+should not return 0. Everything downstream of it — ours and anyone's — reads the status before it reads the
+text, so today a scripted uninstall reports success while the footprint is still on the disk. The pipeline
+does not believe it (we parse the verify rows and call the stage `dirty`, which is why this run is
+`failed`), but we are the exception, not the rule.
+
+Two things that did NOT go wrong, for the record, because they narrow the search:
+
+- **the hand-back's network half passed.** Route, public DNS, `apt` and `systemd-networkd` were all fine in
+  the guest after the uninstall. The §75 DNS failure did not reproduce here — this guest is a cloud image
+  with no NetworkManager, so that row looks specific to a desktop install, not to the uninstall logic.
+- **nothing leaked.** Our leak check across the whole cycle came back `clean (none)`, `RAM +34 MB,
+  disk -358 MB` — the guest gave back more disk than the install took. The remaining footprint is files
+  under `/usr/share/isle-mesh` and `/etc/polari`, not processes, mounts or networks.
+
+The other Polari-side fault this run named is ours, not yours: `polariRefs.selftest_refs` passes on the
+device (88/88 suites) and fails inside the installed isle (49/51 checks). We own that one.
