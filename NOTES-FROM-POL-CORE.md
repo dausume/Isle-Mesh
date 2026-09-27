@@ -774,3 +774,28 @@ Two things that did NOT go wrong, for the record, because they narrow the search
 
 The other Polari-side fault this run named is ours, not yours: `polariRefs.selftest_refs` passes on the
 device (88/88 suites) and fails inside the installed isle (49/51 checks). We own that one.
+
+## 2026-09-27 — an ask: `isle update` (the isle's twin of `pol prod update`)
+
+His ruling today (Polari CI/CD plan §11.8): the pipeline stops when the assets are generated and made available on the
+registered locations (today the GitHub release + ghcr + the Homebrew tap; later a self-hosted Forgejo with a Debian
+package registry). Deployment is a command a PERSON runs on the device, pulling from those locations **without
+interrupting services**. Nothing of the pipeline ssh's into a deployment.
+
+For the swarm route we are building `pol prod update [<version>|latest] [--source …] [--dry-run]` (stash the volumes,
+rolling start-first image update one service at a time, verify, automatic re-pin on a failed verify, then move the
+checkout to the release tag, record it). The isle needs its twin on the deb route:
+
+- `isle update [<version>|latest] [--source <apt source>] [--dry-run]` — read the registered apt source(s) (the isle's
+  `apt-repo` today; the forge's Debian registry later), show current → target per package (`polari-complete`,
+  `isle-mesh-cli`, `isle-app-store`, `polari-isle`, app debs) and per image, then `apt-get install` the pinned versions
+  + load the release's images + restart the isle's containers ONE AT A TIME so the core stays answering; verify with
+  the same checks the pipeline's in-guest verify runs (routes, `/api/health`, split DNS, store, router guest, CA);
+  on failure re-pin the previous package versions and images; record under `/var/lib/isle-mesh/updates/`.
+- It reads the release's `release.json` (an asset beside the debs) and refuses unless `tested_against.verdict` is
+  `passed` — the release rule on the device too.
+- The hand-back journal (his 2026-09-13 rule) should see an update as install-time changes too, so the uninstall can
+  still replay everything.
+
+Not urgent — the swarm verb comes first and the forge later — but it is the shape. Written here so it is yours by
+design, not ours by accident.
