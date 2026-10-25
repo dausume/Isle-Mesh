@@ -121,6 +121,10 @@ sudo bash "$AGENT_MANAGER" register --name "$NAME" --domain "$DOMAIN" \
     --container "$CONTAINER" --port "$PORT" --protocol "$PROTOCOL" \
     || die "agent registration failed"
 
+# Make the new local app reachable from the core desktop immediately.
+# This edits only the owned hosts block; Wi-Fi and resolver settings are untouched.
+sudo bash "$SCRIPT_DIR/hosts-reconcile.sh" || die "core-local name registration failed"
+
 # ---- 4. router DNS (agent's isle IP)
 AGENT_IP=$(sudo docker inspect isle-vlan-agent --format '{{(index .NetworkSettings.Networks "isle-br-0").IPAddress}}' 2>/dev/null)
 if [ -z "${AGENT_IP:-}" ]; then

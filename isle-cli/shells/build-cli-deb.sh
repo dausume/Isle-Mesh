@@ -72,6 +72,7 @@ chmod +x /usr/share/isle-mesh/isle-cli/index.js 2>/dev/null || true
 if [ "$(cat /etc/isle-mesh/agent/agent.mode 2>/dev/null)" = core ]; then
     systemctl daemon-reload
     systemctl enable isle-mesh-boot.service
+    bash /usr/share/isle-mesh/isle-cli/scripts/hosts-reconcile.sh
 fi
 # security material is DEPLOY-TIME input, never shipped in the deb —
 # point at the walkthrough instead of installing any default

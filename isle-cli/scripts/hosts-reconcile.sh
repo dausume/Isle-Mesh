@@ -32,7 +32,7 @@ CAT=$($CURL "$API/api/islemesh/catalog" 2>/dev/null) \
 
 # CAT rides the environment (the dns-reconcile stdin gotcha).
 DOMS=$(CAT="$CAT" HOSTN="$HOSTN" python3 - <<'PYEOF'
-import json, os
+import json, os, re
 doms = {"polari.isle", "api.polari.isle"}  # structural: THE core
 try:
     d = json.loads(os.environ.get("CAT", "{}"))
@@ -44,6 +44,17 @@ for e in d.get("entries", []):
         if i.get("device", "") == os.environ["HOSTN"] \
                 and dom.endswith(".isle"):
             doms.add(dom)
+# Local ingress registrations are authoritative even before topology ingestion.
+# Core clients must use loopback because macvlan isolates its parent host.
+try:
+    with open('/etc/isle-mesh/agent/registry.json') as f:
+        registry = json.load(f)
+    for app in registry.get('apps', {}).values():
+        dom = app.get('domain', '')
+        if isinstance(dom, str) and re.fullmatch(r'(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+isle', dom):
+            doms.add(dom.lower())
+except (OSError, ValueError, AttributeError):
+    pass
 print(" ".join(sorted(doms)))
 PYEOF
 )
@@ -59,9 +70,13 @@ HAVE=$(sed -n "/^# BEGIN isle-mesh core hairpin pins/,/^# END isle-mesh core hai
 TMP=$(mktemp)
 sed "/^# BEGIN isle-mesh core hairpin pins/,/^# END isle-mesh core hairpin pins/d" /etc/hosts > "$TMP"
 printf '%s\n' "$WANT" >> "$TMP"
+RC=0
 if sudo -n cp "$TMP" /etc/hosts 2>/dev/null; then
     echo "hosts-reconcile: pinned core-served domains -> 127.0.0.1: $DOMS"
 else
     echo "hosts-reconcile: FAILED (needs root) — wanted: $DOMS"
+    RC=1
 fi
 rm -f "$TMP"
+
+exit "$RC"
