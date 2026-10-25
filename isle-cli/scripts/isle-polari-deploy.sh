@@ -24,7 +24,11 @@ while [ $# -gt 0 ]; do case "$1" in
 esac; done
 # the deployment lives in the INVOKING user's home (core-install runs
 # under sudo/pkexec where $HOME is /root — the deployment must not)
-DEPLOY_USER="${SUDO_USER:-$USER}"
+if [ -n "${PKEXEC_UID:-}" ]; then
+    DEPLOY_USER="$(id -un "$PKEXEC_UID")" || { echo "Cannot resolve invoking desktop user" >&2; exit 1; }
+else
+    DEPLOY_USER="${SUDO_USER:-$(id -un)}"
+fi
 USER_HOME="$(getent passwd "$DEPLOY_USER" | cut -d: -f6)"
 DIR="${USER_HOME:-$HOME}/polari-isle"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -48,6 +52,7 @@ if [ ! -d "$DIR" ]; then
     # the release image tag the deb was built for (POLARI_IMAGE_REPO/TAG); absent = the compose defaults (published images)
     [ -f "$SEED/.env" ] && cp "$SEED/.env" "$DIR/.env"
     chmod +x "$DIR/push-to-polari.sh"
+    chown "$DEPLOY_USER:$(id -gn "$DEPLOY_USER")" "$DIR" "$DIR"/* "$DIR/.env" 2>/dev/null || true
     ok "seeded $DIR from the versioned polari sub-project ($SEED)"
 fi
 
@@ -105,7 +110,7 @@ if [ ! -f /etc/systemd/system/polari-isle-push.timer ]; then
 Description=Feed isle state into prf-isle (push-to-polari)
 [Service]
 Type=oneshot
-User=$USER
+User=$DEPLOY_USER
 ExecStart=$DIR/push-to-polari.sh
 UNIT
     sudo tee /etc/systemd/system/polari-isle-push.timer >/dev/null <<'UNIT'

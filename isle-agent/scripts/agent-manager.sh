@@ -308,7 +308,8 @@ ensure_mesh_mdns() {
     log_info "Checking mesh-mdns system..."
 
     # Check if mesh-mdns.service is installed
-    if systemctl list-unit-files 2>/dev/null | grep -q "mesh-mdns.service"; then
+    # Query this unit directly: grep -q can SIGPIPE list-unit-files under pipefail.
+    if [[ "$(systemctl show --property=LoadState --value mesh-mdns.service 2>/dev/null)" == loaded ]]; then
         # Service exists, check if it's running
         if ! systemctl is-active --quiet mesh-mdns.service 2>/dev/null; then
             log_warn "mesh-mdns.service is installed but not running"

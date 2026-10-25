@@ -20,7 +20,22 @@
 #                                        trust.isle (timer-driven)
 set -u
 CA=/etc/isle-mesh/ca/isle-root.crt
-NSSDB="sql:$HOME/.pki/nssdb"
+# pkexec changes HOME/USER to root; browser trust belongs to its caller.
+if [ -n "${PKEXEC_UID:-}" ]; then
+    TRUST_USER="$(id -un "$PKEXEC_UID")" || exit 1
+else
+    TRUST_USER="${SUDO_USER:-$(id -un)}"
+fi
+TRUST_HOME="$(getent passwd "$TRUST_USER" | cut -d: -f6)"
+[ -n "$TRUST_HOME" ] || { echo "Cannot resolve browser trust home" >&2; exit 1; }
+NSSDB="sql:$TRUST_HOME/.pki/nssdb"
+as_trust_user() {
+    if [ "$(id -u)" = "$(id -u "$TRUST_USER")" ]; then
+        "$@"
+    else
+        runuser -u "$TRUST_USER" -- "$@"
+    fi
+}
 NICK="Isle Root CA"
 TRUST_URL_DEFAULT="https://trust.isle/ca/isle-root.crt"
 G="\033[0;32m"; Y="\033[1;33m"; R="\033[0;31m"; N="\033[0m"
@@ -43,11 +58,13 @@ status() {
         ok "system store: trusted (curl/CLI tools)"
     else warn "system store: NOT trusted — isle trust install"; fi
     if command -v certutil >/dev/null 2>&1; then
-        certutil -d "$NSSDB" -L 2>/dev/null | grep -q "$NICK" \
-            && ok "Chrome/NSS ($USER): trusted" \
-            || warn "Chrome/NSS ($USER): NOT trusted — isle trust install"
+        local browser_fp
+        browser_fp=$(as_trust_user certutil -d "$NSSDB" -L -n "$NICK" -a 2>/dev/null | openssl x509 -noout -fingerprint -sha256 2>/dev/null | cut -d= -f2)
+        [ -n "$browser_fp" ] && [ "$browser_fp" = "$(fp_of "$CA")" ] \
+            && ok "Chrome/NSS ($TRUST_USER): current isle CA trusted" \
+            || warn "Chrome/NSS ($TRUST_USER): current isle CA NOT trusted — isle trust install"
     else warn "certutil missing (apt install libnss3-tools)"; fi
-    ls "$HOME"/.mozilla/firefox/*/cert9.db >/dev/null 2>&1 \
+    ls "$TRUST_HOME"/.mozilla/firefox/*/cert9.db >/dev/null 2>&1 \
         && warn "Firefox present: separate store (Settings > Certificates, or policies.json)"
     local probe; probe=$(mktemp)
     if curl_trust "$probe" && [ -s "$probe" ]; then
@@ -59,13 +76,21 @@ status() {
 do_import() {
     sudo cp "$CA" /usr/local/share/ca-certificates/isle-root.crt \
         && sudo update-ca-certificates >/dev/null 2>&1 \
-        && ok "system store: imported" || fail "system store import failed"
+        && ok "system store: imported" || { fail "system store import failed"; return 1; }
     command -v certutil >/dev/null 2>&1 || sudo apt-get install -y libnss3-tools >/dev/null 2>&1 || true
+    import_browser
+}
+
+import_browser() {
     if command -v certutil >/dev/null 2>&1; then
-        mkdir -p "$HOME/.pki/nssdb"; [ -f "$HOME/.pki/nssdb/cert9.db" ] || certutil -d "$NSSDB" -N --empty-password 2>/dev/null
-        certutil -d "$NSSDB" -D -n "$NICK" 2>/dev/null || true
-        certutil -d "$NSSDB" -A -t "C,," -n "$NICK" -i "$CA" \
-            && ok "Chrome/NSS: imported (restart Chrome)" || fail "Chrome/NSS import failed"
+        as_trust_user mkdir -p "$TRUST_HOME/.pki/nssdb" || return 1
+        if [ ! -f "$TRUST_HOME/.pki/nssdb/cert9.db" ]; then
+            as_trust_user certutil -d "$NSSDB" -N --empty-password || return 1
+        fi
+        as_trust_user certutil -d "$NSSDB" -D -n "$NICK" 2>/dev/null || true
+        as_trust_user certutil -d "$NSSDB" -A -t "C,," -n "$NICK" -i "$CA" \
+            && ok "Chrome/NSS ($TRUST_USER): imported (restart an already-open browser)" \
+            || { fail "Chrome/NSS import failed"; return 1; }
     fi
 }
 
@@ -77,7 +102,7 @@ install_trust() {
     if [ "${1:-}" != "--yes" ]; then
         read -r -p "Proceed? [y/N] " a; [ "$a" = y ] || [ "$a" = Y ] || { echo "aborted"; exit 1; }
     fi
-    do_import; echo; status
+    do_import || return 1; echo; status
 }
 
 fetch_root() { # first-join: no existing trust — fingerprint IS the consent
@@ -100,7 +125,7 @@ fetch_root() { # first-join: no existing trust — fingerprint IS the consent
         read -r -p "Fingerprint verified? [y/N] " a; [ "$a" = y ] || [ "$a" = Y ] || { echo "aborted"; exit 1; }
     fi
     sudo mkdir -p /etc/isle-mesh/ca && sudo cp "$tmp" "$CA" && sudo chmod 644 "$CA"; rm -f "$tmp"
-    do_import; echo; status
+    do_import || return 1; echo; status
 }
 
 update_trust() { # signed-channel rule: only over TLS the CURRENT root vouches
@@ -126,9 +151,16 @@ update_trust() { # signed-channel rule: only over TLS the CURRENT root vouches
 
 case "${1:-status}" in
     status) status ;;
+    browser)
+        # No elevation or new trust decision: mirror only the CA already
+        # approved in the system store into this user's browser store.
+        [ -f "$CA" ] && cmp -s "$CA" /usr/local/share/ca-certificates/isle-root.crt \
+            || { fail "Isle CA is not installed in the system trust store"; exit 1; }
+        command -v certutil >/dev/null 2>&1 || { fail "certutil unavailable"; exit 1; }
+        import_browser ;;
     install) install_trust "${2:-}" ;;
     cert) echo "$CA"; echo "SHA-256: $(fp_of "$CA")" ;;
     fetch) shift; fetch_root "$@" ;;
     update) update_trust "${2:-}" ;;
-    *) echo "usage: isle trust [status|install [--yes]|cert|fetch [url] [--fingerprint <fp>]|update [--auto]]"; exit 1 ;;
+    *) echo "usage: isle trust [status|browser|install [--yes]|cert|fetch [url] [--fingerprint <fp>]|update [--auto]]"; exit 1 ;;
 esac

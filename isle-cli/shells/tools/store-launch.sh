@@ -87,8 +87,24 @@ if [ -n "$STICK" ] && command -v zenity >/dev/null 2>&1 && [ ! -f "$HOME/.config
     bash "$STICK/polari-apps/on-insert.sh"      # its own Install / Not now / Wipe prompt (pkexec inside); Not now = carry on
 fi
 
-# member/core already: straight into the store
-agent_up && open_shell
+# Mirror the locally approved CA into the invoking user's NSS store before
+# JCEF/Chrome starts; pkexec setup may have imported only root's browser store.
+# The verb refuses unless the CA matches the system-installed certificate.
+if command -v isle >/dev/null 2>&1; then
+    isle trust browser >/dev/null 2>&1 || true
+fi
+
+# Membership alone does not mean a core install finished: image downloads
+# can fail after the agent starts. Keep the original setup door available.
+RESUME_CORE=0
+if agent_up; then
+    if [ "$(cat /etc/isle-mesh/agent/agent.mode 2>/dev/null)" = core ] &&
+       ! docker ps --format '{{.Names}}' 2>/dev/null | grep -qx 'prf-isle-backend'; then
+        RESUME_CORE=1
+    else
+        open_shell
+    fi
+fi
 
 # resolve the isle CLI (desktop launchers get a sanitized-ish PATH)
 ISLE=$(command -v isle 2>/dev/null || true)
@@ -99,10 +115,17 @@ if [ -z "$ISLE" ] || ! command -v zenity >/dev/null 2>&1; then
     open_shell
 fi
 
-CHOICE=$(zenity --question \
+SETUP_TEXT="This device is not part of an isle yet.\n\nThe store installs apps only on isle members (the running agent IS membership). Single-device isles are first-class — you can be your own isle.\n\nEvery door runs the exact terminal command (privilege via polkit) and shows it."
+CREATE_LABEL="Create my own isle"
+if [ "$RESUME_CORE" = 1 ]; then
+    SETUP_TEXT="Your isle's network agent is running, but its Polari service is not running.\n\nFinish setup to retry an interrupted installation. Existing networking and completed setup steps are reused."
+    CREATE_LABEL="Finish setting up my isle"
+fi
+
+CHOICE=$(zenity --question --icon isle-app-store \
     --title "Isle App Store — first run" \
-    --text "This device is not part of an isle yet.\n\nThe store installs apps only on isle members (the running agent IS membership). Single-device isles are first-class — you can be your own isle.\n\nEvery door runs the exact terminal command (privilege via polkit) and shows it." \
-    --ok-label "Create my own isle" \
+    --text "$SETUP_TEXT" \
+    --ok-label "$CREATE_LABEL" \
     --extra-button "Join an existing isle" \
     --extra-button "Install apps from a USB stick" \
     --extra-button "Set up a public server" \
