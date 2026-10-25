@@ -94,6 +94,26 @@ if command -v isle >/dev/null 2>&1; then
     isle trust browser >/dev/null 2>&1 || true
 fi
 
+# An installed core whose runtime stopped needs recovery, not first-run creation.
+if ! agent_up && [ "$(cat /etc/isle-mesh/agent/agent.mode 2>/dev/null)" = core ]; then
+    RECOVERY=$(zenity --question --icon isle-app-store --title "Restart my isle" --width 520 \
+        --text "Your isle is already installed, but its network agent is not running.\n\nRestart the existing router and app services. Your apps and settings are kept." \
+        --ok-label "Restart my isle" --extra-button "Just browse" 2>/dev/null)
+    RECOVERY_RC=$?
+    if [ "$RECOVERY_RC" = 0 ]; then
+        term_run "pkexec $SETUP recover; result=\$?; echo Recovery exit status: \$result; read -p 'Press Enter to close...'" || {
+            zenity --error --text "The isle could not restart. Check the recovery terminal for details." 2>/dev/null
+            exit 1
+        }
+        agent_up || { zenity --error --text "The network agent is still stopped." 2>/dev/null; exit 1; }
+        open_shell
+    elif [ "$RECOVERY" = "Just browse" ]; then
+        open_shell
+    else
+        exit 0
+    fi
+fi
+
 # Membership alone does not mean a core install finished: image downloads
 # can fail after the agent starts. Keep the original setup door available.
 RESUME_CORE=0

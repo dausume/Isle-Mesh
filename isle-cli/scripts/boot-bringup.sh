@@ -70,7 +70,7 @@ bring_up_router(){
   if virsh list --state-running 2>/dev/null | grep -qw "$ROUTER_VM"; then
     ok "router already running"
   else
-    bash "$SCRIPT_DIR/router.sh" up "$ROUTER_VM" || warn "router up reported an error"
+    bash "$SCRIPT_DIR/router.sh" up "$ROUTER_VM" || return 1
   fi
 }
 
@@ -123,8 +123,8 @@ resync_macvlan(){
   log "Step 3/4: isle macvlan docker network"
   if ! command -v docker &>/dev/null; then warn "docker absent — skipping macvlan"; return 0; fi
   if ! ip link show "$MACVLAN_PARENT" &>/dev/null; then
-    warn "parent bridge '$MACVLAN_PARENT' missing — router step should create it; skipping macvlan"
-    return 0
+    err "parent bridge '$MACVLAN_PARENT' missing"
+    return 1
   fi
   if docker network inspect "$MACVLAN" &>/dev/null; then
     local c
@@ -138,6 +138,7 @@ resync_macvlan(){
     ok "macvlan '$MACVLAN' bound to $MACVLAN_PARENT"
   else
     err "failed to create macvlan '$MACVLAN'"
+    return 1
   fi
 }
 
@@ -145,10 +146,11 @@ resync_macvlan(){
 bring_up_agent(){
   log "Step 4/4: isle agent"
   if [[ ! -f "$AGENT_DIR/docker-compose.yml" ]]; then warn "agent compose not found at $AGENT_DIR — skipped"; return 0; fi
-  if ( cd "$AGENT_DIR" && docker compose up -d --force-recreate ) >/dev/null 2>&1; then
+  if ( cd "$AGENT_DIR" && docker compose up -d --no-build --force-recreate ) >/dev/null 2>&1; then
     ok "agent (re)started"
   else
     err "agent failed to start (see: docker logs isle-vlan-agent)"
+    return 1
   fi
 }
 
@@ -174,13 +176,13 @@ reconcile_apps(){
 main(){
   require_root
   log "=== Isle bring-up$( [[ $BOOT == 1 ]] && echo ' (boot)' ) ==="
-  bring_up_router
-  replay_reserved_ports
-  resync_macvlan
-  bring_up_agent
+  bring_up_router || return 1
+  replay_reserved_ports || return 1
+  resync_macvlan || return 1
+  bring_up_agent || return 1
   reconcile_apps
   log "=== summary ==="
   docker ps --format '  {{.Names}}: {{.Status}}' 2>/dev/null | grep -iE 'isle|vlan|sample' || true
   log "=== done ==="
 }
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then main "$@"; fi

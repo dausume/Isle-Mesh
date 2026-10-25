@@ -10,7 +10,7 @@ Requires=docker.service
 Type=oneshot
 RemainAfterExit=yes
 # Route through the symlinked CLI copy (stable path, independent of $HOME).
-ExecStart=/bin/bash /usr/local/lib/node_modules/isle-cli/scripts/boot-bringup.sh --boot
+ExecStart=/bin/bash /usr/share/isle-mesh/isle-cli/scripts/boot-bringup.sh --boot
 TimeoutStartSec=180
 StandardOutput=journal
 StandardError=journal

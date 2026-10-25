@@ -44,6 +44,11 @@ write_posture(){   # $1 = production|dev, $2 = until (may be empty)
 }
 
 case "$VERB" in
+    recover)
+        [ "$(cat /etc/isle-mesh/agent/agent.mode 2>/dev/null)" = core ] || die "This device is not an installed core"
+        run systemctl daemon-reload || exit 1
+        run systemctl enable isle-mesh-boot.service || exit 1
+        run "$ISLE" recover || exit 1 ;;
     posture)
         MODE=${1:?production|dev}; shift; UNTIL=""; while [ $# -gt 0 ]; do case "$1" in --until) UNTIL="$2"; shift 2 ;; *) shift ;; esac; done
         write_posture "$MODE" "$UNTIL" ;;

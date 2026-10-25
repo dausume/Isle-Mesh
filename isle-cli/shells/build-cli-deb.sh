@@ -42,6 +42,9 @@ for d in isle-cli isle-agent mdns mesh-app-scaffolding openwrt-router polari-isl
         -cf - "$d" | tar -C "$STAGE/$SHARE" -xf -
 done
 
+mkdir -p "$STAGE/usr/lib/systemd/system"
+install -m 0644 "$REPO/isle-mesh-boot.service" "$STAGE/usr/lib/systemd/system/isle-mesh-boot.service"
+
 # ---- shell tools + icons (synced from polari-app-shell — see
 # isle-cli/shells/tools/README) staged at shells/ so
 # build-launcher-deb.sh finds $ROOT/shells/icons/polari-mark.png ----
@@ -64,6 +67,12 @@ cat > "$STAGE/DEBIAN/postinst" <<'EOF'
 mkdir -p /usr/local/bin
 ln -sf /usr/share/isle-mesh/isle-cli/index.js /usr/local/bin/isle
 chmod +x /usr/share/isle-mesh/isle-cli/index.js 2>/dev/null || true
+# Enable recovery only for a device already configured as a core.
+# Do not start networking from a package maintainer script.
+if [ "$(cat /etc/isle-mesh/agent/agent.mode 2>/dev/null)" = core ]; then
+    systemctl daemon-reload
+    systemctl enable isle-mesh-boot.service
+fi
 # security material is DEPLOY-TIME input, never shipped in the deb —
 # point at the walkthrough instead of installing any default
 if [ "$(cat /etc/isle-mesh/agent/agent.mode 2>/dev/null)" = remote ]; then
