@@ -171,7 +171,12 @@ esc() {
 
 ISLE_VOL_RE='^(isle-|polari-isle_|prf-isle-|prf-polari-)'
 ISLE_CTR_RE='^(isle-|prf-isle-|prf-polari-)'
-DEB_FAMILY="isle-mesh-cli isle-app-store isle-manager-app polari-shell-core"
+DEB_FAMILY="polari-complete polari-complete-offline polari-isle isle-mesh-cli isle-app-store isle-manager-app polari-shell-core"
+installed_isle_packages() {
+    dpkg-query -W -f='${Package} ${db:Status-Status}\n' 2>/dev/null \
+        | awk '$2=="installed" || $2=="config-files" {print $1}' \
+        | grep -E '^(polari-complete(-offline)?|polari-isle|isle-mesh-cli|isle-app-.*|isle-manager-app|polari-shell-core|polari-module-.*|polari-app-.*)$'
+}
 
 is_isle_core() {
     [ "$(cat /etc/isle-mesh/agent/agent.mode 2>/dev/null)" = core ] && return 0
@@ -195,7 +200,7 @@ verify_zero() {
              | grep -c 'openwrt-isle' || true)
         [ "${n:-0}" = 0 ] || { log_error "router VM remaining"; bad=1; }
     fi
-    n=$(dpkg -l 2>/dev/null | awk '/^ii/{print $2}' | grep -cE '^(isle-mesh-cli|isle-app-.*|isle-manager-app|polari-shell-core|polari-module-.*)$'); [ "${n:-0}" = 0 ] || { log_error "debs remaining: $n"; bad=1; }
+    n=$(installed_isle_packages | wc -l); [ "${n:-0}" = 0 ] || { log_error "debs remaining: $n"; bad=1; }
     for d in /usr/share/isle-mesh /etc/isle-mesh; do
         [ ! -d "$d" ] || { log_error "$d still present"; bad=1; }
     done
@@ -245,31 +250,57 @@ uninstall_everything() {
         esc bash "$SCRIPTS_DIR/watch.sh" broadcast-ending || true
     fi
 
+    local failed=0
     local BK="/var/backups/isle-mesh-purge-$(date +%Y%m%d-%H%M%S)"
-    esc mkdir -p "$BK"
-    [ -d /etc/isle-mesh ] && esc tar czf "$BK/etc-isle-mesh.tgz" -C /etc isle-mesh 2>/dev/null
+    esc install -d -m 700 "$BK" || { log_error "cannot create backup directory"; exit 1; }
+    if [ -d /etc/isle-mesh ]; then
+        esc tar czf "$BK/etc-isle-mesh.tgz" -C /etc isle-mesh \
+            || { log_error "configuration backup failed; nothing removed"; exit 1; }
+    fi
+    # Package removal deletes its scripts. Retain the final DNS handback in
+    # the protected backup directory so maintainer hooks cannot strand DNS.
+    esc cp "$SCRIPTS_DIR/network-handback.sh" "$BK/network-handback.sh" \
+        || { log_error "cannot retain final network handback"; exit 1; }
     log_success "backup dir: $BK"
 
-    esc bash "$SCRIPTS_DIR/destroy.sh" --purge --force || true
-    esc bash "$SCRIPTS_DIR/network-handback.sh" || true
+    esc bash "$SCRIPTS_DIR/destroy.sh" --purge --force || failed=1
+    esc bash "$SCRIPTS_DIR/network-handback.sh" || failed=1
 
     for v in $(docker volume ls --format '{{.Name}}' 2>/dev/null | grep -E "$ISLE_VOL_RE"); do
-        docker run --rm -v "$v":/v:ro -v "$BK":/b alpine tar czf "/b/$v.tgz" -C /v . >/dev/null 2>&1 \
-            && docker volume rm "$v" >/dev/null 2>&1 \
-            && log_success "volume $v backed up + removed"
+        if docker run --rm -v "$v":/v:ro -v "$BK":/b alpine tar czf "/b/$v.tgz" -C /v .; then
+            docker volume rm "$v" >/dev/null 2>&1 \
+                && log_success "volume $v backed up + removed" || failed=1
+        else
+            log_error "volume backup failed: $v (volume preserved)"
+            failed=1
+        fi
     done
 
     # packages LAST — this script may delete itself out from under bash,
     # which keeps the open file handle (safe on Linux). The family
     # includes every launcher (isle-app-*) AND every polari module/
     # engine deb (polari-module-*) installed via apt-on-mesh.
-    local apps; apps=$(dpkg -l 2>/dev/null | awk '/^ii/{print $2}' | grep -E '^(isle-app-|polari-module-)' | tr '\n' ' ')
-    esc apt-get purge -y $DEB_FAMILY $apps 2>/dev/null \
-        || esc dpkg -P $DEB_FAMILY $apps 2>/dev/null || true
-    log_success "packages purged"
-
-    verify_zero || true
+    if [ "$failed" != 0 ]; then
+        log_error "Uninstall INCOMPLETE before package removal; tooling retained for recovery. Backups: $BK"
+        exit 1
+    fi
+    local packages=()
+    mapfile -t packages < <(installed_isle_packages)
+    if [ "${#packages[@]}" -gt 0 ]; then
+        if esc apt-get purge -y "${packages[@]}"; then
+            log_success "installed Isle packages purged"
+        else
+            log_error "package purge failed"
+            failed=1
+        fi
+    fi
+    esc bash "$BK/network-handback.sh" || failed=1
+    verify_zero || failed=1
     echo ""
+    if [ "$failed" != 0 ]; then
+        log_error "Full uninstall INCOMPLETE. See failures above. Backups: $BK"
+        exit 1
+    fi
     log_success "Full uninstall complete. Backups: $BK"
     exit 0
 }

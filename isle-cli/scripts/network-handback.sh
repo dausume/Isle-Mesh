@@ -26,6 +26,7 @@ warn(){ echo -e "${Y}[WARN]${N} $*"; }
 [ "$(id -u)" = 0 ] || { warn "needs root (sudo) — nothing done"; exit 1; }
 
 ISLE_NET_RE='^10\.10\.0\.'
+HANDOFF_FAILED=0
 NM_ACTIVE=0
 systemctl is-active --quiet NetworkManager && NM_ACTIVE=1
 
@@ -51,7 +52,7 @@ else
 fi
 
 # ---- 2. stale isle addressing (dead leases from the removed router) ----
-ip route show default 2>/dev/null | grep -E "via ${ISLE_NET_RE}" | while read -r r; do
+ip route show default 2>/dev/null | grep -E "via 10\.10\.0\." | while read -r r; do
     ip route del $r 2>/dev/null && ok "removed dead default route: $r"
 done
 ip -br -4 addr show 2>/dev/null \
@@ -65,27 +66,47 @@ ip -br -4 addr show 2>/dev/null \
     done
 done
 
-# ---- 2b. re-assert per-link DNS (found live 2026-08-20): after the
-# ownership shuffle, systemd-resolved can be left with NO DNS scope on
-# an NM-managed link (SERVFAIL on everything) until the connection
-# re-activates. Reapply device config so NM re-pushes its lease DNS —
-# reapply is non-disruptive (no reassociation/DHCP release).
+# ---- 3. Remove ONLY Isle search domains, preserving user domains ----
 if [ "$NM_ACTIVE" = 1 ] && command -v nmcli >/dev/null 2>&1; then
-    nmcli -t -f DEVICE,STATE device 2>/dev/null | awk -F: '$2=="connected"{print $1}' \
-      | grep -vE '^(lo|docker|veth|br-|virbr)' | while read -r dev; do
-        nmcli device reapply "$dev" >/dev/null 2>&1 \
-            && ok "reapplied NM config on $dev (lease DNS re-pushed to resolved)"
-    done
+    while IFS= read -r uuid; do
+        [ -n "$uuid" ] || continue
+        for family in ipv4 ipv6; do
+            domains=$(nmcli -g "$family.dns-search" connection show uuid "$uuid" 2>/dev/null) || continue
+            IFS=',' read -r -a entries <<< "$domains"
+            for domain in "${entries[@]}"; do
+                case "$domain" in
+                    isle|~isle|isle.|~isle.)
+                        nmcli connection modify uuid "$uuid" "-$family.dns-search" "$domain" \
+                            || HANDOFF_FAILED=1 ;;
+                esac
+            done
+        done
+    done < <(nmcli -g UUID connection show 2>/dev/null)
 fi
 
-# ---- 3. ~isle split-DNS out of NetworkManager profiles ----
+# ---- 3b. Restore resolved from NetworkManager's effective connection ----
+# Reapply can return success WITHOUT re-sending DNS after resolved/networkd
+# restart. Explicitly publish NM's current DNS, without reassociation or DHCP
+# release. Run after profile cleanup, never before it.
 if [ "$NM_ACTIVE" = 1 ] && command -v nmcli >/dev/null 2>&1; then
-    nmcli -t -f NAME connection show 2>/dev/null | while read -r c; do
-        if nmcli -t -f ipv4.dns-search connection show "$c" 2>/dev/null | grep -q isle; then
-            nmcli connection modify "$c" ipv4.dns-search "" 2>/dev/null \
-                && ok "removed ~isle split-DNS from NM profile '$c'"
+    while IFS=: read -r dev state; do
+        [ "$state" = connected ] || continue
+        case "$dev" in lo|docker*|veth*|br-*|virbr*|isle*) continue ;; esac
+        nmcli device reapply "$dev" >/dev/null 2>&1 || HANDOFF_FAILED=1
+        mapfile -t servers < <(nmcli -g IP4.DNS,IP6.DNS device show "$dev" 2>/dev/null | sed '/^$/d;/^--$/d')
+        if [ "${#servers[@]}" -gt 0 ]; then
+            resolvectl dns "$dev" "${servers[@]}" || HANDOFF_FAILED=1
+            mapfile -t domains < <(nmcli -g IP4.DOMAIN,IP6.DOMAIN device show "$dev" 2>/dev/null \
+                | sed -E '/^$/d;/^--$/d;/^~?isle\.?$/d')
+            if ip -4 route show default dev "$dev" | grep -q '^default'; then
+                domains+=("~.")
+                resolvectl default-route "$dev" yes || HANDOFF_FAILED=1
+            fi
+            resolvectl domain "$dev" "${domains[@]}" || HANDOFF_FAILED=1
+            ok "restored NM DNS on $dev (without disconnecting Wi-Fi)"
         fi
-    done
+    done < <(nmcli -t -f DEVICE,STATE device 2>/dev/null)
+    resolvectl flush-caches || HANDOFF_FAILED=1
 fi
 
 # ---- 4. .isle pins in /etc/hosts ----
@@ -93,4 +114,16 @@ if grep -q '\.isle' /etc/hosts 2>/dev/null; then
     sed -i '/\.isle$/d;/\.isle /d' /etc/hosts && ok "removed .isle pins from /etc/hosts"
 fi
 
-ok "network handback complete — the OS's normal manager owns every interface"
+# Do not report success merely because service-control commands returned zero.
+if [ "$NM_ACTIVE" != 1 ] || ! ip route show default | grep -q '^default'; then
+    warn "network handback incomplete: no active NetworkManager/default route"
+    HANDOFF_FAILED=1
+elif ! timeout 12 getent ahosts example.com >/dev/null 2>&1; then
+    warn "network handback incomplete: public DNS lookup failed"
+    HANDOFF_FAILED=1
+fi
+if [ "$HANDOFF_FAILED" != 0 ]; then
+    warn "network restoration did not verify; connection was not forcibly restarted"
+    exit 1
+fi
+ok "network handback verified: NetworkManager active, default route and public DNS available"
