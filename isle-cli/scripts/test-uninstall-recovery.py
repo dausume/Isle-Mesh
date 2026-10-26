@@ -26,8 +26,8 @@ elif name=='nmcli':
  if args==['-g','UUID','connection','show']: print('test-uuid')
  elif 'dns-search' in ' '.join(args) and 'modify' not in args: print('corp.example,~isle')
  elif args[:3]==['-t','-f','DEVICE,STATE']: print('wlan-test:connected\\nlo:connected')
- elif 'IP4.DNS,IP6.DNS' in args: print('192.0.2.53\\n2001:db8::53')
- elif 'IP4.DOMAIN,IP6.DOMAIN' in args: print('corp.example\\n~isle')
+ elif 'IP4.DNS,IP6.DNS' in args: print('IP4.DNS[1]:192.0.2.53\\nIP4.DNS[2]:192.0.2.54\\nIP6.DNS[1]:2001:db8::53')
+ elif 'IP4.DOMAIN,IP6.DOMAIN' in args: print('IP4.DOMAIN[1]:corp.example\\nIP4.DOMAIN[2]:~isle')
 elif name=='ip':
  if args[:3]==['route','show','default'] or args[:4]==['-4','route','show','default']: print('default via 192.0.2.1 dev wlan-test')
 elif name=='timeout': sys.exit(int(os.environ.get('TEST_DNS_FAIL','0')))
@@ -48,7 +48,7 @@ elif name=='dpkg-query': print('polari-complete installed\\nisle-app-demo instal
     modify = next(i for i,c in enumerate(calls) if c[:3]==['nmcli','connection','modify'])
     dns = next(i for i,c in enumerate(calls) if c[:3]==['resolvectl','dns','wlan-test'])
     assert modify < dns
-    assert ['resolvectl','dns','wlan-test','192.0.2.53','2001:db8::53'] in calls
+    assert ['resolvectl','dns','wlan-test','192.0.2.53','192.0.2.54','2001:db8::53'] in calls
     assert ['resolvectl','domain','wlan-test','corp.example','~.'] in calls
     assert not any(c[:3]==['nmcli','connection','down'] or c[:3]==['nmcli','radio','wifi'] for c in calls)
     assert not any('NetworkManager' in c and ('restart' in c or 'stop' in c) for c in calls)

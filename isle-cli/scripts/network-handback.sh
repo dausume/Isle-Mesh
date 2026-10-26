@@ -93,11 +93,11 @@ if [ "$NM_ACTIVE" = 1 ] && command -v nmcli >/dev/null 2>&1; then
         [ "$state" = connected ] || continue
         case "$dev" in lo|docker*|veth*|br-*|virbr*|isle*) continue ;; esac
         nmcli device reapply "$dev" >/dev/null 2>&1 || HANDOFF_FAILED=1
-        mapfile -t servers < <(nmcli -g IP4.DNS,IP6.DNS device show "$dev" 2>/dev/null | sed '/^$/d;/^--$/d')
+        mapfile -t servers < <(nmcli --escape no -t -f IP4.DNS,IP6.DNS device show "$dev" 2>/dev/null | sed 's/^[^:]*://;/^$/d;/^--$/d')
         if [ "${#servers[@]}" -gt 0 ]; then
             resolvectl dns "$dev" "${servers[@]}" || HANDOFF_FAILED=1
-            mapfile -t domains < <(nmcli -g IP4.DOMAIN,IP6.DOMAIN device show "$dev" 2>/dev/null \
-                | sed -E '/^$/d;/^--$/d;/^~?isle\.?$/d')
+            mapfile -t domains < <(nmcli --escape no -t -f IP4.DOMAIN,IP6.DOMAIN device show "$dev" 2>/dev/null \
+                | sed -E 's/^[^:]*://;/^$/d;/^--$/d;/^~?isle\.?$/d')
             if ip -4 route show default dev "$dev" | grep -q '^default'; then
                 domains+=("~.")
                 resolvectl default-route "$dev" yes || HANDOFF_FAILED=1
