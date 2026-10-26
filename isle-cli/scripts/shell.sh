@@ -35,9 +35,16 @@ else
 fi
 
 ensure_core() {
-    if dpkg -s polari-shell-core >/dev/null 2>&1; then
-        ok "polari-shell-core already installed"; return 0
-    fi
+    local owner status
+    for owner in polari-shell-core polari-complete polari-complete-offline; do
+        status=$(dpkg-query -W -f='${db:Status-Status}' "$owner" 2>/dev/null) || continue
+        [ "$status" = installed ] || continue
+        # A merged package owns the same runtime. Installing the standalone
+        # package conflicts with it; reuse its files without a second install.
+        [ -x /opt/polari-shell/bin/polari-shell ] && [ -d /opt/polari-shell/lib/app ] \
+            || die "shared shell runtime is incomplete — repair/reinstall $owner"
+        ok "shared shell runtime already installed ($owner)"; return 0
+    done
     local deb
     # search the caller's stage AND the system stage (onboard fills it)
     deb=$(ls "$STAGE"/polari-shell-core_*_amd64.deb \
