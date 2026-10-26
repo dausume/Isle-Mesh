@@ -137,22 +137,17 @@ sudo bash "$AGENT_MANAGER" register --name "$NAME" --domain "$DOMAIN" \
 sudo bash "$SCRIPT_DIR/hosts-reconcile.sh" || die "core-local name registration failed"
 
 # ---- 4. router DNS (agent's isle IP)
-AGENT_IP=$(sudo docker inspect isle-vlan-agent --format '{{(index .NetworkSettings.Networks "isle-br-0").IPAddress}}' 2>/dev/null)
-if [ -z "${AGENT_IP:-}" ]; then
-    # remote member: the REMOTE agent's macvlan DHCP lease is the
-    # address other devices reach this app through
-    AGENT_IP=$(sudo docker exec isle-remote-agent ip -4 -o addr 2>/dev/null \
-        | awk '$2 != "lo" && $4 !~ /^172\.20\./ {split($4, a, "/"); print a[1]; exit}')
-fi
+source "$SCRIPT_DIR/agent-address.sh"
+AGENT_IP=$(isle_agent_address) || AGENT_IP=""
 DNS_OK=0
 if [ -n "${AGENT_IP:-}" ]; then
     if sudo /usr/local/bin/isle dns register "$DOMAIN" "$AGENT_IP" >/dev/null 2>&1; then
         ok ".isle DNS: $DOMAIN -> $AGENT_IP"; DNS_OK=1
     else
-        warn "router DNS not registrable from this device — $DOMAIN rides the join-protocol (mDNS) instead"
+        warn "router DNS not registrable here — awaiting the core DNS relay for $DOMAIN; cross-device access is not verified"
     fi
 else
-    warn "no agent IP found — DNS skipped"
+    warn "no verified Isle-facing agent address — DNS skipped"
 fi
 
 # ---- 5. engine declaration (what this app provides to polari)

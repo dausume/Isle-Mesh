@@ -118,13 +118,8 @@ networks:
 EOF
 }
 
-agent_ip(){
-    local ip
-    ip=$(sudo docker inspect isle-vlan-agent --format '{{(index .NetworkSettings.Networks "isle-br-0").IPAddress}}' 2>/dev/null)
-    [ -n "$ip" ] || ip=$(sudo docker exec isle-remote-agent ip -4 -o addr 2>/dev/null \
-        | awk '$2 != "lo" && $4 !~ /^172\.20\./ {split($4, a, "/"); print a[1]; exit}')
-    echo "$ip"
-}
+source "$SCRIPT_DIR/agent-address.sh"
+agent_ip(){ isle_agent_address; }
 
 self_report(){
     local REG=/etc/isle-mesh/agent/registry.json RPT HOSTN AGENT
