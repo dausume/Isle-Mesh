@@ -20,6 +20,38 @@ log_error()   { echo -e "${RED}[✗]${NC} $*" >&2; }
 log_step()    { echo >&2; echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2; echo -e "${CYAN}  $*${NC}" >&2; echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2; }
 # END: 00-log.sh
 
+# --- 05-offline.sh ---
+#!/usr/bin/env bash
+# Read the installation mode rather than inferring it from connectivity.
+router_offline() {
+  [[ "$(cat /etc/polari/install-mode 2>/dev/null)" == offline ]]
+}
+
+router_offline_source() {
+  local medium
+  medium=$(cat /etc/polari/offline-source 2>/dev/null) || return 1
+  [[ -f "$medium/ISLE_OFFLINE_BUNDLE" && -f "$medium/manifest.json" ]] || {
+    log_error "offline router/: reconnect the complete installation medium"; return 1;
+  }
+  printf '%s\n' "$medium"
+}
+
+router_packages_dir() {
+  if router_offline; then
+    local medium
+    medium=$(router_offline_source) || return 1
+    printf '%s/router/packages\n' "$medium"
+  else
+    # The packed entrypoint lives at scripts/, the development libraries
+    # live at scripts/router-setup/router-init-lib/.
+    if [[ "${BUNDLED_MODE:-0}" == 1 ]]; then
+      printf '%s/../packages\n' "$PROJECT_ROOT"
+    else
+      printf '%s/../packages\n' "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+    fi
+  fi
+}
+
 # --- 10-args.sh ---
 #!/usr/bin/env bash
 # BEGIN: 10-args.sh
@@ -380,6 +412,10 @@ _sudo_prefix() {
 }
 
 _try_install() {
+  if router_offline; then
+    log_error "offline apt/: router dependencies must be staged by the medium installer"
+    return 1
+  fi
   local mgr="$1"; shift
   local SUDO; SUDO=$(_sudo_prefix)
   case "$mgr" in
@@ -549,6 +585,27 @@ download_image() {
 
   local QCOW2_IMAGE="$IMAGE_DIR/openwrt-isle-router.qcow2"
 
+  if router_offline; then
+    local medium source
+    medium=$(router_offline_source) || exit 1
+    source=$(python3 - "$medium" <<'PYIMAGE'
+import json, pathlib, sys
+root = pathlib.Path(sys.argv[1]).resolve()
+image = (root / 'router' / json.load(open(root / 'manifest.json'))['router']['file']).resolve()
+if not image.is_relative_to(root / 'router') or not image.is_file():
+    sys.exit('offline router/: missing/invalid image')
+print(image)
+PYIMAGE
+) || exit 1
+    if [[ -f "$QCOW2_IMAGE" ]] && cmp -s "$source" "$QCOW2_IMAGE"; then
+      log_success "Matching bundled router image already staged"
+    else
+      cp --sparse=always "$source" "$QCOW2_IMAGE" || exit 1
+      log_success "Router image staged from offline medium (no fetch)"
+    fi
+    return
+  fi
+
   if [[ -n "${CUSTOM_IMAGE:-}" ]]; then
     if [[ ! -f "$CUSTOM_IMAGE" ]]; then
       log_error "Custom image not found: $CUSTOM_IMAGE"; exit 1
@@ -633,6 +690,10 @@ create_vm_xml() {
   local TEMPLATE_IMAGE="$IMAGE_DIR/openwrt-isle-router.qcow2"
   local RUNTIME_DIR="/var/lib/libvirt/images"
   local IMAGE_PATH="$RUNTIME_DIR/${VM_NAME}.qcow2"
+  if router_offline && [[ -e "$IMAGE_PATH" ]]; then
+    log_error "An orphaned router disk exists at $IMAGE_PATH; recover or back it up before creating a new Isle"
+    return 1
+  fi
   mkdir -p "$RUNTIME_DIR"
   if [[ ! -f "$IMAGE_PATH" ]]; then
     log_info "Staging router image -> $IMAGE_PATH (writable, AppArmor-readable)"
@@ -1059,6 +1120,15 @@ _download_package() {
 }
 
 download_openwrt_packages() {
+  if router_offline; then
+    local packages_dir
+    packages_dir=$(router_packages_dir) || return 1
+    compgen -G "$packages_dir/*.ipk" >/dev/null || {
+      log_error "offline router/: OpenWrt package closure missing"; return 1;
+    }
+    log_success "Using bundled OpenWrt packages (no downloads)"
+    return 0
+  fi
   log_step "Step 7: Downloading OpenWRT Packages"
 
   # Set packages directory relative to router-setup
@@ -1099,7 +1169,8 @@ copy_packages_to_router() {
 
   # Set packages directory relative to router-setup
   local script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-  local packages_dir="${script_dir}/../packages"
+  local packages_dir
+  packages_dir=$(router_packages_dir) || return 1
 
   # Router connection details
   local router_dest="${ROUTER_PACKAGE_DIR:-/tmp/packages}"
@@ -1175,9 +1246,18 @@ install_and_configure_packages() {
 
   # Install packages
   log_info "Installing packages from ${router_dest}..."
-  if router_ssh "opkg install ${router_dest}/*.ipk" 2>/dev/null; then
+  local install_cmd="opkg install ${router_dest}/*.ipk"
+  if router_offline; then
+    # No feed URLs in this configuration: opkg cannot fetch a missing dep.
+    install_cmd="printf 'arch all 100\\narch noarch 100\\narch x86_64 200\\n' > /tmp/isle-offline-opkg.conf && opkg --conf /tmp/isle-offline-opkg.conf install ${router_dest}/*.ipk"
+  fi
+  if router_ssh "$install_cmd" 2>/dev/null; then
     log_success "Packages installed successfully"
   else
+    if router_offline; then
+      log_error "offline router/: package installation failed; no feed fallback attempted"
+      return 1
+    fi
     log_warning "Some packages may have failed to install (this is often OK if already installed)"
   fi
 
@@ -1337,6 +1417,11 @@ $(printf '%b' "${CYAN:-}")╔═════════════════
 ╚═══════════════════════════════════════════════════════════════╝$(printf '%b' "${NC:-}")
 EOF
 
+  if router_offline; then
+    local medium
+    medium=$(router_offline_source) || return 1
+    bash "$medium/scripts/verify-offline.sh" "$medium" || return 1
+  fi
   parse_args "$@"
   check_root
   check_prerequisites

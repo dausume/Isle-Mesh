@@ -171,11 +171,11 @@ esc() {
 
 ISLE_VOL_RE='^(isle-|polari-isle_|prf-isle-|prf-polari-)'
 ISLE_CTR_RE='^(isle-|prf-isle-|prf-polari-)'
-DEB_FAMILY="polari-complete polari-complete-offline polari-isle isle-mesh-cli isle-app-store isle-manager-app polari-shell-core"
+DEB_FAMILY="polari-complete polari-complete-offline polari-offline-installer polari-isle isle-mesh-cli isle-app-store isle-manager-app polari-shell-core"
 installed_isle_packages() {
     dpkg-query -W -f='${Package} ${db:Status-Status}\n' 2>/dev/null \
         | awk '$2=="installed" || $2=="config-files" {print $1}' \
-        | grep -E '^(polari-complete(-offline)?|polari-isle|isle-mesh-cli|isle-app-.*|isle-manager-app|polari-shell-core|polari-module-.*|polari-app-.*)$'
+        | grep -E '^(polari-complete(-offline)?|polari-offline-installer|polari-isle|isle-mesh-cli|isle-app-.*|isle-manager-app|polari-shell-core|polari-module-.*|polari-app-.*)$'
 }
 
 is_isle_core() {

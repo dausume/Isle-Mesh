@@ -7,7 +7,8 @@ copy_packages_to_router() {
 
   # Set packages directory relative to router-setup
   local script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-  local packages_dir="${script_dir}/../packages"
+  local packages_dir
+  packages_dir=$(router_packages_dir) || return 1
 
   # Router connection details
   local router_dest="${ROUTER_PACKAGE_DIR:-/tmp/packages}"

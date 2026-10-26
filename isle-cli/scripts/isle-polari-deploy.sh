@@ -56,6 +56,18 @@ if [ ! -d "$DIR" ]; then
     ok "seeded $DIR from the versioned polari sub-project ($SEED)"
 fi
 
+source "$SCRIPT_DIR/offline-runtime.sh"
+OFFLINE_ARGS=()
+if isle_offline; then
+    [ "$PULL" = 0 ] || die "offline images/: --pull is unavailable"
+    # Resolve exactly what compose will start, including the release .env.
+    refs=$(cd "$DIR" && docker compose config --images) || die "invalid compose configuration"
+    while IFS= read -r ref; do
+        isle_offline_image "$ref" || die "image differs from the offline release"
+    done <<< "$refs"
+    OFFLINE_ARGS=(--no-build --pull never)
+fi
+
 if [ "$PULL" = 1 ]; then
     step "0/5 pull the pushed image from the mesh registry"
     docker pull "$REGISTRY/prf-backend:staging" \
@@ -67,7 +79,7 @@ if [ "$PULL" = 1 ]; then
 fi
 
 step "1/5 bring prf-isle up (current image, behind the agent)"
-(cd "$DIR" && POLARI_ISLE_MODULES="$MODULES" docker compose up -d) \
+(cd "$DIR" && POLARI_ISLE_MODULES="$MODULES" docker compose up -d "${OFFLINE_ARGS[@]}") \
     || die "compose up failed"
 ok "prf-isle containers up (modules: $MODULES)"
 

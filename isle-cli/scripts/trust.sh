@@ -77,7 +77,13 @@ do_import() {
     sudo cp "$CA" /usr/local/share/ca-certificates/isle-root.crt \
         && sudo update-ca-certificates >/dev/null 2>&1 \
         && ok "system store: imported" || { fail "system store import failed"; return 1; }
-    command -v certutil >/dev/null 2>&1 || sudo apt-get install -y libnss3-tools >/dev/null 2>&1 || true
+    if ! command -v certutil >/dev/null 2>&1; then
+        if [ "$(cat /etc/polari/install-mode 2>/dev/null)" = offline ]; then
+            fail "offline apt/: libnss3-tools missing; stage the complete medium first"
+            return 1
+        fi
+        sudo apt-get install -y libnss3-tools >/dev/null 2>&1 || true
+    fi
     import_browser
 }
 

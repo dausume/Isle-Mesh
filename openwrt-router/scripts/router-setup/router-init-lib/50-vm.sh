@@ -44,6 +44,10 @@ create_vm_xml() {
   local TEMPLATE_IMAGE="$IMAGE_DIR/openwrt-isle-router.qcow2"
   local RUNTIME_DIR="/var/lib/libvirt/images"
   local IMAGE_PATH="$RUNTIME_DIR/${VM_NAME}.qcow2"
+  if router_offline && [[ -e "$IMAGE_PATH" ]]; then
+    log_error "An orphaned router disk exists at $IMAGE_PATH; recover or back it up before creating a new Isle"
+    return 1
+  fi
   mkdir -p "$RUNTIME_DIR"
   if [[ ! -f "$IMAGE_PATH" ]]; then
     log_info "Staging router image -> $IMAGE_PATH (writable, AppArmor-readable)"

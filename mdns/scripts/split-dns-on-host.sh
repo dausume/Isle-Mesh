@@ -6,14 +6,20 @@ set -e
 
 echo "🔍 Detecting upstream DNS server..."
 UPSTREAM_DNS=$(resolvectl status | grep 'Current DNS Server' | awk '{print $4}' | head -n1)
-if [[ -z "$UPSTREAM_DNS" ]]; then
+if [[ -z "$UPSTREAM_DNS" ]] && [ "$(cat /etc/polari/install-mode 2>/dev/null)" != offline ]; then
   echo "❌ No upstream DNS server detected. Exiting."
   exit 1
 fi
 echo "🌐 Detected upstream DNS: $UPSTREAM_DNS"
 
 echo "📦 Installing dnsmasq if needed..."
-if [ -f /.dockerenv ]; then
+if [ "$(cat /etc/polari/install-mode 2>/dev/null)" = offline ]; then
+  for package in dnsmasq; do
+    [ "$(dpkg-query -W -f='${db:Status-Status}' "$package" 2>/dev/null)" = installed ] || {
+      echo "offline apt/: missing $package; stage the complete medium first" >&2; exit 1;
+    }
+  done
+elif [ -f /.dockerenv ]; then
   # Running in Docker - use nsenter to install on host
   nsenter --target 1 --mount --uts --ipc --net --pid -- apt-get update -qq
   nsenter --target 1 --mount --uts --ipc --net --pid -- apt-get install -y dnsmasq
@@ -56,7 +62,7 @@ bind-interfaces
 address=/.local/$DNSMASQ_IP
 address=/.mesh/$DNSMASQ_IP
 no-resolv
-server=$UPSTREAM_DNS
+${UPSTREAM_DNS:+server=$UPSTREAM_DNS}
 EOF
 
 # Ensure dnsmasq is enabled and started -> Should already be active if using systemd-networkd, setup

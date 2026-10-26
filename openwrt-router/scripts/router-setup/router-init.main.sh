@@ -44,6 +44,11 @@ $(printf '%b' "${CYAN:-}")╔═════════════════
 ╚═══════════════════════════════════════════════════════════════╝$(printf '%b' "${NC:-}")
 EOF
 
+  if router_offline; then
+    local medium
+    medium=$(router_offline_source) || return 1
+    bash "$medium/scripts/verify-offline.sh" "$medium" || return 1
+  fi
   parse_args "$@"
   check_root
   check_prerequisites

@@ -25,6 +25,10 @@ _sudo_prefix() {
 }
 
 _try_install() {
+  if router_offline; then
+    log_error "offline apt/: router dependencies must be staged by the medium installer"
+    return 1
+  fi
   local mgr="$1"; shift
   local SUDO; SUDO=$(_sudo_prefix)
   case "$mgr" in

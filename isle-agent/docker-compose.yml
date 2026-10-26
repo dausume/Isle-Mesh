@@ -7,6 +7,7 @@ version: '3.8'
 services:
   # === VLAN Agent - Self-Reloading Nginx Proxy ===
   isle-vlan-agent:
+    image: isle-vlan-agent:latest
     build:
       context: ./isle-vlan-agent
       dockerfile: Dockerfile

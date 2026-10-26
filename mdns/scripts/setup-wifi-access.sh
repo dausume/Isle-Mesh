@@ -8,6 +8,11 @@
 
 set -e
 
+if [ "$(cat /etc/polari/install-mode 2>/dev/null)" = offline ]; then
+  echo "Offline setup: keeping the desktop uplink with its existing network owner."
+  exit 0
+fi
+
 echo "📶 Wi-Fi Setup Script (systemd + wpa_supplicant)"
 
 # Auto-detect wireless interface

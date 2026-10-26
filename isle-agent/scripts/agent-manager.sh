@@ -25,6 +25,8 @@ if [[ -f "$DEPENDENCY_CHECKER" ]]; then
     source "$DEPENDENCY_CHECKER"
 fi
 
+source "$CLI_DIR/scripts/offline-runtime.sh"
+
 # Configuration
 ISLE_AGENT_DIR="/etc/isle-mesh/agent"
 COMPOSE_FILE="${ISLE_AGENT_DIR}/docker-compose.yml"
@@ -744,6 +746,10 @@ setup_host_agent() {
 
     # Ensure avahi-daemon is installed (required by isle-host-agent.service)
     if ! command -v avahi-daemon &>/dev/null; then
+        if isle_offline; then
+            log_error "offline apt/: avahi-daemon missing; stage the medium first"
+            return 1
+        fi
         log_info "avahi-daemon not found, installing..."
         if sudo apt-get install -y avahi-daemon avahi-utils &>/dev/null; then
             sudo systemctl enable avahi-daemon 2>/dev/null || true
@@ -816,6 +822,13 @@ setup_vlan_agent() {
     if [[ ! -f "${VLAN_AGENT_DIR}/Dockerfile" ]]; then
         log_error "VLAN agent Dockerfile not found: ${VLAN_AGENT_DIR}/Dockerfile"
         return 1
+    fi
+
+    if isle_offline; then
+        isle_offline_image isle-vlan-agent:latest || return 1
+        mkdir -p "${ISLE_AGENT_DIR}/nginx/configs"
+        log_success "Using bundled VLAN agent image (no build)"
+        return 0
     fi
 
     # Build the custom image (includes registry-watcher + generate-nginx-configs)
@@ -912,7 +925,9 @@ start_agent() {
         fi
     fi
 
-    if ! $DOCKER_COMPOSE_CMD up -d; then
+    local offline_args=()
+    if isle_offline; then offline_args=(--no-build --pull never); fi
+    if ! $DOCKER_COMPOSE_CMD up -d "${offline_args[@]}"; then
         log_error "Failed to start agent containers"
         echo ""
         echo "Check logs with: docker logs isle-vlan-agent"

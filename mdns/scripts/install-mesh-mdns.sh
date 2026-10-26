@@ -75,7 +75,13 @@ sudo "$TARGET_SCRIPTS_DIR/split-dns-on-host.sh"
 
 # === Install and configure avahi-daemon ===
 echo "📡 Installing avahi-daemon for mDNS broadcasting..."
-if [ -f /.dockerenv ]; then
+if [ "$(cat /etc/polari/install-mode 2>/dev/null)" = offline ]; then
+  for package in avahi-daemon avahi-utils; do
+    [ "$(dpkg-query -W -f='${db:Status-Status}' "$package" 2>/dev/null)" = installed ] || {
+      echo "offline apt/: missing $package; stage the complete medium first" >&2; exit 1;
+    }
+  done
+elif [ -f /.dockerenv ]; then
   # Running in Docker - use nsenter to run apt on the host
   nsenter --target 1 --mount --uts --ipc --net --pid -- apt-get update -qq
   nsenter --target 1 --mount --uts --ipc --net --pid -- apt-get install -y avahi-daemon avahi-utils

@@ -57,6 +57,27 @@ download_image() {
 
   local QCOW2_IMAGE="$IMAGE_DIR/openwrt-isle-router.qcow2"
 
+  if router_offline; then
+    local medium source
+    medium=$(router_offline_source) || exit 1
+    source=$(python3 - "$medium" <<'PYIMAGE'
+import json, pathlib, sys
+root = pathlib.Path(sys.argv[1]).resolve()
+image = (root / 'router' / json.load(open(root / 'manifest.json'))['router']['file']).resolve()
+if not image.is_relative_to(root / 'router') or not image.is_file():
+    sys.exit('offline router/: missing/invalid image')
+print(image)
+PYIMAGE
+) || exit 1
+    if [[ -f "$QCOW2_IMAGE" ]] && cmp -s "$source" "$QCOW2_IMAGE"; then
+      log_success "Matching bundled router image already staged"
+    else
+      cp --sparse=always "$source" "$QCOW2_IMAGE" || exit 1
+      log_success "Router image staged from offline medium (no fetch)"
+    fi
+    return
+  fi
+
   if [[ -n "${CUSTOM_IMAGE:-}" ]]; then
     if [[ ! -f "$CUSTOM_IMAGE" ]]; then
       log_error "Custom image not found: $CUSTOM_IMAGE"; exit 1

@@ -22,6 +22,11 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m' # No Color
 
+OFFLINE_DOCKER_ARGS=()
+if [ "$(cat /etc/polari/install-mode 2>/dev/null)" = offline ]; then
+    OFFLINE_DOCKER_ARGS=(--pull never)
+fi
+
 DAEMON_JSON="/etc/docker/daemon.json"
 BACKUP_JSON="/etc/docker/daemon.json.backup-$(date +%Y%m%d-%H%M%S)"
 
@@ -58,7 +63,7 @@ check_docker_issue() {
 
     # Capture output to a variable instead of a file to avoid permission issues
     local docker_output
-    docker_output=$(docker run --rm alpine echo "test" 2>&1)
+    docker_output=$(docker run --rm "${OFFLINE_DOCKER_ARGS[@]}" alpine echo "test" 2>&1)
     local docker_exit_code=$?
 
     if [[ $docker_exit_code -eq 0 ]]; then
@@ -175,7 +180,7 @@ verify_fix() {
 
     # Capture output to a variable instead of a file to avoid permission issues
     local docker_output
-    docker_output=$(docker run --rm alpine echo "Docker is working!" 2>&1)
+    docker_output=$(docker run --rm "${OFFLINE_DOCKER_ARGS[@]}" alpine echo "Docker is working!" 2>&1)
     local docker_exit_code=$?
 
     if [[ $docker_exit_code -eq 0 ]]; then

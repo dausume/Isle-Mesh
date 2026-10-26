@@ -15,9 +15,18 @@ install_and_configure_packages() {
 
   # Install packages
   log_info "Installing packages from ${router_dest}..."
-  if router_ssh "opkg install ${router_dest}/*.ipk" 2>/dev/null; then
+  local install_cmd="opkg install ${router_dest}/*.ipk"
+  if router_offline; then
+    # No feed URLs in this configuration: opkg cannot fetch a missing dep.
+    install_cmd="printf 'arch all 100\\narch noarch 100\\narch x86_64 200\\n' > /tmp/isle-offline-opkg.conf && opkg --conf /tmp/isle-offline-opkg.conf install ${router_dest}/*.ipk"
+  fi
+  if router_ssh "$install_cmd" 2>/dev/null; then
     log_success "Packages installed successfully"
   else
+    if router_offline; then
+      log_error "offline router/: package installation failed; no feed fallback attempted"
+      return 1
+    fi
     log_warning "Some packages may have failed to install (this is often OK if already installed)"
   fi
 

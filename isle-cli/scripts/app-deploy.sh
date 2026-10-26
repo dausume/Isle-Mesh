@@ -91,6 +91,17 @@ fi
 
 echo "deploying '$NAME' -> https://$DOMAIN (service $SERVICE:$PORT, ${#SERVICES[@]} service(s))"
 
+source "$SCRIPT_DIR/offline-runtime.sh"
+OFFLINE_ARGS=()
+if isle_offline; then
+    refs=$(docker compose -f "$COMPOSE" config --images) || die "invalid offline compose configuration"
+    [ -n "$refs" ] || die "offline images/: application has no bundled images"
+    while IFS= read -r ref; do
+        isle_offline_image "$ref" || die "offline images/: app image not staged"
+    done <<< "$refs"
+    OFFLINE_ARGS=(--no-build --pull never)
+fi
+
 # ---- 1. compose up with the auto-isle overlay
 sudo mkdir -p "$APPS_DIR/$NAME"
 sudo cp "$COMPOSE" "$APPS_DIR/$NAME/docker-compose.yml"
@@ -108,7 +119,7 @@ for name in (d.get('services') or {}):
 print(yaml.safe_dump(overlay, default_flow_style=False))
 PYEOF
 (cd "$APPS_DIR/$NAME" && sudo docker compose -p "isle-$NAME" \
-    -f docker-compose.yml -f isle-overlay.yml up -d) \
+    -f docker-compose.yml -f isle-overlay.yml up -d "${OFFLINE_ARGS[@]}") \
     || die "compose up failed"
 ok "containers up (project isle-$NAME, attached to isle-agent-net)"
 

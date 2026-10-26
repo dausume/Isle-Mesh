@@ -37,6 +37,11 @@ while [ $# -gt 0 ]; do case "$1" in
     *) shift ;;
 esac; done
 
+source "$SCRIPT_DIR/offline-runtime.sh"
+if isle_offline; then
+    isle_offline_preflight || die "offline medium is not ready; nothing configured"
+fi
+
 echo "Isle core install — one flow to a working isle core on $(hostname)"
 
 # ---- 1. the isle itself (router + agent) ----
@@ -77,14 +82,20 @@ fi
 
 # ---- 4. the store shell on this box + staged runtime ----
 step "4/7 store shell (native window + system stage)"
-if dpkg -s isle-app-store >/dev/null 2>&1; then
+if [ -x /usr/bin/polari-app-shell ] && [ -f /usr/share/isle-app-store/polari-shell.json ]; then
     ok "isle-app-store installed"
+elif isle_offline; then
+    die "offline debs/: store shell missing; stage the complete medium first"
 else
     DEB=$(ls "$HOME"/polari-shells/isle-app-store_*_all.deb 2>/dev/null | sort -V | tail -1)
     [ -n "$DEB" ] && sudo apt-get install -y "$DEB" >/dev/null 2>&1 && ok "isle-app-store installed" \
         || warn "no isle-app-store deb staged (~/polari-shells) — build it from polari-app-shell/shells"
 fi
 CORE_DEB=$(ls "$HOME"/polari-shells/polari-shell-core_*_amd64.deb 2>/dev/null | sort -V | tail -1)
+if isle_offline; then
+    medium=$(isle_offline_medium) || die "offline medium missing"
+    CORE_DEB=$(ls "$medium"/debs/polari-shell-core_*_amd64.deb 2>/dev/null | sort -V | tail -1)
+fi
 if [ -n "$CORE_DEB" ]; then
     sudo mkdir -p /usr/share/isle-mesh/shells/debs \
         && sudo cp -u "$CORE_DEB" /usr/share/isle-mesh/shells/debs/ \
@@ -97,7 +108,11 @@ step "5/7 apt-on-mesh"
 # like a green step and left the isle with no apt.isle at all
 # (finding #9a, Dustin's 2026-08-21 install). Capture + check.
 APT_LOG=$(mktemp)
-if isle apt-repo publish >"$APT_LOG" 2>&1; then
+APT_ARGS=()
+if isle_offline; then
+    APT_ARGS=(--from "$(isle_offline_medium)/debs")
+fi
+if isle apt-repo publish "${APT_ARGS[@]}" >"$APT_LOG" 2>&1; then
     tail -2 "$APT_LOG"
 else
     cat "$APT_LOG"

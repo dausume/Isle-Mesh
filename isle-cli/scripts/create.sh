@@ -10,6 +10,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLI_DIR="$(dirname "$SCRIPT_DIR")"
 PROJECT_ROOT="$(dirname "$CLI_DIR")"
 
+source "$SCRIPT_DIR/offline-runtime.sh"
+if isle_offline; then
+    isle_offline_preflight || exit 1
+fi
+
 # Color codes for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -182,11 +187,8 @@ check_prerequisites() {
         echo "  sudo apt-get install qemu-kvm libvirt-daemon-system libvirt-clients"
         echo ""
         if [ "$(polari_install_mode)" = offline ]; then
-            # OFFLINE (OFFLINE_INSTALL_PLAN.md §C): the router needs KVM
-            # + the medium's router/ section; without libvirt there is
-            # nothing to fetch and nothing to ask — continue routerless,
-            # stated. Never a network fallback.
-            confirm=y; log_warning "offline install-mode: no libvirt — continuing WITHOUT the router (single-device isle; router section unused)"
+            log_error "offline apt/: libvirt is required for the full Isle; stage the complete medium first"
+            exit 1
         elif [[ -t 0 ]]; then
             read -p "Do you want to continue without the router? (y/N): " confirm
         else
@@ -797,7 +799,7 @@ EOF
     # try the network to "help".
     if [ "$(polari_install_mode)" = offline ]; then
         if docker image inspect isle-sample-app-sample:latest >/dev/null 2>&1; then
-            if $DOCKER_COMPOSE_CMD up -d --no-build; then
+            if $DOCKER_COMPOSE_CMD up -d --no-build --pull never; then
                 log_success "Sample app started from the offline medium's image (no build)"
             else
                 log_error "Failed to start sample app from the offline image"

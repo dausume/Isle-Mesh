@@ -99,6 +99,15 @@ _download_package() {
 }
 
 download_openwrt_packages() {
+  if router_offline; then
+    local packages_dir
+    packages_dir=$(router_packages_dir) || return 1
+    compgen -G "$packages_dir/*.ipk" >/dev/null || {
+      log_error "offline router/: OpenWrt package closure missing"; return 1;
+    }
+    log_success "Using bundled OpenWrt packages (no downloads)"
+    return 0
+  fi
   log_step "Step 7: Downloading OpenWRT Packages"
 
   # Set packages directory relative to router-setup

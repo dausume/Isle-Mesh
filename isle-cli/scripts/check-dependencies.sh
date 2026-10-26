@@ -250,6 +250,10 @@ install_dependency() {
         return 1
     fi
 
+    if [ "$(cat /etc/polari/install-mode 2>/dev/null)" = offline ]; then
+        log_error "offline apt/: missing $dep_name; stage dependencies using the complete medium installer"
+        return 1
+    fi
     log_info "Installing $dep_name ($description)..."
 
     # Special case: yq is installed via snap

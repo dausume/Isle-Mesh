@@ -5,6 +5,11 @@
 
 set -e
 
+if [ "$(cat /etc/polari/install-mode 2>/dev/null)" = offline ]; then
+  echo "Offline setup: keeping the desktop uplink with its existing network owner."
+  exit 0
+fi
+
 echo "detecting the default route interface and DNS..."
 
 # Call the ip route query, get the line from it that contains both default and dhcp, return the 5th item in the list which is always the interface name.
