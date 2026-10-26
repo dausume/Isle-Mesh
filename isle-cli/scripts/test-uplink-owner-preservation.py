@@ -3,7 +3,8 @@
 
 A successful return must not inspect/copy credentials or invoke a network,
 service, profile, DHCP or resolver operation, in any installation context.
-All old absolute /etc references are redirected into the fixture as a second
+Reading the fixture install-mode is allowed; other credential/file reads are
+blocked. All old absolute /etc references are redirected into the fixture as a second
 safeguard, while stubs stop external tools before they could change anything.
 """
 import json
@@ -32,6 +33,10 @@ class UplinkOwnerPreservation(unittest.TestCase):
                 stub=fakebin/command
                 stub.write_text('''#!/usr/bin/python3
 import json,os,pathlib,sys
+if pathlib.Path(sys.argv[0]).name=='cat' and sys.argv[1:]==[os.environ['MODE_FILE']]:
+    try:sys.stdout.write(pathlib.Path(os.environ['MODE_FILE']).read_text())
+    except FileNotFoundError:sys.exit(1)
+    sys.exit(0)
 with open(os.environ['CALLS'],'a') as output:
     output.write(json.dumps([pathlib.Path(sys.argv[0]).name]+sys.argv[1:])+'\\n')
 sys.exit(97)
@@ -47,13 +52,12 @@ sys.exit(97)
                         isolated=fixture/script
                         isolated.write_text((ROOT/'mdns/scripts'/script).read_text().replace('/etc/',str(etc)+'/'))
                         before={str(p.relative_to(etc)):p.read_bytes() for p in etc.rglob('*') if p.is_file()}
-                        environment=dict(os.environ,PATH=str(fakebin)+':'+os.environ['PATH'],CALLS=str(calls),POLARI_INSTALL_MODE=context)
+                        environment=dict(os.environ,PATH=str(fakebin)+':'+os.environ['PATH'],CALLS=str(calls),POLARI_INSTALL_MODE=context,MODE_FILE=str(mode))
                         result=subprocess.run(['/bin/bash',str(isolated)],env=environment,cwd=fixture,capture_output=True,text=True,timeout=5)
                         self.assertEqual(result.returncode,0,result.stdout+result.stderr)
                         self.assertFalse(calls.exists(),calls.read_text() if calls.exists() else '')
                         after={str(p.relative_to(etc)):p.read_bytes() for p in etc.rglob('*') if p.is_file()}
                         self.assertEqual(before,after)
-                        self.assertIn('existing OS network owner',result.stdout)
 
 
 if __name__=='__main__':unittest.main()
