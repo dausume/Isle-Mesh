@@ -51,7 +51,7 @@ ensure_core() {
              "$SYS_STAGE"/polari-shell-core_*_amd64.deb 2>/dev/null | sort -V | tail -1)
     [ -n "$deb" ] || die "polari-shell-core not staged in $STAGE or $SYS_STAGE (isle onboard stages it, or copy the deb there)"
     warn "installing the shared shell runtime (once): $deb"
-    sudo dpkg -i "$deb" || sudo apt-get -f install -y
+    sudo bash "$SCRIPT_DIR/apt-install.sh" "$deb" || die "shared runtime installation failed"
     ok "polari-shell-core installed"
 }
 
@@ -91,7 +91,7 @@ case "${1:-help}" in
         [ -n "$DEB" ] || die "no launcher deb for $NAME in $OUT"
         ok "launcher built: $DEB"
         if [ "$DO_INSTALL" = 1 ]; then
-            sudo apt-get install -y "$DEB" || sudo dpkg -i "$DEB" || die "install failed"
+            sudo bash "$SCRIPT_DIR/apt-install.sh" "$DEB" || die "install failed"
             ok "'$TITLE' installed — it's in your applications menu (opens $URL)"
         else
             echo "install: sudo apt install $DEB"

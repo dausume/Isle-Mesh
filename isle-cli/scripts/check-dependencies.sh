@@ -6,6 +6,7 @@
 # Can be sourced by other scripts or run standalone
 
 set -euo pipefail
+DEPENDENCY_SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Colors for output
 RED='\033[0;31m'
@@ -250,14 +251,14 @@ install_dependency() {
         return 1
     fi
 
-    if [ "$(cat /etc/polari/install-mode 2>/dev/null)" = offline ]; then
-        log_error "offline apt/: missing $dep_name; stage dependencies using the complete medium installer"
-        return 1
-    fi
     log_info "Installing $dep_name ($description)..."
 
     # Special case: yq is installed via snap
     if [[ "$dep_name" == "yq" ]]; then
+        if [ "$(cat /etc/polari/install-mode 2>/dev/null)" = offline ]; then
+            log_error "offline: the optional snap yq tool is not bundled; no network fallback"
+            return 1
+        fi
         if [[ "$post_install_fn" != "none" ]]; then
             $post_install_fn
             return $?
@@ -267,7 +268,7 @@ install_dependency() {
 
     # Standard apt installation
     # shellcheck disable=SC2086
-    if sudo apt-get update && sudo apt-get install -y ${package_name//,/ }; then
+    if sudo bash "$DEPENDENCY_SCRIPTS_DIR/apt-install.sh" ${package_name//,/ }; then
         log_success "$dep_name installed successfully"
 
         # Run post-install action if defined

@@ -20,7 +20,7 @@ case "${1:-help}" in
         MOD="${2:?usage: isle module install <name>}"
         # module .deb path first (if published), else topology assign
         if apt-cache show "polari-module-$MOD" >/dev/null 2>&1; then
-            sudo apt-get install -y "polari-module-$MOD" && ok "installed polari-module-$MOD"
+            sudo bash "$(dirname "${BASH_SOURCE[0]}")/apt-install.sh" "polari-module-$MOD" && ok "installed polari-module-$MOD"
         else
             warn "no polari-module-$MOD .deb yet — assigning via topology"
             RESP=$($CURL -X POST -H "Content-Type: application/json" \

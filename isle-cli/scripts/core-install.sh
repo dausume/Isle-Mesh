@@ -88,7 +88,7 @@ elif isle_offline; then
     die "offline debs/: store shell missing; stage the complete medium first"
 else
     DEB=$(ls "$HOME"/polari-shells/isle-app-store_*_all.deb 2>/dev/null | sort -V | tail -1)
-    [ -n "$DEB" ] && sudo apt-get install -y "$DEB" >/dev/null 2>&1 && ok "isle-app-store installed" \
+    [ -n "$DEB" ] && sudo bash "$SCRIPT_DIR/apt-install.sh" "$DEB" >/dev/null 2>&1 && ok "isle-app-store installed" \
         || warn "no isle-app-store deb staged (~/polari-shells) — build it from polari-app-shell/shells"
 fi
 CORE_DEB=$(ls "$HOME"/polari-shells/polari-shell-core_*_amd64.deb 2>/dev/null | sort -V | tail -1)
@@ -110,10 +110,18 @@ step "5/7 apt-on-mesh"
 APT_LOG=$(mktemp)
 APT_ARGS=()
 if isle_offline; then
-    APT_ARGS=(--from "$(isle_offline_medium)/debs")
+    APT_ARGS=(--from "$(isle_offline_medium)/debs" --dependencies-from "$(isle_offline_medium)/apt")
+elif [ -f /etc/polari/offline-source ]; then
+    # A retained complete medium remains useful after switching to online mode.
+    CACHED_MEDIUM=$(cat /etc/polari/offline-source)
+    if [ -f "$CACHED_MEDIUM/ISLE_OFFLINE_BUNDLE" ]; then
+        bash "$CACHED_MEDIUM/scripts/verify-offline.sh" "$CACHED_MEDIUM" || die "cached medium verification failed"
+        APT_ARGS=(--from "$CACHED_MEDIUM/debs" --dependencies-from "$CACHED_MEDIUM/apt")
+    fi
 fi
 if isle apt-repo publish "${APT_ARGS[@]}" >"$APT_LOG" 2>&1; then
     tail -2 "$APT_LOG"
+    isle apt-repo enable || warn "local repository served, but client source configuration needs retry: isle apt-repo enable"
 else
     cat "$APT_LOG"
     warn "apt-on-mesh publish FAILED — the join door and the"

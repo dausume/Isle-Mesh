@@ -92,12 +92,8 @@ install_router() {
     case "$PKG_MANAGER" in
         apt)
             local PACKAGES="qemu-kvm libvirt-daemon-system libvirt-clients bridge-utils wget"
-            log_info "Updating package lists..."
-            apt-get update
-            echo ""
-
-            log_info "Installing packages: $PACKAGES"
-            apt-get install -y $PACKAGES
+            log_info "Installing packages from local Isle supply first: $PACKAGES"
+            bash "$SCRIPT_DIR/apt-install.sh" $PACKAGES
             ;;
 
         yum|dnf)
@@ -302,8 +298,7 @@ install_detection() {
     # Tools used by scan/relay/onboard (best effort; scan degrades without them).
     log_info "Installing detection tools (socat, netcat, jq, ethtool, nmap)..."
     case "$PKG_MANAGER" in
-        apt)      apt-get install -y socat netcat-openbsd jq ethtool nmap 2>/dev/null \
-                    || apt-get install -y socat jq ethtool || true ;;
+        apt)      bash "$SCRIPT_DIR/apt-install.sh" socat netcat-openbsd jq ethtool nmap ;;
         yum|dnf)  $PKG_MANAGER install -y socat nmap-ncat jq ethtool nmap || true ;;
         pacman)   pacman -S --noconfirm socat gnu-netcat jq ethtool nmap || true ;;
     esac

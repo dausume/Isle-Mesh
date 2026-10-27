@@ -25,11 +25,13 @@ ok(){ echo -e "${G}[ OK ]${N} $*"; }
 warn(){ echo -e "${Y}[WARN]${N} $*"; }
 die(){ echo -e "${R}[FAIL]${N} $*"; exit 1; }
 
-FP=""; CORE=""; WANT_HOST=0
+FP=""; CORE=""; WANT_HOST=0; INSTALL_MODE=$(cat /etc/polari/install-mode 2>/dev/null || echo online)
 while [ $# -gt 0 ]; do case "$1" in
     --fingerprint) FP="$2"; shift 2 ;;
     --core) CORE="$2"; shift 2 ;;
     --host) WANT_HOST=1; shift ;;
+    --offline) INSTALL_MODE="offline"; shift ;;
+    --online) INSTALL_MODE="online"; shift ;;
     *) shift ;;
 esac; done
 [ -n "$FP" ] || die "usage: sudo bash isle-bootstrap.sh --fingerprint <CA sha256> [--core <ip>] [--host]
@@ -101,18 +103,25 @@ echo "==> 2/4 apt-on-mesh"
 KEYRING=/usr/share/keyrings/isle-archive-keyring.gpg
 fetch_ca https://apt.isle/isle-archive-keyring.gpg "$KEYRING" \
     || die "cannot fetch the archive key from https://apt.isle (core published? isle apt-repo publish)"
-echo "deb [signed-by=$KEYRING] https://apt.isle ./" > /etc/apt/sources.list.d/isle-mesh.list
-ok "signed apt source added (https://apt.isle)"
+ok "archive key trusted over the authenticated Isle channel"
 
 # ---- 3. the CLI + the store (runtime rides Depends) ----
 echo
 echo "==> 3/4 install isle-mesh-cli + Isle App Store"
-apt-get update -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/isle-mesh.list \
-    -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0 >/dev/null 2>&1 \
-    || apt-get update >/dev/null 2>&1 || warn "apt update had warnings"
-apt-get install -y isle-mesh-cli isle-app-store polari-shell-core \
-    || die "install failed (apt-cache policy isle-mesh-cli to debug)"
+# Fetch the common transaction helper through the already authenticated Isle
+# CA channel. Its package indexes are additionally checked by apt signatures.
+APT_INSTALLER=$(mktemp)
+trap 'rm -f "$APT_INSTALLER"' EXIT
+fetch_ca https://apt.isle/apt-install.sh "$APT_INSTALLER" \
+    || die "core has no dependency installer; update/re-publish its local repository"
+mkdir -p /etc/polari
+printf '%s\n' "$INSTALL_MODE" > /etc/polari/install-mode
+bash "$APT_INSTALLER" isle-mesh-cli isle-app-store polari-shell-core \
+    || die "install failed from configured local-first package supply"
+rm -f "$APT_INSTALLER"
+trap - EXIT
 ok "CLI + store + shared runtime installed"
+isle apt-repo enable || die "could not enable this Isle's signed local source"
 
 # ---- 4. onboard (trust/reach/register/stage) ----
 echo

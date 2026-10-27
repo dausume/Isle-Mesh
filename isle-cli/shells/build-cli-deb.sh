@@ -36,7 +36,7 @@ mkdir -p "$STAGE/DEBIAN" "$STAGE/$SHARE" "$OUTPUT"
 # were silently packaging them).
 for d in isle-cli isle-agent mdns mesh-app-scaffolding openwrt-router polari-isle; do
     [ -d "$REPO/$d" ] || { echo "missing $REPO/$d" >&2; exit 1; }
-    tar -C "$REPO" --exclude=.git --exclude=node_modules \
+    tar -C "$REPO" --exclude=.git --exclude=node_modules --exclude=__pycache__ --exclude='*.pyc' \
         --exclude='*.backup' --exclude='*.qcow2' --exclude='*.img' \
         --exclude='*.img.gz' --exclude='router-setup/images' \
         -cf - "$d" | tar -C "$STAGE/$SHARE" -xf -
@@ -150,7 +150,7 @@ Version: $VERSION
 Section: admin
 Priority: optional
 Architecture: all
-Depends: nodejs, jq, openssl, curl, iw, hostapd, socat
+Depends: nodejs, python3, python3-yaml, python3-jinja2, ca-certificates, jq, openssl, curl, iw, hostapd, socat
 Replaces: isle-manager-app (<< 0.2)
 Installed-Size: $INSTALLED_KB
 Maintainer: Isle-Mesh <isle@localhost>

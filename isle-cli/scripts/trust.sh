@@ -78,11 +78,7 @@ do_import() {
         && sudo update-ca-certificates >/dev/null 2>&1 \
         && ok "system store: imported" || { fail "system store import failed"; return 1; }
     if ! command -v certutil >/dev/null 2>&1; then
-        if [ "$(cat /etc/polari/install-mode 2>/dev/null)" = offline ]; then
-            fail "offline apt/: libnss3-tools missing; stage the complete medium first"
-            return 1
-        fi
-        sudo apt-get install -y libnss3-tools >/dev/null 2>&1 || true
+        sudo bash "$(dirname "${BASH_SOURCE[0]}")/apt-install.sh" libnss3-tools >/dev/null 2>&1 || true
     fi
     import_browser
 }

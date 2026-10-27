@@ -47,18 +47,20 @@ print("polari-%d" % n)' 2>/dev/null || echo "polari-2"
 ensure_images(){
     if ! docker image inspect prf-backend:staging >/dev/null 2>&1; then
         step "pulling prf images from the mesh registry"
+        [ "$(cat /etc/polari/install-mode 2>/dev/null)" != offline ] \
+            || die "offline: prf-backend:staging is not supplied for this app variant; stage its image first"
         docker pull "$REGISTRY/prf-backend:staging" 2>/dev/null \
-            || docker pull 192.168.0.24:5000/prf-backend:staging 2>/dev/null \
-            || die "no prf-backend:staging locally and no registry pull worked"
-        docker tag "$(docker images -q "$REGISTRY/prf-backend:staging" 2>/dev/null || echo 192.168.0.24:5000/prf-backend:staging)" prf-backend:staging 2>/dev/null \
-            || docker tag 192.168.0.24:5000/prf-backend:staging prf-backend:staging
+            || die "no prf-backend:staging locally or in the configured Isle registry"
+        docker tag "$REGISTRY/prf-backend:staging" prf-backend:staging \
+            || die "could not tag the supplied backend image"
     fi
     if ! docker image inspect prf-frontend:staging >/dev/null 2>&1; then
+        [ "$(cat /etc/polari/install-mode 2>/dev/null)" != offline ] \
+            || die "offline: prf-frontend:staging is not supplied for this app variant; stage its image first"
         docker pull "$REGISTRY/prf-frontend:staging" 2>/dev/null \
-            || docker pull 192.168.0.24:5000/prf-frontend:staging 2>/dev/null \
-            || die "no prf-frontend:staging locally and no registry pull worked"
-        docker tag "$(docker images -q "$REGISTRY/prf-frontend:staging" 2>/dev/null || echo 192.168.0.24:5000/prf-frontend:staging)" prf-frontend:staging 2>/dev/null \
-            || docker tag 192.168.0.24:5000/prf-frontend:staging prf-frontend:staging
+            || die "no prf-frontend:staging locally or in the configured Isle registry"
+        docker tag "$REGISTRY/prf-frontend:staging" prf-frontend:staging \
+            || die "could not tag the supplied frontend image"
     fi
     ok "prf images present"
 }

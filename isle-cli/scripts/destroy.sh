@@ -395,7 +395,7 @@ if [ "$PURGE" = true ]; then
     done
     sudo systemctl daemon-reload 2>/dev/null || true
     sudo sed -i '/\.isle$/d;/\.isle /d' /etc/hosts 2>/dev/null || true
-    sudo rm -f /etc/apt/sources.list.d/isle-mesh.list 2>/dev/null || true
+    sudo rm -f /etc/apt/sources.list.d/isle-mesh.list /etc/apt/sources.list.d/00-isle-mesh.list 2>/dev/null || true
     echo -e "${BLUE}  → removed timer units, .isle hosts pins, on-mesh apt source${NC}"
 
     # mDNS broadcast + host-agent runtime scripts and domain list
