@@ -23,7 +23,7 @@ LEASES=$(sudo -n ssh $SSH_OPTS root@192.168.1.1 "cat /tmp/dhcp.leases" 2>/dev/nu
 # CAT rides the environment: a pipe would lose to the heredoc for
 # stdin (python3 - reads its SCRIPT from stdin)
 PAIRS=$(CAT="$CAT" LEASES="$LEASES" HOSTN="$HOSTN" python3 - <<'PYEOF'
-import json, os, re, sys
+import json, os, re, sys, socket
 try:
     d = json.loads(os.environ.get("CAT", "{}"))
 except Exception:
@@ -43,14 +43,12 @@ for e in d.get("entries", []):
         dev, dom = i.get("device", ""), i.get("domain", "")
         if not dom.endswith(".isle") or not dev:
             continue
-        if dev == os.environ["HOSTN"] or dom in seen:
+        if sanitize(dev) in {sanitize(os.environ["HOSTN"]), sanitize(socket.gethostname())} or dom in seen:
             continue
         sd = sanitize(dev)
         ip = next((ip for h, ip in agents if h == sd), "")
-        # until agents send their hostname in the DHCP request the
-        # lease shows '*'; a single agent lease is unambiguous
-        if not ip and len(agents) == 1:
-            ip = agents[0][1]
+        # Unknown ownership is not evidence for the only remote lease.
+        # Register only an exact device-to-agent hostname match.
         if ip:
             seen.add(dom)
             print("%s %s" % (dom, ip))
