@@ -1,87 +1,102 @@
 #!/usr/bin/env bash
-# remote-lease.sh — ensure the isle cable interface auto-leases from OpenWRT.
-#
-# On a remote node, set up a persistent DHCP auto-connect on the isle-candidate
-# ethernet port so it pulls an isle address whenever the cable is live — on boot and
-# on plug-in — with NO manual dhclient. Idempotent; safe to re-run.
-#
-# THREAT-MODEL GUARD: never touches the WIFI (the ISP LAN / SSH path) or loopback.
-# Only acts on a wired, non-wireless NIC with carrier.
-#
-#   isle remote-lease [iface]   (auto-detects the isle cable NIC if omitted)
+# Configure a remote device's dedicated Isle Ethernet connection.
+# Reuse an active/bound NetworkManager profile; never guess between ports.
+# Usage: sudo isle remote-lease [interface]
 set -uo pipefail
+log(){ printf '[isle-remote-lease] %s\n' "$*"; }
+err(){ log "$*" >&2; }
 
-log(){ echo -e "\033[0;36m[isle-remote-lease]\033[0m $*"; }
-ok(){  echo -e "\033[0;32m[isle-remote-lease] ✓\033[0m $*"; }
-err(){ echo -e "\033[0;31m[isle-remote-lease] ✗\033[0m $*" >&2; }
-
-require_root(){ [[ ${EUID:-$(id -u)} -eq 0 ]] || { err "run as root (sudo isle remote-lease)"; exit 1; }; }
-
-# Never touch the ISP/SSH path = the WIFI (and loopback). We do NOT protect an interface
-# merely for holding a default route: an isle-hijacked default lands on the ethernet
-# cable, and correcting that is this script's job. (never-default keeps us from
-# re-creating one.) On wired-ISP boxes, pass the isle interface explicitly.
-is_protected(){
-  local i="$1"
-  [[ "$i" == "lo" ]] && return 0
-  [[ -d "/sys/class/net/$i/wireless" ]] && return 0
-  case "$i" in wl*|wlan*|wlp*) return 0 ;; esac
-  return 1
+is_candidate(){
+  local nic="$1" routes4 routes6
+  [[ -d "/sys/class/net/$nic/device" && ! -d "/sys/class/net/$nic/wireless" ]] || return 1
+  [[ ! -e "/sys/class/net/$nic/master" ]] || return 1
+  [[ "$(cat "/sys/class/net/$nic/type" 2>/dev/null)" == 1 ]] || return 1
+  [[ "$(cat "/sys/class/net/$nic/carrier" 2>/dev/null)" == 1 ]] || return 1
+  # A wired uplink is protected too. Never remove its default route.
+  routes4="$(ip -4 route show default dev "$nic")" || return 1
+  routes6="$(ip -6 route show default dev "$nic")" || return 1
+  [[ -z "$routes4" && -z "$routes6" ]]
 }
 
-# Pick the isle-candidate wired NIC (ethernet, not protected, carrier up).
 pick_iface(){
-  local i
-  for i in $(ls /sys/class/net 2>/dev/null); do
-    [[ "$(cat "/sys/class/net/$i/type" 2>/dev/null)" == "1" ]] || continue   # ARPHRD_ETHER
-    is_protected "$i" && continue
-    ip link set "$i" up 2>/dev/null || true
-    [[ "$(cat "/sys/class/net/$i/carrier" 2>/dev/null)" == "1" ]] || continue
-    echo "$i"; return 0
+  local path nic found=''
+  for path in /sys/class/net/*; do
+    nic="${path##*/}"
+    is_candidate "$nic" || continue
+    [[ -z "$found" ]] || { err 'Multiple candidate Ethernet ports; specify the Isle interface.'; return 1; }
+    found="$nic"
   done
-  return 1
+  [[ -n "$found" ]] || { err 'No dedicated Ethernet port with carrier found. Connect the Isle cable first.'; return 1; }
+  printf '%s\n' "$found"
 }
 
-require_root
-IFACE="${1:-}"
-[[ -z "$IFACE" ]] && IFACE="$(pick_iface)"
-[[ -n "$IFACE" ]] || { log "no isle-candidate ethernet with carrier — nothing to do"; exit 0; }
-is_protected "$IFACE" && { err "refusing protected interface $IFACE (wifi/default-route/SSH)"; exit 1; }
-log "isle cable interface: $IFACE"
-
-if command -v nmcli >/dev/null 2>&1 && nmcli -t -f RUNNING general 2>/dev/null | grep -q "running"; then
-  # NetworkManager: a persistent autoconnect DHCP profile handles boot AND plug-in.
-  con="isle-cable-$IFACE"
-  if nmcli -t -f NAME connection show 2>/dev/null | grep -qx "$con"; then
-    ok "NM autoconnect profile '$con' already present"
-  else
-    # never-default: the isle is a SEPARATE overlay, NOT the internet path. The ISP/wifi
-    # default route must stay; the isle only owns its own subnet route.
-    nmcli connection add type ethernet ifname "$IFACE" con-name "$con" \
-      ipv4.method auto ipv4.never-default yes ipv6.method ignore ipv6.never-default yes \
-      connection.autoconnect yes >/dev/null \
-      && ok "created NM autoconnect profile '$con' (DHCP, autoconnect, never-default)" \
-      || { err "failed to create NM profile"; exit 1; }
+# Return the UUID (not display name: names can contain colons or be duplicated).
+select_profile(){
+  local nic="$1" uuid bound kind found='' unbound=false
+  uuid="$(nmcli -g GENERAL.CON-UUID device show "$nic")" || return 1
+  if [[ -n "$uuid" && "$uuid" != -- ]]; then
+    kind="$(nmcli -g connection.type connection show uuid "$uuid")" || return 1
+    [[ "$kind" == 802-3-ethernet ]] || { err 'Active profile is not Ethernet.'; return 1; }
+    printf '%s\n' "$uuid"; return 0
   fi
-  nmcli connection up "$con" >/dev/null 2>&1 || true
-else
-  # Non-NM fallback: one-shot DHCP now. NOTE: no boot persistence on this path
-  # (the NM autoconnect profile above is what persists across reboots); re-run
-  # on boot via the isle hotplug rule, or 'isle remote-lease' manually.
-  if   command -v dhclient >/dev/null 2>&1; then dhclient -1 "$IFACE" || true
-  elif command -v udhcpc   >/dev/null 2>&1; then udhcpc -i "$IFACE" -q -n -t 5 || true
-  else err "no DHCP client (dhclient/udhcpc) available"; exit 1; fi
-fi
+  local uuids
+  uuids="$(nmcli -g UUID connection show)" || return 1
+  while IFS= read -r uuid; do
+    [[ -n "$uuid" ]] || continue
+    bound="$(nmcli -g connection.interface-name connection show uuid "$uuid")" || return 1
+    kind="$(nmcli -g connection.type connection show uuid "$uuid")" || return 1
+    [[ "$kind" == 802-3-ethernet ]] || continue
+    if [[ -z "$bound" || "$bound" == -- ]]; then unbound=true; continue; fi
+    [[ "$bound" == "$nic" ]] || continue
+    [[ -z "$found" ]] || { err 'Multiple profiles are bound to this port; activate the intended Isle profile first.'; return 1; }
+    found="$uuid"
+  done <<< "$uuids"
+  if [[ -z "$found" && "$unbound" == true ]]; then
+    err 'An unbound Ethernet profile exists; activate the intended profile on this port first to avoid duplicates.'
+    return 1
+  fi
+  printf '%s' "$found"
+}
 
-sleep 2
-# Safety net for any DHCP path (esp. dhclient): strip an isle-provided DEFAULT route so
-# it can never hijack the ISP/wifi internet path. The isle keeps only its subnet route.
-if ip route show default dev "$IFACE" 2>/dev/null | grep -q .; then
-    ip route del default dev "$IFACE" 2>/dev/null && log "removed isle default route on $IFACE (ISP internet path preserved)"
-fi
-addr="$(ip -4 -o addr show "$IFACE" 2>/dev/null | awk '{print $4}' | head -1)"
-if [[ -n "$addr" ]]; then ok "leased: $IFACE = $addr (isle overlay, not default route)"; else log "no lease yet on $IFACE (is OpenWRT serving DHCP on the cable?)"; fi
+configure_nm(){
+  local nic="$1" uuid addr
+  uuid="$(select_profile "$nic")" || return 1
+  if [[ -z "$uuid" ]]; then
+    nmcli connection add type ethernet ifname "$nic" con-name "isle-cable-$nic" \
+      ipv4.method auto ipv4.never-default yes ipv6.method disabled ipv6.never-default yes \
+      connection.autoconnect yes >/dev/null || { err 'Could not create Ethernet profile.'; return 1; }
+    uuid="$(select_profile "$nic")" || return 1
+    [[ -n "$uuid" ]] || { err 'Created profile could not be identified.'; return 1; }
+  fi
+  # Static/bridged profiles need an explicit review, not an implicit conversion.
+  [[ "$(nmcli -g ipv4.method connection show uuid "$uuid")" == auto ]] || {
+    err 'Existing profile is not DHCP; review it before onboarding.'; return 1;
+  }
+  nmcli connection modify uuid "$uuid" ipv4.never-default yes ipv6.never-default yes \
+    connection.autoconnect yes || { err 'Could not configure Ethernet profile.'; return 1; }
+  log "Using Ethernet profile $uuid on $nic"
+  nmcli --wait 30 connection up uuid "$uuid" ifname "$nic" >/dev/null || {
+    err 'Ethernet activation failed; no lease confirmed.'; return 1;
+  }
+  addr="$(ip -4 -o addr show dev "$nic" scope global | awk '{print $4; exit}')"
+  [[ -n "$addr" ]] || { err 'No IPv4 lease. Check the cable and Isle router DHCP.'; return 1; }
+  log "Ethernet address: $addr. Isle identity and trusted service access still require verification."
+}
 
-# Split-DNS: make *.isle resolve via the isle router (ISP DNS untouched).
-_SELF="$(readlink -f "${BASH_SOURCE[0]}")"; _SD="$(cd "$(dirname "$_SELF")" && pwd)"
-[[ -f "$_SD/remote-dns.sh" ]] && bash "$_SD/remote-dns.sh" "$IFACE" 2>/dev/null || true
+main(){
+  if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then
+    echo 'Usage: sudo isle remote-lease [interface]'; return 0
+  fi
+  [[ $# -le 1 && "${1:-}" != -* ]] || { err 'Usage: sudo isle remote-lease [interface]'; return 1; }
+  [[ ${EUID:-$(id -u)} -eq 0 ]] || { err 'Run with sudo isle remote-lease.'; return 1; }
+  local nic="${1:-}"
+  [[ -n "$nic" ]] || nic="$(pick_iface)" || return 1
+  is_candidate "$nic" || { err 'Refusing port: select physical Ethernet with carrier, outside a bridge and without a default route.'; return 1; }
+  command -v nmcli >/dev/null && [[ "$(nmcli -t -f RUNNING general)" == running ]] || {
+    err 'NetworkManager is required for persistent, scoped Ethernet setup. Configure other managers explicitly.'; return 1;
+  }
+  configure_nm "$nic" || return 1
+  log 'Next: verify the Isle router, then configure scoped DNS with isle dns use-router and verify trusted HTTPS.'
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then main "$@"; fi
