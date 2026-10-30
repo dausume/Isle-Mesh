@@ -1,5 +1,5 @@
 #!/bin/bash
-# store-launch.sh — what the Isle App Store icon actually runs.
+# store-launch.sh — what the Isle App icon actually runs.
 #
 # FIRST-OPEN, fresh device: there is no isle yet, so opening the store offers the doors the terminal route has.
 # Revised 2026-09-14 (his rule: setup choices are CLI VERBS FIRST, the UI WRAPS them with pkexec) around what now
@@ -143,7 +143,7 @@ if [ "$RESUME_CORE" = 1 ]; then
 fi
 
 CHOICE=$(zenity --question --icon isle-app-store \
-    --title "Isle App Store — first run" \
+    --title "Isle App — first run" \
     --text "$SETUP_TEXT" \
     --ok-label "$CREATE_LABEL" \
     --extra-button "Join an existing isle" \

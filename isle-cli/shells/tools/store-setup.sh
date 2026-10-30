@@ -1,5 +1,5 @@
 #!/bin/bash
-# store-setup.sh — the ONE privileged entry point behind the Isle App Store's setup doors (his rule 2026-09-14:
+# store-setup.sh — the ONE privileged entry point behind the Isle App's setup doors (his rule 2026-09-14:
 # setup choices are CLI verbs first; the UI wraps them with pkexec). Every door in store-launch.sh runs
 #     pkexec /usr/share/isle-app-store/store-setup.sh <verb> ...
 # in a visible terminal, and this script runs the SAME isle verbs a person would type — adding only what the

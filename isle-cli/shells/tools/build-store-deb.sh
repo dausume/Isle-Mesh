@@ -1,16 +1,9 @@
 #!/usr/bin/env bash
-# build-store-deb.sh — the ISLE APP STORE launcher .deb (handoff
-# §32). Unlike a plain app launcher, installing the store ALWAYS
-# brings up an isle AGENT on the device (Dustin: "the app store
-# shell at minimum should always come along with an agent being
-# installed"), so a user can use isle-mesh to any extent on any
-# device — host apps, not just reach them. The postinst:
-#   1. trusts the isle CA (isle trust install, if the CLI is there)
-#   2. ensures an isle agent is running (isle agent ensure)
-#   3. registers the store launcher (opens /isle — the tabbed hub)
-# Depends: polari-shell-core, policykit-1, and (recommended) the
-# isle CLI. Idempotent postinst; degrades honestly if the isle CLI
-# is absent (prints what to run).
+# build-store-deb.sh — native Isle App launcher (opens the /isle management hub).
+# App Store is one tab inside Isle App. Keep package/profile IDs stable so
+# upgrades retain existing launchers, registrations and browser profiles.
+# Postinst may seed CA trust; joining and enabling hosting remain explicit.
+# Depends: shared shell runtime, policykit and zenity; recommends the Isle CLI.
 #
 #   build-store-deb.sh --url https://polari.isle/isle [--ca <root>]
 #       [--version 0.1.0] [--output dist]
@@ -56,11 +49,11 @@ url, ca = sys.argv[1], sys.argv[2]
 ca_pem = [open(ca).read()] if ca else []
 print(json.dumps({
     "kind": "polari-shell-registration", "schemaVersion": 1,
-    "app": {"name": "isle-app-store", "title": "Isle App Store",
+    "app": {"name": "isle-app-store", "title": "Isle App",
             "scope": "instance", "appName": "", "startRoute": "",
             "brandColor": "", "icon": ""},
     "instances": [{
-        "id": "isle-store", "displayName": "Isle App Store",
+        "id": "isle-store", "displayName": "Isle App",
         "webUrl": url, "apiUrl": url,
         # blank identity/instanceId → the shell treats this as a
         # plain mesh web view (no appstore-enrollment probe); prf-isle
@@ -103,8 +96,8 @@ chmod 755 "$STAGE$SHARE/store-setup.sh"
 cat > "$STAGE/usr/share/applications/$PKG.desktop" <<EOF
 [Desktop Entry]
 Type=Application
-Name=Isle App Store
-Comment=Install and manage isle-mesh apps on this device
+Name=Isle App
+Comment=Manage Isle devices, capabilities and apps
 Exec=$SHARE/store-launch.sh
 Icon=$STORE_ICON
 Terminal=false
@@ -120,7 +113,7 @@ EOF
 cat > "$STAGE/DEBIAN/postinst" <<'POSTINST'
 #!/bin/sh
 set -e
-echo "==> Isle App Store: trusting the isle on this device"
+echo "==> Isle App: trusting the isle on this device"
 CA=/usr/share/isle-app-store/isle-root.crt
 # apt runs us with a sanitized PATH that skips /usr/local/bin —
 # resolve the CLI symlink explicitly
@@ -142,7 +135,7 @@ if [ -n "$ISLE" ]; then
         echo "     sudo isle core-install     # make this its own isle (single-device is valid)"
         echo "     sudo isle onboard --host   # or join an existing isle"
     fi
-    echo "==> ready — open 'Isle App Store' from your menu"
+    echo "==> ready — open 'Isle App' from your menu"
 else
     echo "   NOTE: the isle CLI is not installed on this device."
     echo "   Install it to host apps here (reach still works):"
@@ -163,15 +156,13 @@ Depends: polari-shell-core, policykit-1, zenity
 Recommends: isle-mesh-cli
 Installed-Size: $INSTALLED_KB
 Maintainer: Polari <polari@localhost>
-Description: Isle App Store — install & manage isle-mesh apps
- The genuine isle-mesh app store as a native window: browse the
- catalog + live topology, install apps (with a password prompt),
- and project the polari app store when a polari instance is up.
- Installing this ALWAYS brings up an isle agent so this device can
- host apps, not only reach them.
+Description: Isle App — manage Isle devices, capabilities and apps
+ The Isle management app as a native window, with device capabilities,
+ network topology and an App Store tab for finding and managing apps.
+ Joining an Isle and enabling hosting are separate setup steps.
 EOF
 
 DEB="$OUTPUT/${PKG}_${VERSION}_all.deb"
 dpkg-deb --build --root-owner-group "$STAGE" "$DEB" >/dev/null
 echo "built: $DEB ($(du -h "$DEB" | cut -f1))"
-echo "install: sudo apt install ./$DEB   (installs the agent too)"
+echo "install: sudo apt install ./$DEB   (joining and hosting are separate setup steps)"
