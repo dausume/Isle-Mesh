@@ -21,7 +21,7 @@ step(){ echo -e "${C}==>${N} $*"; }
 die(){ echo -e "${R}[FAIL]${N} $*"; exit 1; }
 
 API="https://api.polari.isle"
-CURL="curl -skf --max-time 8"
+CURL="curl -sSf --max-time 8"
 REGISTRY="${ISLE_REGISTRY:-registry.isle:5000}"
 BASE=/etc/isle-mesh/polari
 
@@ -163,6 +163,13 @@ deploy(){
     echo "$NAME" | grep -qE '^[a-z0-9][a-z0-9-]{0,40}$' || die "bad instance name: $NAME"
     [ -d "$BASE/$NAME" ] && warn "$NAME already has a config dir — redeploying it"
 
+    # Members must import their core-signed leaves before starting workloads.
+    # On the CA host this reuses valid leaves or issues missing ones locally.
+    for dom in "$NAME.isle" "api.$NAME.isle"; do
+        sudo bash "$SCRIPT_DIR/certs.sh" ensure "$dom" \
+            || die "$dom certificate not ready; instance configuration and containers have not been changed"
+    done
+
     step "1/5 images"
     ensure_images
     step "2/5 config ($NAME, modules: $MODULES)"
@@ -175,10 +182,10 @@ deploy(){
     local AM=/usr/share/isle-mesh/isle-agent/scripts/agent-manager.sh
     sudo bash "$AM" register --name "$NAME" --domain "$NAME.isle" \
         --container "prf-$NAME-frontend" --port 4200 --protocol http >/dev/null 2>&1 \
-        && ok "$NAME.isle" || warn "$NAME.isle registration failed"
+        && ok "$NAME.isle" || die "$NAME.isle registration failed; containers may be running, but deployment is incomplete"
     sudo bash "$AM" register --name "$NAME-api" --domain "api.$NAME.isle" \
         --container "prf-$NAME-backend" --port 3000 --protocol http >/dev/null 2>&1 \
-        && ok "api.$NAME.isle" || warn "api.$NAME.isle registration failed"
+        && ok "api.$NAME.isle" || die "api.$NAME.isle registration failed; containers may be running, but deployment is incomplete"
     local IP; IP=$(agent_ip)
     for dom in "$NAME.isle" "api.$NAME.isle"; do
         sudo /usr/local/bin/isle dns register "$dom" "$IP" >/dev/null 2>&1 \
@@ -205,28 +212,32 @@ PYMOD
     fi
     step "5/5 report + verify"
     self_report
-    # resolve the health probe to the agent that actually serves
-    # this instance: the CORE agent is on 127.0.0.1 (host-local
-    # proxy), a REMOTE agent is its macvlan IP (127.0.0.1 would
-    # never reach it — the old 5-minute 'hang'). Short, bounded loop.
-    local IP2; IP2=$(agent_ip)
-    local RES="--resolve api.$NAME.isle:443:127.0.0.1"
-    [ -n "$IP2" ] && [ "$IP2" != "10.10.0.2" ] \
-        && RES="--resolve api.$NAME.isle:443:$IP2"
-    local code i
-    for i in $(seq 1 6); do
-        code=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 6 \
-            $RES "https://api.$NAME.isle/api/health" 2>/dev/null)
-        [ "$code" = 200 ] && break; sleep 5
-    done
-    if [ "${code:-}" = 200 ]; then
-        ok "api.$NAME.isle/api/health -> 200"
-    else
-        warn "backend still booting (last: ${code:-none}) — lazy boot takes ~1-2min; it will answer at https://$NAME.isle. Not a failure; the instance is up + reported."
-    fi
+    verify_instance "$NAME" || return 1
     echo
-    ok "polari instance '$NAME' deployed as a mesh-app: https://$NAME.isle"
+    ok "polari instance '$NAME' deployed and verified from this device: https://$NAME.isle"
     echo "   undeploy: isle polari instance undeploy $NAME"
+}
+
+# Verification is independently retryable: it never recreates containers or
+# rewrites configuration. Use normal DNS and certificate validation so a local
+# address override cannot hide incomplete naming/trust setup.
+verify_instance(){
+    local NAME="${1:?usage: isle polari instance verify <name>}"
+    echo "$NAME" | grep -qE '^[a-z0-9][a-z0-9-]{0,40}$' || die "bad instance name: $NAME"
+    local backend frontend i
+    for i in $(seq 1 6); do
+        backend=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 6 \
+            "https://api.$NAME.isle/api/health" 2>/dev/null) || backend="transport/DNS/TLS failure"
+        frontend=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 6 \
+            "https://$NAME.isle/" 2>/dev/null) || frontend="transport/DNS/TLS failure"
+        if [ "$backend" = 200 ] && [ "$frontend" = 200 ]; then
+            ok "$NAME: frontend and backend answer through normal DNS with trusted HTTPS from this device"
+            return 0
+        fi
+        [ "$i" = 6 ] || sleep 5
+    done
+    warn "$NAME verification incomplete: backend=$backend; frontend=$frontend. Containers/configuration retained. Check startup, DNS and certificate trust; retry: isle polari instance verify $NAME"
+    return 1
 }
 
 # THE DYNAMIC-URL PROOF (Dustin #1): change a LIVE instance's URL
@@ -377,7 +388,7 @@ for s in d["satisfied"]:
 for m in d["missing"]:
     print("  [MISSING] %s" % m)
 if d["complete"]:
-    print("\nCOMPLETE — every module is live; the app works.")
+    print("\nPLACEMENT COMPLETE — every module is assigned; verify runtime APIs, worker bindings and app behavior separately.")
 else:
     print("\nplan to ensure it:")
     for step in d["plan"]:
@@ -388,23 +399,70 @@ app_ensure(){
     local APP="${1:?usage: isle polari app ensure <app> [--yes]}"
     local YES="${2:-}"
     local RESP; RESP=$(api_get "/api/islemesh/appplan/$APP")
-    echo "$RESP" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("ok") else 1)' \
+    echo "$RESP" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("ok") is True and isinstance(d.get("complete"),bool) else 1)' \
         || die "no such app: $APP"
-    if echo "$RESP" | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin)["complete"] else 1)'; then
-        ok "$APP already complete — every module is live"; return 0
+    if echo "$RESP" | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin)["complete"] is True else 1)'; then
+        ok "$APP module placement already recorded; runtime APIs, worker bindings and app behavior still need their own checks"; return 0
     fi
+    # Validate the entire typed plan before asking or executing any step.
+    # Human-readable server command strings are never executable input.
+    local PLAN
+    PLAN=$(printf '%s' "$RESP" | python3 -c '
+import json,re,sys
+def refuse(message):
+    sys.exit("invalid placement plan: " + message)
+d=json.load(sys.stdin)
+steps=d.get("plan")
+if not isinstance(steps,list) or not steps:
+    refuse("missing steps for incomplete placement")
+lines=[]
+new_modules=[]
+for step in steps:
+    if not isinstance(step,dict): refuse("step must be an object")
+    action=step.get("action")
+    module=step.get("module", "")
+    if not isinstance(module,str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.-]{0,127}",module):
+        refuse("invalid module identifier")
+    if action == "add-module":
+        target=step.get("target", "")
+        if not isinstance(target,str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,40}",target):
+            refuse("invalid target instance")
+    elif action == "deploy-instance":
+        if module not in new_modules: new_modules.append(module)
+        continue
+    else:
+        refuse("unsupported action")
+    lines.append("|".join((action,module,target)))
+if new_modules:
+    lines.append("deploy-instance|" + ",".join(new_modules) + "|(new)")
+print("\n".join(lines))') || die "placement plan refused; no steps applied"
+    local action module target
+    local -a command
     echo -e "${Y}Ensure '$APP' — will run on THIS host:${N}"
-    echo "$RESP" | python3 -c 'import json,sys; [print("  $ "+s["cmd"]) for s in json.load(sys.stdin)["plan"]]'
+    while IFS='|' read -r action module target; do
+        if [ "$action" = add-module ]; then
+            [ -d "$BASE/$target" ] || die "target instance $target is not configured on this device; no steps applied. Run the plan on its hosting device"
+            echo "  isle polari module add $module --to $target"
+        else
+            echo "  isle polari instance deploy --modules $module"
+        fi
+    done <<< "$PLAN"
     if [ "$YES" != "--yes" ]; then
         read -r -p "Proceed? [y/N] " a; [ "$a" = y ] || [ "$a" = Y ] || { echo aborted; exit 1; }
     fi
-    # each plan step is an isle command targeting a DEPLOYED instance
-    echo "$RESP" | python3 -c 'import json,sys; [print("%s|%s"%(s["action"],s["cmd"])) for s in json.load(sys.stdin)["plan"]]' \
-      | while IFS='|' read -r action cmd; do
-        echo -e "${C}==> $cmd${N}"
-        eval "sudo ${cmd#sudo }" || warn "step had warnings: $cmd"
-    done
-    ok "ensured $APP (re-run 'isle polari app plan $APP' to confirm complete)"
+    while IFS='|' read -r action module target; do
+        if [ "$action" = add-module ]; then
+            command=(isle polari module add "$module" --to "$target")
+        else
+            command=(isle polari instance deploy --modules "$module")
+        fi
+        echo -e "${C}==> ${command[*]}${N}"
+        sudo "${command[@]}" || die "could not ensure $APP; completed steps retained. Re-run 'isle polari app plan $APP' to inspect remaining work"
+    done <<< "$PLAN"
+    RESP=$(api_get "/api/islemesh/appplan/$APP") || die "steps finished but placement verification unavailable for $APP"
+    echo "$RESP" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("ok") is True and d.get("complete") is True else 1)' \
+        || die "steps finished but placement is not verified complete for $APP; re-run 'isle polari app plan $APP'"
+    ok "ensured $APP (module placement verified; app-specific worker and hardware checks remain separate)"
 }
 
 # Move a module's TABLES from one instance database to another. The
@@ -501,9 +559,10 @@ case "${1:-help}" in
     instance)
         case "${2:-}" in
             deploy) shift 2; deploy "$@" ;;
+            verify) shift 2; verify_instance "$@" ;;
             rebase) shift 2; rebase "$@" ;;
             undeploy) shift 2; undeploy "$@" ;;
-            *) echo "usage: isle polari instance [deploy [--name n] [--modules csv]|rebase <n> --domain d|undeploy <name>]" ;;
+            *) echo "usage: isle polari instance [deploy [--name n] [--modules csv]|verify <name>|rebase <n> --domain d|undeploy <name>]" ;;
         esac ;;
     module)
         case "${2:-}" in
@@ -518,5 +577,5 @@ case "${1:-help}" in
             *) echo "usage: isle polari app [plan <app>|ensure <app> [--yes]]" ;;
         esac ;;
     instances) instances ;;
-    *) echo "usage: isle polari [instance deploy|instance rebase|instance undeploy <n>|module move <m> --from A --to B|instances]" ;;
+    *) echo "usage: isle polari [instance deploy|instance verify <n>|instance rebase|instance undeploy <n>|module move <m> --from A --to B|instances]" ;;
 esac

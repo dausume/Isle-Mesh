@@ -7,7 +7,7 @@
 #                   [--port <p>] [--domain <name>.isle]
 #                   [--protocol http] [--engine <kind>[@<url>]]
 #
-# --engine business-ops            → http://<container>:<port> (auto)
+# --engine business-ops            → https://<app-domain> (auto, Isle-wide)
 # --engine business-ops@http://x   → explicit url (no <> chars)
 #
 # Pipeline (each step an existing isle capability — this verb only
@@ -91,13 +91,20 @@ fi
 
 echo "deploying '$NAME' -> https://$DOMAIN (service $SERVICE:$PORT, ${#SERVICES[@]} service(s))"
 
+# Resolve the service identity before launching containers. Members use the
+# explicit CSR exchange; only the CA host can issue a new leaf locally.
+if [[ "$DOMAIN" == *.isle ]]; then
+    sudo bash "$SCRIPT_DIR/certs.sh" ensure "$DOMAIN" \
+        || die "$DOMAIN certificate not ready; app containers have not been changed"
+fi
+
 source "$SCRIPT_DIR/offline-runtime.sh"
 OFFLINE_ARGS=()
 if isle_offline; then
     refs=$(docker compose -f "$COMPOSE" config --images) || die "invalid offline compose configuration"
     [ -n "$refs" ] || die "offline images/: application has no bundled images"
     while IFS= read -r ref; do
-        isle_offline_image "$ref" || die "offline images/: app image not staged"
+        isle_prepare_offline_app_image "$ref" || die "offline images/: app image not available from verified supply"
     done <<< "$refs"
     OFFLINE_ARGS=(--no-build --pull never)
 fi
@@ -151,13 +158,15 @@ else
 fi
 
 # ---- 5. engine declaration (what this app provides to polari)
-# --engine <kind>            → URL auto-derived: http://<container>:<port>
+# --engine <kind>            → URL auto-derived: https://<app-domain>
 # --engine <kind>@<url>      → explicit URL (no shell-hostile <> chars)
 if [ -n "$ENGINE" ]; then
     if [ "${ENGINE#*@}" != "$ENGINE" ]; then
         KIND="${ENGINE%%@*}"; EURL="${ENGINE#*@}"
     else
-        KIND="$ENGINE"; EURL="http://$CONTAINER:$PORT"
+        # Consumers may run on another member. Docker service/container names
+        # are local to this host; use the published, certified Isle identity.
+        KIND="$ENGINE"; EURL="https://$DOMAIN"
     fi
     python3 - "$KIND" "$EURL" "$CONTAINER" <<'PYEOF' | sudo tee "$APPS_DIR/$NAME/engine.json" > /dev/null
 import json, sys

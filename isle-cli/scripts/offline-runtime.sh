@@ -57,3 +57,54 @@ if result.returncode or result.stdout.strip() != matches[0]['id']:
     sys.exit('offline images/: missing/incorrect image ' + ref + '; run the medium installer')
 PY
 }
+
+# App distribution may use the trusted Isle supply while internet access is
+# disabled. Only an explicitly digest-pinned reference at registry.isle is
+# eligible; mutable tags and external registries still require the medium.
+isle_registry_digest_origin() {
+    python3 - "$1" <<'PY'
+import re, sys
+match = re.fullmatch(r'(registry\.isle(?::([1-9][0-9]{0,4}))?)/[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*@sha256:[0-9a-f]{64}', sys.argv[1])
+if not match or (match[2] and int(match[2]) > 65535):
+    sys.exit(1)
+print('https://' + match[1])
+PY
+}
+
+isle_pinned_image_present() {
+    local ref="$1" digests
+    digests=$(docker image inspect --format '{{json .RepoDigests}}' "$ref" 2>/dev/null) || return 1
+    python3 - "$ref" "$digests" <<'PY'
+import json, sys
+try:
+    digests = json.loads(sys.argv[2])
+    valid = isinstance(digests, list) and sys.argv[1] in digests
+except ValueError:
+    valid = False
+sys.exit(0 if valid else 1)
+PY
+}
+
+isle_prepare_offline_app_image() {
+    local ref="$1" origin
+    if origin=$(isle_registry_digest_origin "$ref"); then
+        isle_pinned_image_present "$ref" && return 0
+        # No redirects or fallback hosts: validate the Isle root and requested
+        # registry name before allowing Docker to obtain the exact digest.
+        curl -fsS --cacert /etc/isle-mesh/ca/isle-root.crt --max-time 10 \
+            "$origin/v2/" >/dev/null || {
+                echo "offline Isle supply: trusted registry access failed; no internet fallback" >&2
+                return 1
+            }
+        docker pull "$ref" || return 1
+        isle_pinned_image_present "$ref" || {
+            echo "offline Isle supply: pulled image does not report the requested repository digest" >&2
+            return 1
+        }
+    else
+        isle_offline_image "$ref" || {
+            echo "offline app image must be supplied by the verified medium or pinned as registry.isle[:port]/repository@sha256:<digest>" >&2
+            return 1
+        }
+    fi
+}

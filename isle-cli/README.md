@@ -120,6 +120,85 @@ All old commands now require a namespace specifier (`app`, `router`, or `agent`)
 
 ## Documentation
 
+### Isle image registry
+
+`sudo isle registry setup` configures the existing registry service on the Isle
+CA host. It selects the actual `br-mgmt` IPv4 address; `--address <IPv4>` selects
+another address already assigned to that host. `--port` defaults to 5000. A
+missing or ambiguous address refuses setup. Offline setup requires the exact
+`registry:2` image recorded in the installation medium. New media builds include
+that image; previously built media are not retroactively changed.
+
+`isle registry verify` (or `--port <port>`) checks normal DNS and trusted HTTPS
+without changing the host. Run it on each intended publisher/consumer. This
+checks API access; a successful Docker push/pull remains a separate distribution
+test. Setup is privileged and recreates the registry container while retaining
+its data directory; it is not a read-only inspection command.
+
+Offline Mesh App deployment also accepts an explicit immutable image reference
+such as `registry.isle:5000/engines/board@sha256:<64-hex-digest>`. It reuses an
+exact cached repository digest, or verifies the registry with the Isle root
+before pulling that exact reference. Compose then runs with `--no-build --pull
+never`. Mutable tags and external registries remain restricted to images
+verified against the medium. This supports later Isle-published apps without
+treating offline mode as a ban on the Isle's own local supply; it does not
+automatically publish images or choose a compatible app version.
+
+### Member service certificates
+
+Members keep their service private keys locally. For an operator-mediated
+certificate exchange, use the existing Isle root trust and transfer the public
+CSR and chain over a verified channel. On the member:
+
+```bash
+sudo isle certs request board-engines.isle --output /tmp/board-engines.csr
+```
+
+On the Isle CA host, the operator must verify the requesting device, CSR SHA256,
+and ownership of the service name before signing. This command is explicit
+authorization for that name; it does not perform automatic device enrollment or
+reserve DNS ownership:
+
+```bash
+sudo isle certs sign /path/to/board-engines.csr --domain board-engines.isle --output /tmp/board-engines-chain.pem
+```
+
+Return only the public chain to the member:
+
+```bash
+sudo isle certs install board-engines.isle --certificate /path/to/board-engines-chain.pem
+sudo isle certs reload
+```
+
+Import checks the Isle CA, exact service SAN, validity and matching local private
+key before replacing the certificate. Renewal requests reuse the existing key.
+Existing exchange output files are never overwritten. Neither private service
+keys nor CA signing keys should be transferred. These commands do not register
+the app or its DNS name; verify the actual app through trusted HTTPS from another
+device after registration. For Polari instances, `isle polari instance verify
+<name>` checks frontend and backend without redeploying.
+
+`sudo isle certs check <domain>` checks an installed chain and matching key
+without changing them. Deployment and `.isle` agent registration use `certs
+ensure`: reuse a valid service identity, issue locally on the CA host if needed,
+or stop with CSR instructions on a member. A member's failed certificate check
+does not publish a new registry entry or start new app containers.
+
+### Applying app placement
+
+`isle polari app ensure <app>` validates the complete typed placement plan
+before applying it. It executes only supported module-add and instance-deploy
+actions, not the server's display command strings. Targets must be configured
+on the executing device. Multiple missing modules needing a new instance are
+grouped into one deployment. Failed steps stop the operation, and completion
+requires a fresh placement result. This confirms module placement, not worker,
+data-migration or physical-hardware readiness.
+
+Mesh App engine declarations now default to the published HTTPS `.isle` domain,
+so another device can resolve the provider. Existing explicit endpoint overrides
+are retained. Previously written `engine.json` files are not migrated by a CLI
+upgrade; review/redeploy those declarations as part of the app's placement work.
+
 For comprehensive documentation, see:
 - [CLI-ARCHITECTURE.md](CLI-ARCHITECTURE.md) - Complete architecture
 - [QUICK-REFERENCE.md](QUICK-REFERENCE.md) - Command reference

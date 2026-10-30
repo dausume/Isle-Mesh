@@ -26,6 +26,7 @@ SIGN=/etc/isle-mesh/ca/signing
 CRTD=/etc/isle-mesh/agent/ssl/certs
 KEYD=/etc/isle-mesh/agent/ssl/keys
 REG=/etc/isle-mesh/agent/registry.json
+ROOT_CA=/etc/isle-mesh/ca/isle-root.crt
 DAYS=365
 RENEW_UNDER=30
 G="\033[0;32m"; Y="\033[1;33m"; R="\033[0;31m"; N="\033[0m"
@@ -57,9 +58,8 @@ init_ca() {
     echo "The root PRIVATE key stays on this device ($CAD, root-only); members"
     echo "trust the PUBLIC root via the fingerprint-verified bootstrap."
     local tmp; tmp=$(mktemp -d); chmod 700 "$tmp"
-    # issuer substring "Polari Root CA" is LOAD-BEARING (cert_state checks
-    # it on every leaf) — keep it in the INTERMEDIATE's CN too, since a
-    # leaf's issuer is the intermediate's subject.
+    # Keep the established human-readable issuer names. Certificate state
+    # is verified cryptographically against the root, not by this label.
     local HOST; HOST=$(hostname)
     openssl ecparam -name prime256v1 -genkey -noout -out "$tmp/root.key" 2>/dev/null
     openssl req -x509 -new -key "$tmp/root.key" -sha256 -days 3650 \
@@ -104,20 +104,23 @@ for app in (d.get("apps") or {}).values():
 print("\n".join(seen))'
 }
 
-# cert_state <domain>: missing | self-signed | wrong-san | expiring | ok
+# cert_state <domain>: missing | wrong-san | expiring | untrusted | ok
 cert_state() {
-    local dom=$1 crt="$CRTD/$dom.crt"
+    local dom=$1
+    local crt="$CRTD/$dom.crt"
     sudo test -f "$crt" || { echo missing; return; }
-    local issuer
-    issuer=$(sudo openssl x509 -in "$crt" -noout -issuer 2>/dev/null)
-    case "$issuer" in
-        *"Polari Root CA"*) ;;
-        *) echo self-signed; return ;;
-    esac
-    sudo openssl x509 -in "$crt" -noout -ext subjectAltName 2>/dev/null | grep -q "DNS:$dom" \
+    # Match an entire explicit SAN. A prefix match can accept foo.isle.evil
+    # for foo.isle; CN and wildcard fallback are not our naming contract.
+    sudo openssl x509 -in "$crt" -noout -ext subjectAltName 2>/dev/null \
+        | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -Fxq "DNS:$dom" \
         || { echo wrong-san; return; }
     sudo openssl x509 -in "$crt" -noout -checkend $((RENEW_UNDER*86400)) >/dev/null 2>&1 \
         || { echo expiring; return; }
+    # The file contains leaf + intermediate. An issuer's display name is
+    # not proof that this Isle signed it (including after a CA replacement).
+    sudo openssl verify -CAfile "$ROOT_CA" -untrusted "$crt" \
+        -purpose sslserver -verify_hostname "$dom" "$crt" >/dev/null 2>&1 \
+        || { echo untrusted; return; }
     echo ok
 }
 
@@ -148,12 +151,70 @@ issue_leaf() {
 }
 
 reload_agent() {
-    docker ps --format "{{.Names}}" | grep -q "^isle-vlan-agent$" || return 0
-    docker exec isle-vlan-agent sh -c "nginx -t >/dev/null 2>&1 && kill -HUP 1" \
-        && ok "agent reloaded" || warn "agent reload failed (nginx -t)"
+    local running agent found=0 failed=0
+    running=$(docker ps --format "{{.Names}}") || { fail "cannot inspect hosting agents"; return 1; }
+    for agent in isle-vlan-agent isle-remote-agent; do
+        printf '%s\n' "$running" | grep -Fxq "$agent" || continue
+        found=1
+        if docker exec "$agent" sh -c "nginx -t >/dev/null 2>&1 && kill -HUP 1"; then
+            ok "$agent reloaded"
+        else
+            fail "$agent reload failed (nginx validation or reload signal)"; failed=1
+        fi
+    done
+    [ "$found" = 1 ] || { fail "no running hosting agent to reload"; return 1; }
+    [ "$failed" = 0 ]
+}
+
+sync_certs() {
+    require_signing
+    local domains dom state changed=0 failed=0
+    domains=$(domains_from_registry) || { fail "cannot read registered service names"; return 1; }
+    while IFS= read -r dom; do
+        [ -n "$dom" ] || continue
+        state=$(cert_state "$dom")
+        if [ "$state" != ok ]; then
+            echo "-> $dom: $state — issuing"
+            if issue_leaf "$dom"; then changed=1; else failed=1; fi
+        fi
+    done <<< "$domains"
+    if [ "$changed" = 1 ]; then
+        reload_agent || failed=1
+    elif [ "$failed" = 0 ]; then
+        ok "all leaves current"
+    fi
+    [ "$failed" = 0 ] || { fail "certificate sync incomplete"; return 1; }
+}
+
+check_leaf() {
+    sudo python3 "$(dirname "${BASH_SOURCE[0]}")/certs-enroll.py" check "$1"
+}
+
+ensure_leaf() {
+    local dom="$1"
+    [[ "$dom" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+isle$ ]] && [ "${#dom}" -le 253 ] \
+        || { fail "expected an explicit lowercase .isle service name"; return 1; }
+    check_leaf "$dom" >/dev/null 2>&1 && { ok "$dom service certificate ready"; return 0; }
+    if sudo test -f "$SIGN/intermediate_ca_key"; then
+        issue_leaf "$dom" || return 1
+        check_leaf "$dom" || return 1
+    else
+        fail "$dom has no usable service certificate on this member; hosting setup incomplete"
+        echo "Create a CSR: sudo isle certs request $dom --output <new-csr-file>"
+        echo "Have the core operator verify device/name ownership and sign it; import with isle certs install, then retry deployment."
+        return 1
+    fi
 }
 
 case "${1:-status}" in
+    request|sign|install|check)
+        # Explicit operator-mediated CSR exchange. The helper never copies
+        # signing keys, changes trust or automatically grants a service name.
+        python3 "$(dirname "${BASH_SOURCE[0]}")/certs-enroll.py" "$@" ;;
+    ensure)
+        ensure_leaf "${2:?usage: isle certs ensure <domain>}" ;;
+    reload)
+        reload_agent ;;
     status)
         printf "%-28s %s\n" DOMAIN STATE
         while read -r dom; do
@@ -161,21 +222,11 @@ case "${1:-status}" in
             printf "%-28s %s\n" "$dom" "$(cert_state "$dom")"
         done < <(domains_from_registry) ;;
     sync)
-        require_signing
-        changed=0
-        while read -r dom; do
-            [ -n "$dom" ] || continue
-            state=$(cert_state "$dom")
-            if [ "$state" != ok ]; then
-                echo "-> $dom: $state — issuing"
-                issue_leaf "$dom" && changed=1
-            fi
-        done < <(domains_from_registry)
-        [ $changed -eq 1 ] && reload_agent || ok "all leaves current" ;;
+        sync_certs ;;
     issue)
         dom=${2:?usage: isle certs issue <domain>}
         issue_leaf "$dom" && reload_agent ;;
     init-ca)
         init_ca ;;
-    *) echo "usage: isle certs [status|sync|issue <domain>|init-ca]"; exit 1 ;;
+    *) echo "usage: isle certs [status|sync|issue <domain>|init-ca|reload|check <domain>|ensure <domain>|request <domain> --output <csr>|sign <csr> --domain <domain> --output <chain>|install <domain> --certificate <chain>]"; exit 1 ;;
 esac

@@ -1420,6 +1420,17 @@ register_app() {
         return 1
     fi
 
+    # For Isle services, verify identity before publishing a registry entry.
+    # A member imports its own core-signed leaf; never silently substitute a
+    # self-signed certificate or ask it to become a certificate authority.
+    local certs_sh="${SCRIPT_DIR}/../../isle-cli/scripts/certs.sh"
+    if [[ "$domain" == *.isle ]]; then
+        if [[ ! -f "$certs_sh" ]] || ! bash "$certs_sh" ensure "$domain"; then
+            log_error "Service certificate not ready for $domain; registry unchanged"
+            return 1
+        fi
+    fi
+
     # Ensure registry file exists
     if [[ ! -f "${REGISTRY_FILE}" ]]; then
         log_warn "Registry file not found, initializing..."
@@ -1457,10 +1468,9 @@ register_app() {
 
     log_success "App '${app_name}' registered in registry.json"
 
-    # explicit-SAN leaf at registration (isle certs; no-op if this
-    # device lacks the signing material)
-    local certs_sh="${SCRIPT_DIR}/../../isle-cli/scripts/certs.sh"
-    if [ -f "$certs_sh" ]; then
+    # Isle identity was checked before registry mutation. Preserve legacy
+    # certificate handling for non-Isle local registrations.
+    if [[ "$domain" != *.isle ]] && [ -f "$certs_sh" ]; then
         bash "$certs_sh" issue "${domain}" || log_warn "leaf issuance failed for ${domain} (isle certs issue ${domain})"
     fi
 

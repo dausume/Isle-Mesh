@@ -31,12 +31,13 @@ const commands = {
   mdns:     { script: 'mdns.sh',     desc: 'mDNS infrastructure (.local domains)' },
   dns:      { script: 'dns.sh',      desc: 'Router DNS management (.isle domains)' },
   trust:    { script: 'trust.sh',    desc: 'CA trust install-step (status/install/cert)' },
-  certs:    { script: 'certs.sh',    desc: 'Per-domain leaf issuance from the isle CA' },
+  certs:    { script: 'certs.sh',    desc: 'Service certificate checks, member CSR exchange and core issuance' },
+  registry: { script: 'registry.sh', desc: 'Isle image registry setup and trusted access verification' },
   store:    { script: 'store.sh',    desc: 'The general isle app store (list/show/install/uninstall)' },
   apt:      { script: 'apt.sh', desc: 'Install packages from local Isle supply first (online fallback only)' },
   'apt-repo': { script: 'apt-repo.sh', desc: 'Apt-on-mesh: signed deb repo at apt.isle (publish/enable/status)' },
   'core-install': { script: 'core-install.sh', desc: 'ONE flow: fresh box to working isle core (5a)' },
-  polari:   { script: 'polari.sh',   desc: 'Polari instances as mesh-app installs (instance deploy/rebase/undeploy/instances)' },
+  polari:   { script: 'polari.sh',   desc: 'Polari instances and placement (instance deploy/verify/rebase/undeploy, app plan/ensure)' },
   url:      { script: 'url.sh',      desc: 'Selective web exposure: outside host:port doors into contained .isle services' },
   net:      { script: 'net.sh',      desc: 'Network resource ledger: pools/ports per device (status/report/free-subnet/free-port)' },
   shell:    { script: 'shell.sh',    desc: 'Install polari/isle apps as native shells', docker: true },
@@ -63,6 +64,7 @@ const commands = {
   hotplug:   { script: 'hotplug.sh',   desc: 'Internal: cable-plug handler (udev-invoked; role-aware)' },
 
   // Diagnostics / status
+  capabilities: { script: 'capabilities.sh', desc: 'Read-only timestamped device observations (status --json; explicit --publish)' },
   status:    { script: 'status.sh',    desc: 'Comprehensive system status (all components)' },
   diagnose:  { script: 'diagnose.sh',  desc: 'Mesh-expansion hardware capacity diagnostic', aliases: ['capacity'] },
   test:      { script: 'test.sh',      desc: 'Run diagnostic tests (isle/mdns/all/check)' },
