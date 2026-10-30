@@ -73,6 +73,7 @@ for s in p["steps"]: print("  $ %s" % s)
 '
         ;;
     install)
+        set -o pipefail
         NAME="${2:?usage: isle store install <name>}"
         RESP=$(api_get "/api/islemesh/catalog/$NAME")
         echo "$RESP" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("ok") else 1)' || { echo "no such entry: $NAME"; exit 1; }
@@ -128,7 +129,7 @@ print("%s-%d" % (e["name"], n))')
             echo -e "${C}==> $step${N}"
             # steps are isle/apt commands; run through the shell
             eval "$step" || { echo "step failed: $step"; exit 1; }
-        done
+        done || { echo "installation incomplete: ${DUP_NAME:-$NAME}" >&2; exit 1; }
         echo -e "${G}installed ${DUP_NAME:-$NAME}${N}"
         ;;
     uninstall)
