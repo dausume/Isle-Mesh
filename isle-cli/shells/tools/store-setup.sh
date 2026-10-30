@@ -61,7 +61,12 @@ case "$VERB" in
         else warn "this isle CLI has no --mode yet — the mode is recorded in $POSTURE_FILE and the instance env"; run "$ISLE" core-install "${ARGS[@]}"; fi ;;
     join)
         # Installed CLI owns discovery, declared names, networking and CA trust.
-        if [ $# -eq 0 ]; then run "$ISLE" join; exit $?; fi
+        if [ $# -eq 0 ]; then
+            if [ "${DRY:-0}" != 1 ] && ! cli_accepts join --finish; then
+                die "Guided joining requires isle-mesh-cli 0.1.172+join1 or later. Install the matching CLI package first."
+            fi
+            run "$ISLE" join; exit $?
+        fi
         FP=""; TIER=access; CORE=""
         while [ $# -gt 0 ]; do case "$1" in --fingerprint) FP="$2"; shift 2 ;; --tier) TIER="$2"; shift 2 ;; --core) CORE="$2"; shift 2 ;; *) shift ;; esac; done
         [ -n "$FP" ] || die "join needs --fingerprint <CA sha256> (from the core's 'isle core-install' printout)"
