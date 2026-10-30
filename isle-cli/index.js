@@ -64,6 +64,7 @@ const commands = {
   hotplug:   { script: 'hotplug.sh',   desc: 'Internal: cable-plug handler (udev-invoked; role-aware)' },
 
   // Diagnostics / status
+  names: { script: 'names.sh', desc: 'Memorable device-name suggestions and instance-name planning' },
   capabilities: { script: 'capabilities.sh', desc: 'Read-only timestamped device observations (status --json; explicit --publish)' },
   status:    { script: 'status.sh',    desc: 'Comprehensive system status (all components)' },
   diagnose:  { script: 'diagnose.sh',  desc: 'Mesh-expansion hardware capacity diagnostic', aliases: ['capacity'] },

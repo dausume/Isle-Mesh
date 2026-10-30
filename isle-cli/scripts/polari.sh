@@ -34,14 +34,18 @@ require_member(){
 }
 
 next_name(){
-    api_get /api/islemesh/catalog/polari 2>/dev/null | python3 -c '
-import json, sys
-try: e = json.load(sys.stdin)["entry"]
-except Exception: print("polari-2"); raise SystemExit
-taken = {i["app"] for i in e.get("instances", [])}
-n = 2
-while "polari-%d" % n in taken: n += 1
-print("polari-%d" % n)' 2>/dev/null || echo "polari-2"
+    local device catalog
+    # Prefer an explicitly configured Isle identity, then the joined agent's
+    # saved name. Preserve the existing core alias convention as a fallback.
+    if [ -s /etc/isle-mesh/device-name ]; then
+        device=$(cat /etc/isle-mesh/device-name)
+    elif [ -s /etc/isle-mesh/remote/hostname ]; then
+        device=$(cat /etc/isle-mesh/remote/hostname)
+    else
+        device=$(hostname -s | sed 's/^dustin-etts-mesh-core$/isle-core/')
+    fi
+    catalog=$(api_get /api/islemesh/catalog) || return 1
+    printf '%s' "$catalog" | python3 "$SCRIPT_DIR/names.py" instance --app polari --device "$device"
 }
 
 ensure_images(){
@@ -159,7 +163,9 @@ deploy(){
         *) shift ;;
     esac; done
     require_member
-    [ -n "$NAME" ] || NAME=$(next_name)
+    if [ -z "$NAME" ]; then
+        NAME=$(next_name) || die "could not choose an unused device-based name; check the catalog/device name or supply --name"
+    fi
     echo "$NAME" | grep -qE '^[a-z0-9][a-z0-9-]{0,40}$' || die "bad instance name: $NAME"
     [ -d "$BASE/$NAME" ] && warn "$NAME already has a config dir — redeploying it"
 
