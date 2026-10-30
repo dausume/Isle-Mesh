@@ -5,6 +5,8 @@ import json
 import re
 import secrets
 import sys
+import socket
+from pathlib import Path
 
 ADJECTIVES = ('amber','bright','calm','clever','cosmic','dapper','eager','eccentric',
               'gentle','golden','happy','jolly','kind','lively','lucky','mellow',
@@ -51,16 +53,29 @@ def instance_name(app, device, taken):
         if candidate not in taken:return candidate
     raise ValueError('No unused instance name found; supply --name explicitly.')
 
+def current_device():
+    for path in ('/etc/isle-mesh/device-name', '/etc/isle-mesh/agent/remote/hostname'):
+        try:
+            value=Path(path).read_text().strip()
+        except FileNotFoundError:
+            continue
+        if not valid_label(value):raise ValueError('Invalid saved Isle device name')
+        return value
+    value=socket.gethostname().lower()
+    return 'isle-core' if value == 'dustin-etts-mesh-core' else value
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     sub=parser.add_subparsers(dest='command',required=True)
+    sub.add_parser('current-device',help='read the saved Isle identity, falling back to the OS hostname')
     device=sub.add_parser('suggest-device',help='suggest an adjective-animal name; does not rename or register a device')
     device.add_argument('--taken',action='append',default=[])
     inst=sub.add_parser('instance',help='plan an instance name using a catalog JSON document on stdin')
     inst.add_argument('--app',required=True);inst.add_argument('--device',required=True)
     args=parser.parse_args()
     try:
-        if args.command=='suggest-device':print(suggest_device(args.taken))
+        if args.command=='current-device':print(current_device())
+        elif args.command=='suggest-device':print(suggest_device(args.taken))
         else:print(instance_name(args.app,args.device,occupied_names(json.load(sys.stdin))))
     except (ValueError,TypeError) as exc:parser.exit(1,str(exc)+'\n')
 if __name__=='__main__':main()

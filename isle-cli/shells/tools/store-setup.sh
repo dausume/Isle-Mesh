@@ -60,6 +60,8 @@ case "$VERB" in
         if cli_accepts core-install --mode; then run "$ISLE" core-install --mode "$MODE" "${ARGS[@]}"
         else warn "this isle CLI has no --mode yet — the mode is recorded in $POSTURE_FILE and the instance env"; run "$ISLE" core-install "${ARGS[@]}"; fi ;;
     join)
+        # Installed CLI owns discovery, declared names, networking and CA trust.
+        if [ $# -eq 0 ]; then run "$ISLE" join; exit $?; fi
         FP=""; TIER=access; CORE=""
         while [ $# -gt 0 ]; do case "$1" in --fingerprint) FP="$2"; shift 2 ;; --tier) TIER="$2"; shift 2 ;; --core) CORE="$2"; shift 2 ;; *) shift ;; esac; done
         [ -n "$FP" ] || die "join needs --fingerprint <CA sha256> (from the core's 'isle core-install' printout)"
@@ -77,7 +79,13 @@ case "$VERB" in
                 if cli_accepts isle-bootstrap --tier || cli_accepts onboard --tier; then BARGS+=(--tier hardware)
                 else BARGS+=(--host); warn "this isle CLI has no HARDWARE tier yet — joining as an isle MEMBER; hardware apps will say they cannot reach this machine's devices until the isle side ships the tier"; fi ;;
         esac
-        run bash "$TMP" "${BARGS[@]}"; rm -f "$TMP"
+        run bash "$TMP" "${BARGS[@]}"
+        BOOTSTRAP_STATUS=$?
+        rm -f "$TMP"
+        if [ "$BOOTSTRAP_STATUS" -ne 0 ]; then
+            warn "Onboarding incomplete: bootstrap failed (exit $BOOTSTRAP_STATUS). Keep completed steps and retry after resolving the failure."
+            exit "$BOOTSTRAP_STATUS"
+        fi
         [ "$TIER" = hardware ] && ok "requested tier: hardware (recorded for the core's topology once the tier exists)"
         exit 0 ;;
     stick)

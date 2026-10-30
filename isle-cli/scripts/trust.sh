@@ -93,6 +93,9 @@ import_browser() {
         as_trust_user certutil -d "$NSSDB" -A -t "C,," -n "$NICK" -i "$CA" \
             && ok "Chrome/NSS ($TRUST_USER): imported (restart an already-open browser)" \
             || { fail "Chrome/NSS import failed"; return 1; }
+    else
+        fail "Browser trust tools missing; install libnss3-tools, then retry certificate setup"
+        return 1
     fi
 }
 
@@ -120,7 +123,8 @@ fetch_root() { # first-join: no existing trust — fingerprint IS the consent
     local got; got=$(fp_of "$tmp")
     echo "Fetched root from $url"; echo "  SHA-256: $got"
     if [ -n "$expect" ]; then
-        [ "${got//:/}" = "${expect^^//:/}" ] || [ "$got" = "${expect^^}" ] || { fail "fingerprint MISMATCH (expected $expect) — refusing"; exit 1; }
+        expect=${expect^^}; expect=${expect//:/}
+        [ "${got//:/}" = "$expect" ] || { fail "fingerprint MISMATCH (expected $expect) — refusing"; exit 1; }
         ok "fingerprint matches the expected value"
     else
         echo "Compare against the operator's value (isle trust cert on the core)."

@@ -39,8 +39,8 @@ next_name(){
     # saved name. Preserve the existing core alias convention as a fallback.
     if [ -s /etc/isle-mesh/device-name ]; then
         device=$(cat /etc/isle-mesh/device-name)
-    elif [ -s /etc/isle-mesh/remote/hostname ]; then
-        device=$(cat /etc/isle-mesh/remote/hostname)
+    elif [ -s /etc/isle-mesh/agent/remote/hostname ]; then
+        device=$(cat /etc/isle-mesh/agent/remote/hostname)
     else
         device=$(hostname -s | sed 's/^dustin-etts-mesh-core$/isle-core/')
     fi
@@ -131,7 +131,7 @@ self_report(){
     local REG=/etc/isle-mesh/agent/registry.json RPT HOSTN AGENT
     [ -f "$REG" ] || return 0
     # canonical device name: same normalization as the core pusher
-    HOSTN=$(hostname | sed "s/dustin-etts-mesh-core/isle-core/")
+    HOSTN=$(python3 "$SCRIPT_DIR/names.py" current-device) || return 1
     AGENT=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -cE '^isle-(vlan|remote)-agent$' || true)
     # device facts ride along so coherence knows the agent is up
     printf '{"device":"%s","facts":{"machine_name":"%s","agent_present":%s}}' \

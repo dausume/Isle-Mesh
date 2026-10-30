@@ -6,8 +6,7 @@
 # exists — install MODES, member TIERS, the USB app stick:
 #   1. Create my own isle        -> mode question (Production / Development + the standing dev warning)
 #                                   -> pkexec store-setup.sh core-install --mode <m>   (a terminal: the walkthrough asks there)
-#   2. Join an existing isle     -> tier question (Access only / Isle member / Hardware, in plain words; the core = Create my own isle) + the core's CA fingerprint
-#                                   -> pkexec store-setup.sh join --fingerprint <fp> --tier <t>
+#   2. Join an existing isle -> guided device name, discovery, selection and certificate setup
 #   3. Install apps from a USB stick -> the stick's own prompt (Install / Not now / Wipe) — offline, presence-checked
 #   4. Set up a public server    -> pol prod guide in a terminal (the developer route)
 #   5. Just browse               -> open the shell anyway (honest unreachable page until an isle exists)
@@ -50,6 +49,16 @@ term_run() {  # CMD-STRING — run in a visible terminal, wait
     done
     return 1
 }
+
+# Removal must remain available when the backend or router has already been
+# removed. The desktop action opens the SAME interactive uninstall engine.
+if [ "${1:-}" = "--remove" ]; then
+    REMOVE_CLI=$(command -v isle 2>/dev/null || true)
+    [ -n "$REMOVE_CLI" ] || REMOVE_CLI=/usr/local/bin/isle
+    [ -x "$REMOVE_CLI" ] || exit 1
+    term_run "pkexec '$REMOVE_CLI' uninstall --everything; result=\$?; echo; echo \"Uninstall exited with status \$result\"; read -r -p 'Press Enter to close…'"
+    exit $?
+fi
 
 # ── the ISLE-ENDED prompt (unin-7) ──────────────────────────────────
 # isle-watch records when this device's CORE was deleted (kill signal)
@@ -174,24 +183,9 @@ echo; read -p 'Done — press Enter to close and open the store...'" \
     zenity --info --text "The isle is not up yet — the store opens in browse mode.\nFinish setup any time:  sudo isle core-install" 2>/dev/null
     open_shell
 elif [ "$CHOICE" = "Join an existing isle" ]; then
-    # DOOR 2: the TIER question in plain words, then the core's CA fingerprint (the trust anchor), then ONE verb
-    TIER_ANSWER=$(zenity --question --title "Join an existing isle — what should this computer do?" --width 600 \
-        --text "<b>Access only</b> — use the isle's apps from this computer. Only app SHELLS (launchers that open an app hosted elsewhere on the isle) can be installed here; nothing is hosted and nothing keeps running. Lightest.\n\n<b>Isle member</b> — also run apps here for the isle (Polari apps and containers; not hardware apps, not the core-only apps). Heavier: an agent and Docker stay running.\n\n<b>Hardware</b> — also let hardware apps use THIS machine's devices (KVM/passthrough, radios, printers, GPIO). Heaviest: libvirt + the agent; the machine must stay on. Needed for any Hardware App.\n\nYou can change this later." \
-        --ok-label "Access only" --extra-button "Isle member" --extra-button "Hardware" --extra-button "Back" 2>/dev/null)
-    TRC=$?
-    if [ "$TIER_ANSWER" = "Back" ]; then exec "$0"; fi
-    TIER=access; [ "$TIER_ANSWER" = "Isle member" ] && TIER=member; [ "$TIER_ANSWER" = "Hardware" ] && TIER=hardware
-    FP=$(zenity --entry --title "Join an existing isle — the core's fingerprint" --width 560 \
-        --text "On your isle's CORE device, 'sudo isle core-install' printed the JOIN INFO with the CA FINGERPRINT (sha256).\nType or paste it here — it is the trust anchor; always compare it with the core's printout, never with a message someone sent you." 2>/dev/null)
-    [ -n "$FP" ] || open_shell
-    CORE=$(zenity --entry --title "Join an existing isle — the core's address" --width 480 \
-        --text "Leave empty if 'apt.isle' already resolves on this network (the usual case). Otherwise the core's IP address:" 2>/dev/null)
-    CORE_ARG=""; [ -n "$CORE" ] && CORE_ARG="--core $CORE"
-    term_run "echo 'Join (tier: $TIER) — the same steps the terminal route uses, fingerprint-verified:'; \
-echo \"  pkexec $SETUP join --fingerprint '$FP' --tier $TIER $CORE_ARG\"; echo; \
-pkexec $SETUP join --fingerprint '$FP' --tier $TIER $CORE_ARG; \
-echo; read -p 'Done — press Enter to close and open the store...'" \
-        || zenity --error --text "No terminal emulator found. Run in any terminal:\n  sudo $SETUP join --fingerprint '<from core>' --tier $TIER" 2>/dev/null
+    # Basic membership first. Hosting capabilities are selected after joining.
+    term_run "pkexec $SETUP join; result=\$?; echo; if [ \$result -eq 0 ]; then echo 'Join completed.'; else echo 'Join incomplete — see the message above.'; fi; read -p 'Press Enter to close...'" \
+        || zenity --error --text "No terminal emulator found. Run: sudo isle join" 2>/dev/null
     open_shell
 elif [ "$CHOICE" = "Install apps from a USB stick" ]; then
     # DOOR 3: the stick's own prompt (Install / Not now / Wipe); it needs no isle to install the platform from the stick

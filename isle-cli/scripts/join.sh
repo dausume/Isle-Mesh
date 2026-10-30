@@ -25,9 +25,13 @@ DISCOVERY_FILE="${REMOTE_DIR}/discovery.json"
 
 # Defaults
 INTERFACE=""
-TIMEOUT=60
+TIMEOUT=35
 DISCOVERY_PORT=7878
 DETECT=false
+DEVICE_NAME=""
+SELECT_ISLE=""
+FINGERPRINT=""
+FINISH=false
 
 # Color codes
 RED='\033[0;31m'
@@ -60,19 +64,24 @@ ${CYAN}USAGE:${NC}
 
 ${CYAN}OPTIONS:${NC}
   --interface, -i <iface>   Physical network interface (auto-detected if omitted)
-  --timeout, -t <seconds>   Discovery beacon timeout (default: 60)
+  --timeout, -t <seconds>  Discovery scan duration (default: 35)
+  --device-name <name>     This device's memorable name on the Isle
+  --isle <router-ip>       Select a discovered Isle without a selection prompt
+  --fingerprint <sha256>   Expected Isle CA fingerprint (otherwise confirm it)
+  --finish                Retry DNS/certificate checks after an incomplete join
   --help, -h                Show this help message
 
 ${CYAN}DESCRIPTION:${NC}
   Joins this machine to an existing isle. The command:
-    1. Listens for a discovery beacon from the isle router
+    1. Saves your device name and lets you choose a discovered Isle
     2. Creates a Docker macvlan network on the physical interface
     3. Starts a remote agent container that gets a VLAN IP via DHCP
-    4. The container runs nginx + avahi for serving apps and mDNS
+    4. Installs certificate trust and verifies Polari access over HTTPS
+  Connect Ethernet to an Isle port first; add the port on the core if necessary.
 
 ${CYAN}PREREQUISITES:${NC}
   - Docker installed and running
-  - socat or netcat installed (for discovery listening)
+  - Python 3, DNS tools and browser certificate tools (installed by the CLI package)
   - An isle router broadcasting discovery beacons on the network
   - Root/sudo access (for macvlan network creation)
 
@@ -94,13 +103,24 @@ parse_args() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --interface|-i)
+                [[ $# -ge 2 && -n "$2" ]] || { log_error "--interface needs a value"; exit 1; }
                 INTERFACE="$2"
                 shift 2
                 ;;
             --timeout|-t)
+                [[ $# -ge 2 && "$2" =~ ^[0-9]+$ && "$2" -ge 1 && "$2" -le 300 ]] || { log_error "Timeout must be 1–300 seconds"; exit 1; }
                 TIMEOUT="$2"
                 shift 2
                 ;;
+            --device-name|--isle|--fingerprint)
+                [[ $# -ge 2 && -n "$2" ]] || { log_error "$1 needs a value"; exit 1; }
+                case "$1" in
+                    --device-name) DEVICE_NAME="$2" ;;
+                    --isle) SELECT_ISLE="$2" ;;
+                    --fingerprint) FINGERPRINT="$2" ;;
+                esac
+                shift 2 ;;
+            --finish) FINISH=true; shift ;;
             --detect)
                 DETECT=true
                 shift
@@ -137,13 +157,9 @@ check_prerequisites() {
     fi
     log_success "Docker daemon is running"
 
-    # Check for discovery listener tools
-    if ! command -v socat &>/dev/null && ! command -v nc &>/dev/null; then
-        log_error "Neither socat nor netcat is installed"
-        echo "  Install socat: sudo apt-get install socat"
-        exit 1
-    fi
-    log_success "Discovery listener tool available"
+    for tool in python3 curl openssl dig; do
+        command -v "$tool" >/dev/null || { log_error "Missing $tool; install the remote package dependencies first"; exit 1; }
+    done
 
     # Check for jq
     if ! command -v jq &>/dev/null; then
@@ -245,8 +261,12 @@ detect_interface() {
                     echo "    $iface ($mac)"
                 done
                 echo ""
-                log_error "Cannot auto-select — specify with --interface <name>"
-                exit 1
+                if [[ -t 0 ]]; then
+                    read -r -p "Ethernet interface to use: " INTERFACE
+                    [[ " $candidates " == *" $INTERFACE "* && -n "$INTERFACE" ]] || { log_error "Select a listed interface"; return 1; }
+                else
+                    log_error "Specify --interface <name>"; return 1
+                fi
             fi
         else
             # Strategy 1.5: a WIRED NIC already holding an isle (10.x)
@@ -283,6 +303,11 @@ detect_interface() {
             log_warning "No dedicated isle cable detected — using main network interface"
             fi
         fi
+    fi
+
+    if [[ -d "/sys/class/net/$INTERFACE/wireless" ]]; then
+        log_error "Connect an Ethernet cable to the Isle, then retry; Wi-Fi cannot carry this macvlan join."
+        return 1
     fi
 
     # Show interface info
@@ -389,33 +414,32 @@ discover_isle() {
     mkdir -p "$REMOTE_DIR"
     echo "$existing_names" > "${REMOTE_DIR}/observed-mdns-names.txt"
 
-    # --- Discovery phase: listen for router beacon ---
-    log_info "Listening for discovery beacon on UDP port ${DISCOVERY_PORT}..."
-    log_info "Timeout: ${TIMEOUT}s"
-    echo ""
-
-    local listener_script="${PROJECT_ROOT}/isle-agent/isle-remote-agent/discovery-listener.sh"
-
-    if [[ ! -f "$listener_script" ]]; then
-        log_error "Discovery listener script not found: $listener_script"
-        exit 1
+    log_info "Finding available Isles on $INTERFACE (${TIMEOUT}s scan)..."
+    local candidates count choice
+    candidates=$(python3 "$SCRIPT_DIR/join-discovery.py" --interface "$INTERFACE" --timeout "$TIMEOUT") || return 1
+    count=$(jq 'length' <<< "$candidates")
+    if [[ "$count" == 0 ]]; then
+        if derive_isle_from_lease; then
+            candidates=$(jq -s '.' "$DISCOVERY_FILE")
+            count=1
+        else
+            log_error "No Isle found. Connect Ethernet to an Isle port and retry. On the core, add that Ethernet port to the Isle if needed."
+            return 1
+        fi
     fi
-
-    # Run discovery listener
-    if DISCOVERY_PORT="$DISCOVERY_PORT" TIMEOUT="$TIMEOUT" OUTPUT_FILE="$DISCOVERY_FILE" \
-        bash "$listener_script"; then
-        log_success "Isle discovered!"
-    elif derive_isle_from_lease; then
-        log_success "Isle derived from the interface's DHCP lease (beacon not needed)"
+    echo "Available Isles (discovered names are verified during certificate setup):"
+    jq -r 'to_entries[] | "  \(.key + 1). \(.value.isle_name) — router \(.value.router_ip)"' <<< "$candidates"
+    if [[ -n "$SELECT_ISLE" ]]; then
+        choice=$(jq -r --arg router "$SELECT_ISLE" 'to_entries[] | select(.value.router_ip == $router) | .key + 1' <<< "$candidates")
+    elif [[ -t 0 ]]; then
+        read -r -p "Choose Isle [1]: " choice
+        choice=${choice:-1}
     else
-        log_error "Failed to discover an isle"
-        echo ""
-        echo "  Possible causes:"
-        echo "    - No isle router is broadcasting on this network"
-        echo "    - Firewall blocking UDP port ${DISCOVERY_PORT}"
-        echo "    - Try increasing timeout: isle join --timeout 120"
-        exit 1
+        log_error "Choose an Isle with --isle <router-ip>; no network is selected silently."
+        return 1
     fi
+    [[ "$choice" =~ ^[0-9]+$ && "$choice" -ge 1 && "$choice" -le "$count" ]] || { log_error "Invalid Isle selection"; return 1; }
+    jq --argjson index "$((choice-1))" '.[$index]' <<< "$candidates" > "$DISCOVERY_FILE"
 
     # Read discovery data
     ISLE_NAME=$(jq -r '.isle_name' "$DISCOVERY_FILE")
@@ -450,7 +474,9 @@ derive_isle_from_lease() {
     [[ -n "$gw" ]] || gw="${subnet%.*/*}.1"
     # sanity: the isle router answers DNS on :53
     if command -v dig &>/dev/null; then
-        timeout 3 dig +short "@${gw}" openwrt.isle >/dev/null 2>&1 || true
+        local answer
+        answer=$(timeout 3 dig +short +time=2 +tries=1 "@${gw}" openwrt.isle A) || return 1
+        [[ -n "$answer" ]] || return 1
     fi
     vlan=$(echo "$gw" | cut -d. -f2)
     mkdir -p "$(dirname "$DISCOVERY_FILE")"
@@ -480,7 +506,7 @@ validate_no_subnet_conflict() {
         ip=$(echo "$line" | awk '{print $3}' | cut -d'/' -f1)
 
         [[ -z "$ip" ]] && continue
-        [[ "$iface" == "lo" ]] && continue
+        [[ "$iface" == "lo" || "$iface" == "$INTERFACE" ]] && continue
 
         local ip_prefix
         ip_prefix=$(echo "$ip" | sed 's/\.[0-9]*$//')
@@ -512,6 +538,48 @@ validate_no_subnet_conflict() {
     fi
 }
 
+# Declare one stable Isle identity without changing the OS hostname.
+declare_device_name() {
+    local suggestion
+    suggestion=$(cat /etc/isle-mesh/device-name 2>/dev/null || true)
+    [[ -n "$suggestion" ]] || suggestion=$(python3 "$SCRIPT_DIR/names.py" suggest-device)
+    if [[ -z "$DEVICE_NAME" ]]; then
+        [[ -t 0 ]] || { log_error "Supply --device-name for a non-interactive join"; return 1; }
+        read -r -p "Device name on the Isle [$suggestion]: " DEVICE_NAME
+        DEVICE_NAME=${DEVICE_NAME:-$suggestion}
+    fi
+    [[ "$DEVICE_NAME" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ && "$DEVICE_NAME" != localhost && "$DEVICE_NAME" != unknown ]] || {
+        log_error "Use 1–63 lowercase letters, digits or hyphens, with a letter or digit at each end"; return 1;
+    }
+}
+
+check_device_name() {
+    local response
+    response=$(dig +time=3 +tries=1 "@$ROUTER_IP" "$DEVICE_NAME.isle" A) || { log_error "Cannot check device name with the selected Isle"; return 1; }
+    grep -qE 'status: (NOERROR|NXDOMAIN),' <<< "$response" || { log_error "Isle DNS did not answer the name check"; return 1; }
+    if grep -qE '^[^;].*[[:space:]]IN[[:space:]]+(A|CNAME)[[:space:]]' <<< "$response"; then
+        log_error "$DEVICE_NAME.isle is already in use. Retry with another --device-name."
+        return 1
+    fi
+}
+
+finish_join() {
+    setup_remote_dns
+    local args=()
+    [[ -z "$FINGERPRINT" ]] || args+=(--fingerprint "$FINGERPRINT")
+    bash "$SCRIPT_DIR/trust.sh" fetch "${args[@]}" || {
+        log_error "Connected, but certificate setup is incomplete. Retry: sudo isle join --finish"; return 1;
+    }
+    curl --fail --silent --show-error --max-time 15 https://api.polari.isle/api/health >/dev/null || {
+        log_error "Certificate installed, but trusted access to Polari failed. Retry: sudo isle join --finish"; return 1;
+    }
+    log_success "Certificate trust installed and Polari HTTPS verified"
+    python3 "$SCRIPT_DIR/capabilities.py" status --publish https://api.polari.isle >/dev/null ||
+        log_warning "Joined, but capability reporting needs a retry: isle capabilities status --publish https://api.polari.isle"
+    echo "App hosting capabilities can be enabled afterward in the Isle App."
+
+}
+
 # Generate virtual MAC address and isle hostname
 generate_mac() {
     local vlan_hex
@@ -526,14 +594,8 @@ generate_mac() {
 
     log_info "Generated virtual MAC: ${VIRTUAL_MAC}"
 
-    # Generate isle hostname from the machine's real hostname
-    # This is what avahi will publish as <hostname>.local on the isle network,
-    # and the router's join-protocol will map to <hostname>.isle
-    local machine_hostname
-    machine_hostname=$(hostname -s 2>/dev/null || hostname)
-
-    # Sanitize: lowercase, alphanumeric + hyphens only, max 63 chars
-    ISLE_HOSTNAME=$(echo "$machine_hostname" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | cut -c1-63)
+    ISLE_HOSTNAME="$DEVICE_NAME"
+    printf '%s\n' "$DEVICE_NAME" > /etc/isle-mesh/device-name
 
     # Save for restarts
     echo "$ISLE_HOSTNAME" > "${REMOTE_DIR}/hostname"
@@ -682,13 +744,13 @@ wait_for_health() {
     if ! $healthy; then
         log_warning "Agent not yet healthy after 60s (may still be waiting for DHCP)"
         echo "  Check status: docker logs isle-remote-agent"
-        return 0
+        return 1
     fi
 
     # Get VLAN IP
     local vlan_ip
     vlan_ip=$(docker exec isle-remote-agent ip -4 -o addr 2>/dev/null | awk '$4 ~ /^10\./ {split($4, a, "/"); print a[1]; exit}')
-    [ -n "$vlan_ip" ] || vlan_ip="pending"
+    [ -n "$vlan_ip" ] || { log_error "Agent has no Isle address yet"; return 1; }
 
     log_success "Remote agent is healthy"
     echo "  VLAN IP: ${vlan_ip}"
@@ -814,16 +876,26 @@ main() {
     echo ""
 
     check_prerequisites
+    if $FINISH; then
+        [[ "$(cat "$MODE_FILE" 2>/dev/null)" == remote && -s "$DISCOVERY_FILE" ]] || { log_error "No incomplete remote join to finish"; return 1; }
+        ROUTER_IP=$(jq -er '.router_ip' "$DISCOVERY_FILE")
+        wait_for_health
+        finish_join
+        log_success "Joined; certificate setup and trusted access complete"
+        return
+    fi
     check_mode_guard
+    declare_device_name
     detect_interface
     discover_isle
+    check_device_name
     generate_mac
     init_agent_dirs
     setup_macvlan
     start_remote_agent
-    wait_for_health
-    setup_remote_dns
+    wait_for_health || { log_error "Agent setup incomplete. Retry: sudo isle join --finish"; return 1; }
+    finish_join
     show_completion
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then main "$@"; fi

@@ -20,6 +20,8 @@ ok(){ echo -e "${G}[ OK ]${N} $*"; }
 warn(){ echo -e "${Y}[WARN]${N} $*"; }
 step(){ echo; echo -e "${C}==> $*${N}"; }
 
+DEVICE_NAME=$(python3 "$SCRIPT_DIR/names.py" current-device) || exit 1
+
 echo "Isle onboarding — making $(hostname) a mesh member"
 
 # ---- 1. trust the isle CA (system + browser NSS) ----
@@ -53,7 +55,7 @@ fi
 # ---- 3. register this device with polari (topology) ----
 step "3/5 register this device"
 LINKS=$(ip -br link | awk '$1!~/^(lo|veth|br-|docker|virbr|isle)/{print $1" "$2}')
-LINKS="$LINKS" python3 - "$(hostname)" <<'PYEOF' 2>/dev/null | curl -skf --max-time 8 $API_RESOLVE -X POST -H "Content-Type: application/json" --data-binary @- https://api.polari.isle/api/islemesh/ingest/device >/dev/null 2>&1 \
+LINKS="$LINKS" python3 - "$DEVICE_NAME" <<'PYEOF' 2>/dev/null | curl -skf --max-time 8 $API_RESOLVE -X POST -H "Content-Type: application/json" --data-binary @- https://api.polari.isle/api/islemesh/ingest/device >/dev/null 2>&1 \
     && ok "registered in the isle topology" || warn "topology registration skipped (API unreachable)"
 import json, os, sys
 host = sys.argv[1]

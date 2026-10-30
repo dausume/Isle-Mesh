@@ -72,10 +72,11 @@ def image_arg(value):
 
 
 def main():
+    from names import current_device
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action',choices=['status'])
     parser.add_argument('--json',action='store_true',help='emit JSON (the default)')
-    parser.add_argument('--device',default=socket.gethostname().lower())
+    parser.add_argument('--device',default=current_device())
     parser.add_argument('--image',action='append',type=image_arg,default=[])
     parser.add_argument('--publish',help='explicit HTTPS Isle API base; does not change host configuration')
     args=parser.parse_args()
