@@ -25,6 +25,25 @@ class Probe(unittest.TestCase):
     def test_digest_required(self):
         with self.assertRaises(Exception):probe.image_arg('worker=latest')
         self.assertEqual(probe.image_arg('worker=sha256:'+'a'*64)[0],'worker')
+    def test_partial_probe_does_not_clear_uplinks_or_agent_on_error(self):
+        with patch.object(probe,'run',return_value=(1,'','denied')),patch.object(probe.shutil,'which',return_value='/bin/tool'):
+            report=probe.collect('fixture')
+        self.assertNotIn('uplinks',report)
+        self.assertNotIn('agent_present',report['facts'])
+    def test_physical_network_and_agent_report(self):
+        links=[{'ifname':'eth-test','operstate':'UP','addr_info':[{'family':'inet','scope':'global'}]},
+               {'ifname':'wifi-test','operstate':'UP','addr_info':[{'family':'inet','scope':'global'}]},
+               {'ifname':'veth-test','operstate':'UP','addr_info':[]}]
+        def respond(args, timeout=8):
+            if args[0]=='ip': return (0,json.dumps(links),'')
+            if args[:2]==['docker','ps']:return (0,'isle-remote-agent','')
+            return (0,'200','')
+        def exists(path):return str(path) in ['/sys/class/net/eth-test/device','/sys/class/net/wifi-test/device','/sys/class/net/wifi-test/wireless']
+        with patch.object(probe,'run',side_effect=respond),patch.object(probe.shutil,'which',return_value='/bin/tool'),patch.object(probe.Path,'exists',exists):
+            report=probe.collect('econ-core')
+        self.assertEqual([p['kind'] for p in report['uplinks']],['ethernet','wifi'])
+        self.assertTrue(report['facts']['agent_present'])
+        self.assertEqual(report['facts']['connectivity_mode'],'dual-home')
     def test_source_and_time_on_every_fact(self):
         for fact in self.facts((0,'200','')).values():
             self.assertIn('observed_at',fact);self.assertIn('source',fact)
