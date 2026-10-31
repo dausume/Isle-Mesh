@@ -17,7 +17,7 @@
 #                                        the root, verify fp (interactive
 #                                        or scripted), then install
 #   isle trust update [--auto]           signed-channel refresh from
-#                                        trust.isle (timer-driven)
+#                                        apt.isle (timer-driven)
 set -u
 CA=/etc/isle-mesh/ca/isle-root.crt
 # pkexec changes HOME/USER to root; browser trust belongs to its caller.
@@ -37,7 +37,7 @@ as_trust_user() {
     fi
 }
 NICK="Isle Root CA"
-TRUST_URL_DEFAULT="https://trust.isle/ca/isle-root.crt"
+TRUST_URL_DEFAULT="https://apt.isle/isle-root.crt"
 G="\033[0;32m"; Y="\033[1;33m"; R="\033[0;31m"; N="\033[0m"
 ok(){ echo -e "${G}[ OK ]${N} $*"; }
 warn(){ echo -e "${Y}[WARN]${N} $*"; }
@@ -46,8 +46,8 @@ fp_of(){ openssl x509 -in "$1" -noout -fingerprint -sha256 | cut -d= -f2; }
 
 curl_trust(){ # $1 out; authenticated by CURRENT root, core-local fallbacks
     curl -s --max-time 6 --cacert "$CA" -o "$1" "$TRUST_URL_DEFAULT" 2>/dev/null \
-    || curl -s --max-time 6 --cacert "$CA" --resolve trust.isle:443:127.0.0.1 -o "$1" "$TRUST_URL_DEFAULT" 2>/dev/null \
-    || curl -s --max-time 6 --cacert "$CA" --resolve trust.isle:443:10.10.0.2 -o "$1" "$TRUST_URL_DEFAULT" 2>/dev/null
+    || curl -s --max-time 6 --cacert "$CA" --resolve apt.isle:443:127.0.0.1 -o "$1" "$TRUST_URL_DEFAULT" 2>/dev/null \
+    || curl -s --max-time 6 --cacert "$CA" --resolve apt.isle:443:10.10.0.2 -o "$1" "$TRUST_URL_DEFAULT" 2>/dev/null
 }
 
 status() {
@@ -68,8 +68,8 @@ status() {
         && warn "Firefox present: separate store (Settings > Certificates, or policies.json)"
     local probe; probe=$(mktemp)
     if curl_trust "$probe" && [ -s "$probe" ]; then
-        ok "live probe: trust.isle answered over a channel this root authenticates"
-    else warn "live probe: trust.isle not reachable/authenticated from here"; fi
+        ok "live probe: apt.isle answered over a channel this root authenticates"
+    else warn "live probe: apt.isle not reachable/authenticated from here"; fi
     rm -f "$probe"
 }
 
