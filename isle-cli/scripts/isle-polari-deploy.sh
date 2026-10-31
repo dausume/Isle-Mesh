@@ -14,7 +14,7 @@
 #
 #   isle-polari-deploy.sh [--modules <csv>] [--pull]
 set -u
-MODULES="${POLARI_ISLE_MODULES:-islemesh}"
+MODULES="${POLARI_ISLE_MODULES:-islemesh,polariapps}"
 REGISTRY="${ISLE_REGISTRY:-registry.isle:5000}"
 PULL=0
 while [ $# -gt 0 ]; do case "$1" in

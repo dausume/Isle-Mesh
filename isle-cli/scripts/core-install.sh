@@ -29,7 +29,7 @@ step(){ echo; echo -e "${C}==> $*${N}"; }
 die(){ echo -e "${R}[FAIL]${N} $*"; exit 1; }
 
 CA=/etc/isle-mesh/ca/isle-root.crt
-MODULES="islemesh"
+MODULES="islemesh,polariapps"
 SKIP_SECURITY=0
 while [ $# -gt 0 ]; do case "$1" in
     --modules) MODULES="$2"; shift 2 ;;
