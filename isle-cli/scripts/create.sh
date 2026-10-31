@@ -388,7 +388,8 @@ add_connected_cables() {
             log_success "Cable '$eth' added to the isle"
             added=$((added + 1))
         else
-            log_warning "Could not add cable '$eth' (add later: isle router add-connection --iface $eth)"
+            log_error "Could not add cable '$eth'; setup incomplete (retry: isle router add-connection --iface $eth)"
+            return 1
         fi
     done
     [[ $added -eq 0 ]] && log_info "No new isle cables to bridge (plug one in anytime — hotplug adds it)."
@@ -935,6 +936,11 @@ main() {
             # its DHCP lease comes from the router. On a fresh/purged host
             # the old order failed at docker network creation.
             setup_router
+            if [[ "$SKIP_ROUTER" != true ]]; then
+                bash "$PROJECT_ROOT/openwrt-router/scripts/router-setup/configure-core-isle.sh"
+                bash "$PROJECT_ROOT/openwrt-router/scripts/router-setup/ensure-discovery-tool.sh"
+                bash "$PROJECT_ROOT/openwrt-router/scripts/router-setup/configure-discovery.sh"
+            fi
             add_connected_cables
             setup_agent
             setup_sample_app

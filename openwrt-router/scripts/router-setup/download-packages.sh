@@ -16,6 +16,7 @@ REQUIRED_PACKAGES=(
   "avahi-utils"
   "ip-full"
   "tcpdump"
+  "socat"
 )
 
 # Color output

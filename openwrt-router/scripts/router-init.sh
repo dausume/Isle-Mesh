@@ -1036,6 +1036,7 @@ REQUIRED_PACKAGES=(
   "avahi-utils"
   "ip-full"
   "tcpdump"
+  "socat"
 )
 
 # Function to download a single package and its dependencies

@@ -44,6 +44,11 @@ fi
 
 echo "Isle core install — one flow to a working isle core on $(hostname)"
 
+# Applications created during networking need a CA before requesting leaf certificates.
+if [ ! -f "$CA" ]; then
+    bash "$SCRIPT_DIR/certs.sh" init-ca || die "CA mint failed before networking"
+fi
+
 # ---- 1. the isle itself (router + agent) ----
 step "1/7 isle networking (router + agent)"
 if docker ps --format '{{.Names}}' | grep -q '^isle-vlan-agent$'; then
