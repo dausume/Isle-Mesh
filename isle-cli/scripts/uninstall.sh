@@ -157,6 +157,7 @@ remove_cli() {
 # scripts from the deb's prerm/postrm, and the store UI runs exactly
 # this verb via polkit. One engine, three doors.
 SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RESIDUE_HELPER="$SCRIPTS_DIR/uninstall-residue.py"
 
 # privilege: polkit when a desktop session can prompt, sudo otherwise —
 # the same flow works smoothly with and without a UI.
@@ -207,7 +208,8 @@ verify_zero() {
     systemctl is-active --quiet NetworkManager 2>/dev/null \
         && log_success "network owner: NetworkManager (active)" \
         || log_warning "NetworkManager not active — check who owns the interfaces"
-    [ "$bad" = 0 ] && log_success "VERIFIED: nothing of isle-mesh/polari remains on this device" \
+    esc python3 "$RESIDUE_HELPER" || bad=1
+    [ "$bad" = 0 ] && log_success "VERIFIED: installed Isle runtime and trust removed; source, backups and cached images retained" \
                    || log_error "footprint remains (above)"
     return $bad
 }
@@ -261,6 +263,8 @@ uninstall_everything() {
     # the protected backup directory so maintainer hooks cannot strand DNS.
     esc cp "$SCRIPTS_DIR/network-handback.sh" "$BK/network-handback.sh" \
         || { log_error "cannot retain final network handback"; exit 1; }
+    esc cp "$RESIDUE_HELPER" "$BK/uninstall-residue.py" || exit 1
+    RESIDUE_HELPER="$BK/uninstall-residue.py"
     log_success "backup dir: $BK"
 
     esc bash "$SCRIPTS_DIR/destroy.sh" --purge --force || failed=1
@@ -284,6 +288,11 @@ uninstall_everything() {
         log_error "Uninstall INCOMPLETE before package removal; tooling retained for recovery. Backups: $BK"
         exit 1
     fi
+    esc python3 "$RESIDUE_HELPER" --cleanup "$BK" || {
+        log_error "Runtime/trust cleanup incomplete; keeping installed recovery tools"; exit 1;
+    }
+    # Package removal deletes the dispatch working directory.
+    cd / || exit 1
     local packages=()
     mapfile -t packages < <(installed_isle_packages)
     if [ "${#packages[@]}" -gt 0 ]; then
