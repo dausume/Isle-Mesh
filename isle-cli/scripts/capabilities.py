@@ -4,6 +4,8 @@ import argparse
 from datetime import datetime, timezone
 import json
 import platform
+import os
+from pathlib import Path
 import re
 import shutil
 import socket
@@ -44,6 +46,28 @@ def collect(device, images=()):
         code, output, _ = run(['docker','ps','--format','{{.Names}}'])
         present = bool(set(output.splitlines()) & {'isle-vlan-agent','isle-remote-agent'})
         record('agent.running', present, 'docker ps:agent name', code != 0)
+    # A real running KVM guest is direct evidence that VM hosting is in use.
+    if shutil.which('virsh'):
+        code, guests, _ = run(['virsh','-c','qemu:///system','list','--name','--state-running'])
+        record('runtime.libvirt.usable', code == 0, 'virsh system list', code != 0)
+        kvm_running = False
+        router_running = False
+        if code == 0:
+            for guest in guests.splitlines()[:32]:
+                if not guest.strip(): continue
+                result, xml, _ = run(['virsh','-c','qemu:///system','dumpxml',guest])
+                if result == 0:
+                    import xml.etree.ElementTree as ET
+                    try: is_kvm = ET.fromstring(xml).get('type') == 'kvm'
+                    except ET.ParseError: is_kvm = False
+                    kvm_running = kvm_running or is_kvm
+                    router_running = router_running or (is_kvm and guest == 'openwrt-isle-router')
+        record('hardware.openwrt.running', router_running, 'virsh running domains and XML', code != 0)
+        record('runtime.kvm.usable', kvm_running or os.access('/dev/kvm', os.R_OK | os.W_OK), 'running KVM guest or /dev/kvm access', code != 0 and not os.access('/dev/kvm', os.R_OK | os.W_OK))
+    else:
+        for dep in ('runtime.libvirt.usable','runtime.kvm.usable','hardware.openwrt.running'):
+            record(dep, False, 'command lookup:virsh')
+    record('runtime.shell.installed', Path('/usr/bin/polari-app-shell').is_file(), 'local shell executable')
     for endpoint, url in [('whoami','https://whoami.isle/'),('polari','https://api.polari.isle/api/health'),('polari-frontend','https://polari.isle/')]:
         code, output, _ = run(['curl','--silent','--show-error','--max-time','6','--output','/dev/null','--write-out','%{http_code}',url])
         # A completed TLS exchange and HTTP response proves access, not an app's

@@ -6,6 +6,15 @@ class Probe(unittest.TestCase):
     def facts(self, result):
         with patch.object(probe,'run',return_value=result),patch.object(probe.shutil,'which',return_value='/bin/docker'):
             return probe.collect('fixture')['capability_evidence']['facts']
+    def test_running_openwrt_proves_kvm_without_user_device_access(self):
+        def respond(args, timeout=8):
+            if 'dumpxml' in args:return (0,"<domain type='kvm'><name>openwrt-isle-router</name></domain>",'')
+            if args[0]=='virsh':return (0,'openwrt-isle-router','')
+            return (0,'200','')
+        with patch.object(probe,'run',side_effect=respond),patch.object(probe.shutil,'which',return_value='/bin/tool'),patch.object(probe.os,'access',return_value=False):
+            f=probe.collect('isle-core')['capability_evidence']['facts']
+        self.assertTrue(f['hardware.openwrt.running']['value'])
+        self.assertTrue(f['runtime.kvm.usable']['value'])
     def test_access_requires_200(self):
         self.assertTrue(self.facts((0,'200',''))['access.whoami.https']['value'])
         self.assertFalse(self.facts((0,'404',''))['access.whoami.https']['value'])
