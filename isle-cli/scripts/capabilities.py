@@ -89,7 +89,30 @@ def collect(device, images=()):
     for evidence, field in [('agent.running','agent_present'),('hardware.openwrt.running','router_running')]:
         if facts.get(evidence, {}).get('status') == 'observed':
             device_facts[field] = facts[evidence]['value']
-    return {'device':device,'facts':device_facts,'capability_evidence':{'schema_version':1,'facts':facts}}
+    payload = {'device':device,'facts':device_facts,'capability_evidence':{'schema_version':1,'facts':facts}}
+    code, addresses, _ = run(['ip','-j','address','show'])
+    if code == 0:
+        try:
+            interfaces = json.loads(addresses)
+            if not isinstance(interfaces, list): raise ValueError('expected interface list')
+            uplinks = []
+            connected = set()
+            for link in interfaces:
+                name = link.get('ifname', '')
+                if not re.fullmatch(r'[a-zA-Z0-9_.:-]+', name): continue
+                base = Path('/sys/class/net') / name
+                if not (base / 'device').exists(): continue
+                kind = 'wifi' if (base / 'wireless').exists() else 'ethernet'
+                up = link.get('operstate') == 'UP'
+                uplinks.append({'interface':name, 'kind':kind, 'link_up':up,
+                                'measured_at':datetime.now(timezone.utc).isoformat()})
+                if up and any(a.get('family') == 'inet' and a.get('scope') == 'global' for a in link.get('addr_info', [])):
+                    connected.add(kind)
+            payload['uplinks'] = uplinks
+            if connected == {'ethernet','wifi'}: device_facts['connectivity_mode'] = 'dual-home'
+        except (ValueError, TypeError, AttributeError):
+            pass  # Failed observation must not clear an existing network report.
+    return payload
 
 
 def image_arg(value):
