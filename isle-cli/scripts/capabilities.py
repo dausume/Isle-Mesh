@@ -85,7 +85,11 @@ def collect(device, images=()):
         else:
             missing = 'No such image' in err or 'No such object' in err
             record('image.'+name+'.present', False, 'docker image inspect:'+digest, not missing)
-    return {'device':device,'capability_evidence':{'schema_version':1,'facts':facts}}
+    device_facts = {'machine_name':device}
+    for evidence, field in [('agent.running','agent_present'),('hardware.openwrt.running','router_running')]:
+        if facts.get(evidence, {}).get('status') == 'observed':
+            device_facts[field] = facts[evidence]['value']
+    return {'device':device,'facts':device_facts,'capability_evidence':{'schema_version':1,'facts':facts}}
 
 
 def image_arg(value):
