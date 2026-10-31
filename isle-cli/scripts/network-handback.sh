@@ -51,6 +51,18 @@ else
     warn "(handback only swaps owners when one is present to take over)"
 fi
 
+# Return only explicitly reserved Isle Ethernet ports to NetworkManager.
+if [ "$NM_ACTIVE" = 1 ] && command -v nmcli >/dev/null 2>&1; then
+    for f in /etc/NetworkManager/conf.d/90-isle-ethernet-*.conf; do
+        [ -f "$f" ] || continue
+        grep -q '^# Managed by Isle Ethernet reservation$' "$f" || continue
+        iface=$(sed -n 's/^match-device=interface-name://p' "$f")
+        rm -f "$f" || { HANDOFF_FAILED=1; continue; }
+        nmcli general reload conf || HANDOFF_FAILED=1
+        [ -z "$iface" ] || nmcli device set "$iface" managed yes || HANDOFF_FAILED=1
+    done
+fi
+
 # ---- 2. stale isle addressing (dead leases from the removed router) ----
 ip route show default 2>/dev/null | grep -E "via 10\.10\.0\." | while read -r r; do
     ip route del $r 2>/dev/null && ok "removed dead default route: $r"

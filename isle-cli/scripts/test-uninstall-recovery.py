@@ -39,12 +39,21 @@ elif name=='dpkg-query': print('polari-complete installed\\nisle-app-demo instal
     env = dict(os.environ, PATH=str(fake)+':'+os.environ['PATH'], TEST_LOG=str(log))
     etc = root / 'etc'
     (etc / 'systemd/network').mkdir(parents=True)
+    nmconf = etc / 'NetworkManager/conf.d'
+    nmconf.mkdir(parents=True)
+    owned = nmconf / '90-isle-ethernet-eth-test.conf'
+    owned.write_text('# Managed by Isle Ethernet reservation\n[device-isle-test]\nmatch-device=interface-name:eth-test\nmanaged=0\n')
+    unrelated = nmconf / '90-isle-ethernet-unrelated.conf'
+    unrelated.write_text('# user configuration\n')
     (etc / 'hosts').write_text('127.0.0.1 localhost\n')
     handback = root / 'handback.sh'
     handback.write_text((scripts / 'network-handback.sh').read_text().replace('/etc/',str(etc)+'/'))
     result = subprocess.run(['bash',str(handback)],env=env,capture_output=True,text=True)
     assert result.returncode == 0, result.stdout+result.stderr
     calls = [json.loads(line) for line in log.read_text().splitlines()]
+    assert not owned.exists() and unrelated.exists()
+    assert ['nmcli','device','set','eth-test','managed','yes'] in calls
+    assert not any(c[:3]==['nmcli','device','set'] and 'unrelated' in c for c in calls)
     modify = next(i for i,c in enumerate(calls) if c[:3]==['nmcli','connection','modify'])
     dns = next(i for i,c in enumerate(calls) if c[:3]==['resolvectl','dns','wlan-test'])
     assert modify < dns
