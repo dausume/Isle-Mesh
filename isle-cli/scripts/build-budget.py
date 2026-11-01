@@ -48,7 +48,7 @@ def resources():
 def plan(r):
     reserve = max(2048, r['total_mib'] // 4)
     maximum = min(4096, max(0, r['available_mib'] - reserve))
-    heap = min(3072, max(0, maximum - 1024))
+    heap = min(3072, max(0, maximum - max(512, maximum // 5)))
     reasons = []
     if heap < 1536:
         reasons.append('Insufficient headroom for compilation; defer or build on another device.')
@@ -58,7 +58,7 @@ def plan(r):
         reasons.append('Memory pressure is already elevated.')
     return dict(observed_at=datetime.now(timezone.utc).isoformat(), observed=r,
                 ready=not reasons, reasons=reasons, reserve_mib=reserve,
-                memory_max_mib=maximum, memory_high_mib=max(0, maximum - 256),
+                memory_max_mib=maximum, memory_high_mib=max(0, maximum - 128),
                 node_heap_mib=heap, workers=1, cpu_quota_percent=100,
                 note='Planning budget, not an allocation. The run remeasures and enforces a whole-process-tree cgroup limit.')
 
@@ -91,7 +91,7 @@ def main():
             return 2
         unit = 'isle-build-' + uuid.uuid4().hex
         props = [
-            'MemoryAccounting=yes', 'MemoryMax=' + str(budget['memory_max_mib']) + 'M',
+            'MemoryAccounting=yes', 'LimitCORE=0', 'MemoryMax=' + str(budget['memory_max_mib']) + 'M',
             'MemoryHigh=' + str(budget['memory_high_mib']) + 'M', 'MemorySwapMax=0',
             'CPUQuota=100%', 'CPUWeight=10', 'Nice=15',
             'IOSchedulingClass=idle', 'OOMPolicy=stop', 'KillMode=control-group',

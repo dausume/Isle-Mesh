@@ -13,7 +13,7 @@ class Budget(unittest.TestCase):
         p=b.plan(self.sample())
         self.assertTrue(p['ready']);self.assertEqual(p['workers'],1)
         self.assertLessEqual(p['memory_max_mib']+p['reserve_mib'],5000)
-        self.assertGreaterEqual(p['memory_max_mib']-p['node_heap_mib'],1024)
+        self.assertGreaterEqual(p['memory_max_mib']-p['node_heap_mib'],512)
     def test_refuses_tight_host(self):self.assertFalse(b.plan(self.sample(3000))['ready'])
     def test_refuses_existing_pressure(self):self.assertFalse(b.plan(self.sample(6000,6))['ready'])
     def test_pressure_stop_never_reports_success(self):
