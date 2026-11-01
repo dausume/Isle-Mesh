@@ -119,7 +119,7 @@ def main():
             process = subprocess.Popen(cmd, env=env)
             low = 0
             cgroup = None
-            outcome["peak_memory_bytes"] = 0
+            outcome["peak_memory_bytes"] = None
             while process.poll() is None:
                 time.sleep(2)
                 if cgroup is None:
@@ -129,8 +129,10 @@ def main():
                         cgroup = Path('/sys/fs/cgroup') / group.lstrip('/')
                 if cgroup:
                     try:
-                        outcome['peak_memory_bytes'] = max(outcome['peak_memory_bytes'],
-                                                           int((cgroup/'memory.peak').read_text()))
+                        metric = 'memory.peak' if (cgroup/'memory.peak').exists() else 'memory.current'
+                        outcome['peak_memory_bytes'] = max(outcome['peak_memory_bytes'] or 0,
+                                                           int((cgroup/metric).read_text()))
+                        outcome['peak_memory_source'] = metric
                     except (OSError, ValueError):
                         pass
                 r = resources()
