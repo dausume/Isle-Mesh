@@ -103,11 +103,14 @@ def main():
         env['NG_BUILD_MAX_WORKERS'] = '1'
         env['CMAKE_BUILD_PARALLEL_LEVEL'] = '1'
         env['MAKEFLAGS'] = '-j1'
+        env['DPKG_DEB_THREADS_MAX'] = '1'
+        env['DPKG_DEB_COMPRESSOR_TYPE'] = 'zstd'
+        env['DPKG_DEB_COMPRESSOR_LEVEL'] = '3'
         cmd = ['systemd-run', '--user', '--wait', '--pipe', '--unit=' + unit,
                '--working-directory=' + str(Path.cwd())]
         for p in props:
             cmd += ['--property=' + p]
-        for k in ['PATH', 'NODE_OPTIONS', 'NG_BUILD_MAX_WORKERS', 'CMAKE_BUILD_PARALLEL_LEVEL', 'MAKEFLAGS']:
+        for k in ['PATH', 'NODE_OPTIONS', 'NG_BUILD_MAX_WORKERS', 'CMAKE_BUILD_PARALLEL_LEVEL', 'MAKEFLAGS', 'DPKG_DEB_THREADS_MAX', 'DPKG_DEB_COMPRESSOR_TYPE', 'DPKG_DEB_COMPRESSOR_LEVEL']:
             cmd += ['--setenv=' + k + '=' + env[k]]
         cmd += ['--'] + command
         outcome = dict(plan=budget, unit=unit, command=command)
