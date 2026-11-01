@@ -1,0 +1,14 @@
+[Unit]
+Description=Publish a dated Isle device capability and resource report
+After=network-online.target docker.service
+ConditionPathExists=/etc/isle-mesh/agent/agent.mode
+
+[Service]
+Type=oneshot
+ExecCondition=/bin/sh -c 'test "$(cat /etc/isle-mesh/agent/agent.mode)" = remote'
+ExecStart=/usr/bin/python3 /usr/share/isle-mesh/isle-cli/scripts/capabilities.py status --publish https://api.polari.isle
+Nice=15
+CPUQuota=20%
+MemoryMax=128M
+MemorySwapMax=0
+TimeoutStartSec=90

@@ -147,6 +147,8 @@ echo ""
 
 # Step 2: Stop host agent service
 echo -e "${CYAN}[2/6] Stopping host agent service...${NC}"
+systemctl disable --now isle-resource-report.timer >/dev/null 2>&1 || true
+systemctl stop isle-resource-report.service >/dev/null 2>&1 || true
 if systemctl is-active --quiet isle-host-agent 2>/dev/null; then
     systemctl stop isle-host-agent 2>/dev/null || true
     log_success "Host agent service stopped"

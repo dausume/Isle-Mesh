@@ -576,6 +576,8 @@ finish_join() {
     log_success "Certificate trust installed and Polari HTTPS verified"
     python3 "$SCRIPT_DIR/capabilities.py" status --publish https://api.polari.isle >/dev/null ||
         log_warning "Joined, but capability reporting needs a retry: isle capabilities status --publish https://api.polari.isle"
+    systemctl daemon-reload
+    systemctl enable --now isle-resource-report.timer || log_warning "Periodic resource reports need a retry: sudo systemctl enable --now isle-resource-report.timer"
     echo "App hosting capabilities can be enabled afterward in the Isle App."
 
 }

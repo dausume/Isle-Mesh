@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh remote Isle capability and resource observations
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=2min
+RandomizedDelaySec=15s
+Unit=isle-resource-report.service
+
+[Install]
+WantedBy=timers.target

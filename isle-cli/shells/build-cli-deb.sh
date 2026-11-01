@@ -44,6 +44,7 @@ done
 
 mkdir -p "$STAGE/usr/lib/systemd/system"
 install -m 0644 "$REPO/isle-mesh-boot.service" "$STAGE/usr/lib/systemd/system/isle-mesh-boot.service"
+install -m 0644 "$REPO/isle-resource-report.service" "$REPO/isle-resource-report.timer" "$STAGE/usr/lib/systemd/system/"
 
 # ---- shell tools + icons (synced from polari-app-shell — see
 # isle-cli/shells/tools/README) staged at shells/ so
@@ -78,6 +79,8 @@ fi
 # point at the walkthrough instead of installing any default
 if [ "$(cat /etc/isle-mesh/agent/agent.mode 2>/dev/null)" = remote ]; then
     bash /usr/share/isle-mesh/isle-cli/scripts/watch.sh enable >/dev/null 2>&1 || true
+    systemctl daemon-reload
+    systemctl enable --now isle-resource-report.timer
     echo "isle-watch enabled (member device: listens for the core's ISLE-ENDING)"
 fi
 echo "isle CLI installed. On a core: sudo isle core-install"
@@ -94,6 +97,8 @@ EOF
 cat > "$STAGE/DEBIAN/prerm" <<'EOF'
 #!/bin/sh
 if [ "$1" = remove ]; then
+    systemctl disable --now isle-resource-report.timer >/dev/null 2>&1 || true
+    systemctl stop isle-resource-report.service >/dev/null 2>&1 || true
     SCRIPTS=/usr/share/isle-mesh/isle-cli/scripts
     # CORE CASCADE (unin-7): removing the core ends the isle for every
     # member — send the last-gasp ISLE-ENDING broadcast FIRST so member
@@ -128,7 +133,7 @@ if [ "$1" = purge ]; then
             docker run --rm -v "$v":/v:ro -v "$BK":/b alpine                 tar czf "/b/$v.tgz" -C /v . >/dev/null 2>&1                 && docker volume rm "$v" >/dev/null 2>&1                 && echo "isle-mesh-cli purge: volume $v backed up + removed"
         done
     fi
-    for unit in polari-isle-push isle-trust-update isle-host-agent isle-mesh-boot isle-watch; do
+    for unit in polari-isle-push isle-trust-update isle-host-agent isle-mesh-boot isle-watch isle-resource-report; do
         systemctl stop "$unit.timer" "$unit.service" >/dev/null 2>&1 || true
         systemctl disable "$unit.timer" "$unit.service" >/dev/null 2>&1 || true
         rm -f "/etc/systemd/system/$unit.service" "/etc/systemd/system/$unit.timer"
