@@ -46,6 +46,8 @@ def collect(device, images=()):
         code, output, _ = run(['docker','ps','--format','{{.Names}}'])
         present = bool(set(output.splitlines()) & {'isle-vlan-agent','isle-remote-agent'})
         record('agent.running', present, 'docker ps:agent name', code != 0)
+    qemu = {'x86_64':'qemu-system-x86_64','aarch64':'qemu-system-aarch64'}.get(platform.machine())
+    record('runtime.qemu.installed', bool(qemu and shutil.which(qemu)), 'local QEMU executable for '+platform.machine())
     # A real running KVM guest is direct evidence that VM hosting is in use.
     if shutil.which('virsh'):
         code, guests, _ = run(['virsh','-c','qemu:///system','list','--name','--state-running'])

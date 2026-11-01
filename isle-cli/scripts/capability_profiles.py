@@ -3,7 +3,7 @@ import json, platform, shutil, subprocess, sys
 PROFILES = {
  'mesh-app': {'title':'Mesh hosting', 'package':'isle-capability-mesh', 'dependencies':'Docker Engine and Docker Compose', 'required':['runtime.docker.usable','runtime.compose.usable','agent.running']},
  'polari-instance': {'title':'Polari node hosting', 'package':'isle-capability-polari', 'dependencies':'Docker Engine and Docker Compose; app modules and images are separate', 'required':['runtime.docker.usable','runtime.compose.usable','agent.running']},
- 'hardware-vm': {'title':'KVM hardware hosting', 'package':'isle-capability-kvm', 'dependencies':'QEMU, libvirt and usable KVM; guest images and device passthrough are separate', 'required':['runtime.libvirt.usable','runtime.kvm.usable']},
+ 'hardware-vm': {'title':'KVM hardware hosting', 'package':'isle-capability-kvm', 'dependencies':'QEMU, libvirt and usable KVM; guest images and device passthrough are separate', 'required':['runtime.qemu.installed','runtime.libvirt.usable','runtime.kvm.usable']},
  'shell-app': {'title':'Shell launchers', 'package':'isle-capability-shell', 'dependencies':'Polari shared shell runtime; Isle access and certificate trust', 'required':['runtime.shell.installed','access.polari-frontend.https']},
 }
 def plan(profile, which=shutil.which, run=subprocess.run, arch=None):

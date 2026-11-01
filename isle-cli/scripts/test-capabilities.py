@@ -15,6 +15,11 @@ class Probe(unittest.TestCase):
             f=probe.collect('isle-core')['capability_evidence']['facts']
         self.assertTrue(f['hardware.openwrt.running']['value'])
         self.assertTrue(f['runtime.kvm.usable']['value'])
+    def test_qemu_is_checked_independently_of_libvirt(self):
+        with patch.object(probe,'run',return_value=(0,'','')),patch.object(probe.shutil,'which',side_effect=lambda name: None if name.startswith('qemu-') else '/bin/tool'):
+            f=probe.collect('fixture')['capability_evidence']['facts']
+        self.assertFalse(f['runtime.qemu.installed']['value'])
+        self.assertTrue(f['runtime.libvirt.usable']['value'])
     def test_access_requires_200(self):
         self.assertTrue(self.facts((0,'200',''))['access.whoami.https']['value'])
         self.assertFalse(self.facts((0,'404',''))['access.whoami.https']['value'])
