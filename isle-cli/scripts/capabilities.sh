@@ -1,6 +1,10 @@
 #!/bin/bash
 set -euo pipefail
 DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+if [[ "${1:-}" == build ]]; then
+    shift
+    exec python3 "$DIR/build-budget.py" "$@"
+fi
 if [[ "${1:-}" == profiles ]]; then
     [[ $# == 1 ]] || exit 2
     exec python3 "$DIR/capability_profiles.py"

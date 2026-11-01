@@ -35,6 +35,14 @@ def collect(device, images=()):
     except (OSError, ValueError, StopIteration):
         record('resources.memory_available_mib', None, '/proc/meminfo:MemAvailable', True)
     record('resources.root_disk_free_mib', shutil.disk_usage('/').free // (1024*1024), 'disk_usage:/')
+    record('resources.root_disk_total_mib', shutil.disk_usage('/').total // (1024*1024), 'disk_usage:/')
+    record('resources.logical_cpus', os.cpu_count(), 'os.cpu_count')
+    try:
+        with open('/proc/meminfo') as stream:
+            total = next(int(line.split()[1]) // 1024 for line in stream if line.startswith('MemTotal:'))
+        record('resources.memory_total_mib', total, '/proc/meminfo:MemTotal')
+    except (OSError, ValueError, StopIteration):
+        record('resources.memory_total_mib', None, '/proc/meminfo:MemTotal', True)
     if not shutil.which('docker'):
         record('runtime.docker.usable', False, 'command lookup:docker')
         record('runtime.compose.usable', False, 'command lookup:docker')
