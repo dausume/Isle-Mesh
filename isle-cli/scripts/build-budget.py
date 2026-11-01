@@ -115,8 +115,21 @@ def main():
         try:
             process = subprocess.Popen(cmd, env=env)
             low = 0
+            cgroup = None
+            outcome["peak_memory_bytes"] = 0
             while process.poll() is None:
                 time.sleep(2)
+                if cgroup is None:
+                    group = subprocess.run(['systemctl','--user','show',unit,'-p','ControlGroup','--value'],
+                                           capture_output=True,text=True).stdout.strip()
+                    if group:
+                        cgroup = Path('/sys/fs/cgroup') / group.lstrip('/')
+                if cgroup:
+                    try:
+                        outcome['peak_memory_bytes'] = max(outcome['peak_memory_bytes'],
+                                                           int((cgroup/'memory.peak').read_text()))
+                    except (OSError, ValueError):
+                        pass
                 r = resources()
                 low = low + 1 if r['available_mib'] < 768 or r['pressure_full_avg10'] >= 20 else 0
                 if low >= 3:
