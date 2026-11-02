@@ -5,7 +5,7 @@ ConditionPathExists=/etc/isle-mesh/agent/agent.mode
 
 [Service]
 Type=oneshot
-ExecCondition=/bin/sh -c 'test "$(cat /etc/isle-mesh/agent/agent.mode)" = remote'
+ExecCondition=/bin/sh -c 'case "$(cat /etc/isle-mesh/agent/agent.mode)" in core|remote) exit 0;; *) exit 1;; esac'
 ExecStart=/usr/bin/python3 /usr/share/isle-mesh/isle-cli/scripts/capabilities.py status --publish https://api.polari.isle
 Nice=15
 CPUQuota=20%

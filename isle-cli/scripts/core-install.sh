@@ -64,6 +64,7 @@ fi
 # Recover the installed core on subsequent boots, after Docker/libvirt are ready.
 systemctl daemon-reload || die "could not reload boot recovery unit"
 systemctl enable isle-mesh-boot.service || die "could not enable boot recovery"
+systemctl enable --now isle-resource-report.timer || warn "Periodic resource reporting needs a retry"
 
 # ---- 2. the isle CA, trusted locally ----
 step "2/7 isle CA"

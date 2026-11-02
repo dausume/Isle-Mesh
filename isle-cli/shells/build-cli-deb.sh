@@ -80,9 +80,11 @@ fi
 if [ "$(cat /etc/isle-mesh/agent/agent.mode 2>/dev/null)" = remote ]; then
     bash /usr/share/isle-mesh/isle-cli/scripts/watch.sh enable >/dev/null 2>&1 || true
     systemctl daemon-reload
-    systemctl enable --now isle-resource-report.timer
     echo "isle-watch enabled (member device: listens for the core's ISLE-ENDING)"
 fi
+case "$(cat /etc/isle-mesh/agent/agent.mode 2>/dev/null)" in
+    core|remote) systemctl daemon-reload; systemctl enable --now isle-resource-report.timer ;;
+esac
 echo "isle CLI installed. On a core: sudo isle core-install"
 echo "  (ends with the production-security walkthrough; any time:"
 echo "   isle security setup — passwords/domain/certs put in at deploy)"

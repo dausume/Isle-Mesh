@@ -1,5 +1,5 @@
 [Unit]
-Description=Refresh remote Isle capability and resource observations
+Description=Refresh Isle device capability and resource observations
 
 [Timer]
 OnBootSec=2min
