@@ -56,10 +56,13 @@ def collect(device, images=()):
         record('agent.running', present, 'docker ps:agent name', code != 0)
     qemu = {'x86_64':'qemu-system-x86_64','aarch64':'qemu-system-aarch64'}.get(platform.machine())
     record('runtime.qemu.installed', bool(qemu and shutil.which(qemu)), 'local QEMU executable for '+platform.machine())
+    vm_allocations = []
+    vm_status = 'libvirt not available'
     # A real running KVM guest is direct evidence that VM hosting is in use.
     if shutil.which('virsh'):
         code, guests, _ = run(['virsh','-c','qemu:///system','list','--name','--state-running'])
         record('runtime.libvirt.usable', code == 0, 'virsh system list', code != 0)
+        vm_status = 'observed (up to 32 running domains)' if code == 0 else 'libvirt not readable'
         kvm_running = False
         router_running = False
         if code == 0:
@@ -70,6 +73,10 @@ def collect(device, images=()):
                     import xml.etree.ElementTree as ET
                     try: is_kvm = ET.fromstring(xml).get('type') == 'kvm'
                     except ET.ParseError: is_kvm = False
+                    try:
+                        from resource_snapshot import vm_allocation
+                        vm_allocations.append(vm_allocation(guest, xml))
+                    except (ValueError, ET.ParseError): vm_status = 'some domain allocations not readable'
                     kvm_running = kvm_running or is_kvm
                     router_running = router_running or (is_kvm and guest == 'openwrt-isle-router')
         record('hardware.openwrt.running', router_running, 'virsh running domains and XML', code != 0)
@@ -77,6 +84,8 @@ def collect(device, images=()):
     else:
         for dep in ('runtime.libvirt.usable','runtime.kvm.usable','hardware.openwrt.running'):
             record(dep, False, 'command lookup:virsh')
+    from resource_snapshot import collect as collect_resources
+    record('resources.detail_json', json.dumps(collect_resources(run, vm_allocations, vm_status), separators=(',', ':')), 'host proc/sysfs, lsblk, running libvirt XML and Docker HostConfig')
     record('runtime.shell.installed', Path('/usr/bin/polari-app-shell').is_file(), 'local shell executable')
     for endpoint, url in [('whoami','https://whoami.isle/'),('polari','https://api.polari.isle/api/health'),('polari-frontend','https://polari.isle/')]:
         code, output, _ = run(['curl','--silent','--show-error','--max-time','6','--output','/dev/null','--write-out','%{http_code}',url])
