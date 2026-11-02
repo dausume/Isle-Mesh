@@ -32,6 +32,7 @@ DEVICE_NAME=""
 SELECT_ISLE=""
 FINGERPRINT=""
 FINISH=false
+WITH_SAMPLE=false
 
 # Color codes
 RED='\033[0;31m'
@@ -68,6 +69,7 @@ ${CYAN}OPTIONS:${NC}
   --device-name <name>     This device's memorable name on the Isle
   --isle <router-ip>       Select a discovered Isle without a selection prompt
   --fingerprint <sha256>   Expected Isle CA fingerprint (otherwise confirm it)
+  --with-sample           Deploy the optional sample Mesh App after joining (default: off)
   --finish                Retry DNS/certificate checks after an incomplete join
   --help, -h                Show this help message
 
@@ -120,6 +122,7 @@ parse_args() {
                     --fingerprint) FINGERPRINT="$2" ;;
                 esac
                 shift 2 ;;
+            --with-sample) WITH_SAMPLE=true; shift ;;
             --finish) FINISH=true; shift ;;
             --detect)
                 DETECT=true
@@ -579,6 +582,9 @@ finish_join() {
     systemctl daemon-reload
     systemctl enable --now isle-resource-report.timer || log_warning "Periodic resource reports need a retry: sudo systemctl enable --now isle-resource-report.timer"
     echo "App hosting capabilities can be enabled afterward in the Isle App."
+    if [[ "$WITH_SAMPLE" == true ]]; then
+        bash "$SCRIPT_DIR/sample.sh" mesh up || { log_warning "Joined successfully, but sample Mesh App failed; retry: sudo isle sample mesh up"; return 1; }
+    fi
 
 }
 
