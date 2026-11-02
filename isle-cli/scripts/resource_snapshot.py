@@ -81,7 +81,7 @@ def storage_inventory(tree):
 
 
 def collect(run, vms, vm_status):
-    detail={'schemaVersion':1,'cpus':[],'allocations':vms,'vmStatus':vm_status,
+    detail={'schemaVersion':1,'cpus':[],'allocations':list(vms),'vmStatus':vm_status,
             'allocationNote':'Affinity constrains placement; it does not establish exclusive ownership. Unpinned workloads share host CPUs.'}
     try:
         first=cpu_ticks();time.sleep(.15);second=cpu_ticks()
@@ -138,12 +138,12 @@ def container_usage(rows):
             else:app=''
             if not app:continue
             memory=int((path/'memory.current').read_text())/1048576
-            samples.append((path,read_cpu(path),{'app':app,'instance':row['Id'][:12],'version':row.get('Image',''),'ramMiB':round(memory,3),'source':'cgroup-v2 memory.current / cpu.stat; includes container cache'}))
+            samples.append((path,read_cpu(path),time.monotonic(),{'app':app,'instance':row['Id'][:12],'version':row.get('Image',''),'ramMiB':round(memory,3),'source':'cgroup-v2 memory.current / cpu.stat; includes container cache'}))
         except (OSError,ValueError,KeyError,StopIteration):continue
     start=time.monotonic()
     if samples:time.sleep(.15)
     result=[]
-    for path,previous,item in samples:
+    for path,previous,start,item in samples:
         try:
             item['cpus']=round(max(0,read_cpu(path)-previous)/1e6/(time.monotonic()-start),4)
             item['sampleSeconds']=round(time.monotonic()-start,3);result.append(item)
