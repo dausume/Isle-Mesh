@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 const fs = require('fs');
-const { execSync } = require('child_process');
+const { execSync, execFileSync } = require('child_process');
 const path = require('path');
 
 // Project root (parent of isle-cli)
@@ -325,9 +325,10 @@ if (def.deprecated) {
 if (def.docker) checkDockerGroupMembership();
 
 const scriptPath = path.join(scriptsDir, def.script);
-const args = [subcommand, ...extraArgs].filter(Boolean).join(' ');
+const args = [subcommand, ...extraArgs].filter(arg => arg !== undefined);
 try {
-  execSync(`bash ${scriptPath} ${args}`, { stdio: 'inherit', cwd: projectRoot });
+  const cwd = resolve(command) === 'capabilities' && subcommand === 'build' ? process.cwd() : projectRoot;
+  execFileSync('bash', [scriptPath, ...args], { stdio: 'inherit', cwd });
 } catch (error) {
   // The script already printed its own error; exit with its code, no Node stack.
   process.exit(error.status || 1);
