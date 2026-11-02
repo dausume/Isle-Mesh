@@ -144,6 +144,7 @@ print("%s-%d" % (e["name"], n))')
         # --everything`, per-app scale).
         NAME="${2:?usage: isle store uninstall <name> [--purge] [--yes]}"
         echo "$NAME" | grep -qE '^[a-z0-9][a-z0-9-]{0,63}$' || { echo "not an app name: $NAME"; exit 1; }
+        python3 "$SCRIPT_DIR/removal_guard.py" "$NAME" || exit 1
         PURGE=false; YES=false
         for a in "${@:3}"; do case "$a" in
             --purge) PURGE=true ;;

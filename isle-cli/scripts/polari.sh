@@ -252,6 +252,8 @@ PYRC
 undeploy(){
     local NAME="${1:?usage: isle polari instance undeploy <name>}"
     [ -d "$BASE/$NAME" ] || die "no such instance dir: $BASE/$NAME"
+    python3 "$SCRIPT_DIR/removal_guard.py" "$NAME" || return 1
+    python3 "$SCRIPT_DIR/removal_guard.py" "$NAME-api" || return 1
     (cd "$BASE/$NAME" && sudo docker compose -p "prf-$NAME" down) || warn "compose down had warnings"
     local AM=/usr/share/isle-mesh/isle-agent/scripts/agent-manager.sh
     sudo bash "$AM" unregister --name "$NAME" >/dev/null 2>&1

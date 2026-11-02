@@ -1,5 +1,6 @@
 """Small read-only resource inventory; no benchmarks, allocations or disk writes."""
 import json
+import hashlib
 import os
 from pathlib import Path
 import shutil
@@ -29,7 +30,7 @@ def vm_allocation(name, xml):
     vcpu = root.find('vcpu')
     affinity = [{'vcpu':p.get('vcpu'), 'cpus':cpu_set(p.get('cpuset'))}
                 for p in root.findall('./cputune/vcpupin')][:512]
-    return {'name':name, 'kind':'vm', 'vcpus':int(vcpu.get('current') or vcpu.text or 0) if vcpu is not None else 0,
+    return {'name':name, 'kind':'vm', 'version':'libvirt-config:'+hashlib.sha256(xml.encode()).hexdigest(), 'vcpus':int(vcpu.get('current') or vcpu.text or 0) if vcpu is not None else 0,
             'cpus':cpu_set(vcpu.get('cpuset')) if vcpu is not None else [], 'pins':affinity,
             'exclusive':False, 'scope':'running domain XML'}
 
@@ -106,10 +107,69 @@ def collect(run, vms, vm_status):
         code,out,_=run(['docker','inspect',*ids])
         try:
             if code!=0:raise ValueError('inspect failed')
-            for row in json.loads(out):
+            rows=json.loads(out)
+            detail['appUsage']=container_usage(rows)
+            for row in rows:
                 host=row.get('HostConfig',{});quota=host.get('NanoCpus',0)/1e9
                 if not quota and host.get('CpuQuota',0)>0 and host.get('CpuPeriod',0)>0:quota=host['CpuQuota']/host['CpuPeriod']
                 detail['allocations'].append({'name':row.get('Name','').lstrip('/'),'kind':'container','cpus':cpu_set(host.get('CpusetCpus')),
                     'quotaCpus':quota or None,'exclusive':False,'scope':'running container HostConfig'})
         except (ValueError,TypeError,AttributeError):detail['containerStatus']='not readable'
+    detail.setdefault('appUsage',[]).extend(vm_usage(run,vms))
     return detail
+
+
+def container_usage(rows):
+    """One bounded cgroup v2 sample, all containers in the same 150ms window."""
+    samples=[]
+    def read_cpu(path):
+        return int(dict(line.split() for line in (path/'cpu.stat').read_text().splitlines())['usage_usec'])
+    for row in rows[:64]:
+        try:
+            pid=int(row.get('State',{}).get('Pid',0))
+            if pid<=0:continue
+            relative=next(line[3:] for line in Path(f'/proc/{pid}/cgroup').read_text().splitlines() if line.startswith('0::'))
+            path=(Path('/sys/fs/cgroup')/relative.lstrip('/')).resolve()
+            if not path.is_relative_to('/sys/fs/cgroup'):continue
+            labels=row.get('Config',{}).get('Labels') or {};project=labels.get('com.docker.compose.project','');service=labels.get('com.docker.compose.service','')
+            if project=='polari-isle':app={'frontend':'polari','backend':'polari-api'}.get(service,'')
+            elif project=='isle-sample-app':app='sample'
+            elif project.startswith('isle-') and project not in ('isle-agent','isle-remote-agent'):app=project[5:]
+            else:app=''
+            if not app:continue
+            memory=int((path/'memory.current').read_text())/1048576
+            samples.append((path,read_cpu(path),{'app':app,'instance':row['Id'][:12],'version':row.get('Image',''),'ramMiB':round(memory,3),'source':'cgroup-v2 memory.current / cpu.stat; includes container cache'}))
+        except (OSError,ValueError,KeyError,StopIteration):continue
+    start=time.monotonic()
+    if samples:time.sleep(.15)
+    result=[]
+    for path,previous,item in samples:
+        try:
+            item['cpus']=round(max(0,read_cpu(path)-previous)/1e6/(time.monotonic()-start),4)
+            item['sampleSeconds']=round(time.monotonic()-start,3);result.append(item)
+        except (OSError,ValueError,KeyError):continue
+    return result
+
+
+def vm_usage(run,vms):
+    if not vms:return []
+    def read():
+        code,out,_=run(['virsh','-c','qemu:///system','domstats','--list-running','--cpu-total','--balloon'])
+        if code!=0:return {}
+        data={};current=None
+        for line in out.splitlines():
+            if line.startswith('Domain: '):
+                current=line[8:].strip().strip("'");data[current]={}
+            elif current and '=' in line:
+                key,value=line.strip().split('=',1)
+                try:data[current][key]=int(value)
+                except ValueError:pass
+        return data
+    first=read();start=time.monotonic();time.sleep(.15);second=read();elapsed=time.monotonic()-start;result=[]
+    for vm in vms[:32]:
+        name=vm['name'];a=first.get(name,{});b=second.get(name,{})
+        item={'app':'openwrt' if name=='openwrt-isle-router' else name,'version':vm.get('version','libvirt-config-unreported'),'source':'libvirt balloon.rss host process memory / cpu.time; not guest reserved RAM','sampleSeconds':round(elapsed,3)}
+        if 'balloon.rss' in b:item['ramMiB']=b['balloon.rss']/1024
+        if 'cpu.time' in a and 'cpu.time' in b:item['cpus']=round(max(0,b['cpu.time']-a['cpu.time'])/1e9/elapsed,4)
+        if 'ramMiB' in item or 'cpus' in item:result.append(item)
+    return result
