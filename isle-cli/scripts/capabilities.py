@@ -108,6 +108,10 @@ def collect(device, images=()):
             missing = 'No such image' in err or 'No such object' in err
             record('image.'+name+'.present', False, 'docker image inspect:'+digest, not missing)
     device_facts = {'machine_name':device}
+    try:
+        mode=Path('/etc/isle-mesh/agent/agent.mode').read_text().strip()
+        if mode in ('core','remote'):device_facts['agent_mode']=mode
+    except OSError:pass
     for evidence, field in [('agent.running','agent_present'),('hardware.openwrt.running','router_running')]:
         if facts.get(evidence, {}).get('status') == 'observed':
             device_facts[field] = facts[evidence]['value']
