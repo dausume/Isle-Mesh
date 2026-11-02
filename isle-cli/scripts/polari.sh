@@ -4,7 +4,7 @@
 # install of polari instances — the topology functionality works
 # the same on an isle/mesh).
 #
-#   isle polari instance deploy [--name <n>] [--modules <csv>]
+#   isle polari instance deploy [--role both|frontend|backend] [--name <n>] [--modules <csv>]
 #   isle polari instance undeploy <name>
 #   isle polari instances              what runs where (coherence)
 #
@@ -49,7 +49,7 @@ next_name(){
 }
 
 ensure_images(){
-    if ! docker image inspect prf-backend:staging >/dev/null 2>&1; then
+    if [[ "${ROLE:-both}" != frontend ]] && ! docker image inspect prf-backend:staging >/dev/null 2>&1; then
         step "pulling prf images from the mesh registry"
         [ "$(cat /etc/polari/install-mode 2>/dev/null)" != offline ] \
             || die "offline: prf-backend:staging is not supplied for this app variant; stage its image first"
@@ -58,7 +58,7 @@ ensure_images(){
         docker tag "$REGISTRY/prf-backend:staging" prf-backend:staging \
             || die "could not tag the supplied backend image"
     fi
-    if ! docker image inspect prf-frontend:staging >/dev/null 2>&1; then
+    if [[ "${ROLE:-both}" != backend ]] && ! docker image inspect prf-frontend:staging >/dev/null 2>&1; then
         [ "$(cat /etc/polari/install-mode 2>/dev/null)" != offline ] \
             || die "offline: prf-frontend:staging is not supplied for this app variant; stage its image first"
         docker pull "$REGISTRY/prf-frontend:staging" 2>/dev/null \
@@ -69,59 +69,9 @@ ensure_images(){
     ok "prf images present"
 }
 
-write_configs(){ # $1 name $2 modules
-    local NAME="$1" MODULES="$2" DIR="$BASE/$1"
-    sudo mkdir -p "$DIR"
-    sudo tee "$DIR/runtime-config.json" >/dev/null <<EOF
-{
-  "_comment": "$NAME: a polari instance deployed as a mesh-app (isle polari)",
-  "backend": {
-    "http":  { "protocol": "http",  "url": "api.$NAME.isle", "port": "80" },
-    "https": { "protocol": "https", "url": "api.$NAME.isle", "port": "443" },
-    "ws":    { "protocol": "wss",   "url": "api.$NAME.isle", "port": "443" },
-    "preferHttps": true
-  },
-  "frontend": {
-    "http":  { "protocol": "http",  "url": "$NAME.isle", "port": "80" },
-    "https": { "protocol": "https", "url": "$NAME.isle", "port": "443" }
-  }
-}
-EOF
-    sudo tee "$DIR/docker-compose.yml" >/dev/null <<EOF
-services:
-  backend:
-    image: prf-backend:staging
-    container_name: prf-$NAME-backend
-    restart: unless-stopped
-    networks: [isle-agent-net]
-    environment:
-      - WEBSOCKET_ENABLED=true
-      - WEBSOCKET_PORT=3001
-      - POLARI_MODULES=$MODULES
-      - POLARI_LAZY_BOOT=1
-      # Without this the sqlite files land in ./data -> /app/data, in the
-      # container's writable layer, and the volume below sits empty — so
-      # every recreate (including `isle polari module move`, which
-      # recreates both backends) threw the instance's data away.
-      - DATABASE_PATH=/data/polari.db
-    volumes:
-      - backend-data:/data
-    mem_limit: 2g
-  frontend:
-    image: prf-frontend:staging
-    container_name: prf-$NAME-frontend
-    restart: unless-stopped
-    networks: [isle-agent-net]
-    volumes:
-      - $DIR/runtime-config.json:/usr/share/nginx/html/assets/runtime-config.json:ro
-    mem_limit: 128m
-    depends_on: [backend]
-volumes:
-  backend-data:
-networks:
-  isle-agent-net:
-    external: true
-EOF
+write_configs(){
+    sudo python3 "$SCRIPT_DIR/polari-component-config.py" --name "$1" --modules "$2" \
+        --directory "$BASE/$1" --role "${ROLE:-both}" --backend-url "${BACKEND_URL:-}" --frontend-origin "${FRONTEND_ORIGIN:-https://polari.isle}"
 }
 
 source "$SCRIPT_DIR/agent-address.sh"
@@ -156,93 +106,80 @@ PYEOF
 }
 
 deploy(){
-    local NAME="" MODULES="islemesh"
+    local NAME="" MODULES="islemesh" ROLE=both BACKEND_URL="" FRONTEND_ORIGIN=https://polari.isle
     while [ $# -gt 0 ]; do case "$1" in
-        --name) NAME="$2"; shift 2 ;;
-        --modules) MODULES="$2"; shift 2 ;;
-        *) shift ;;
+        --name|--modules|--role|--backend-url|--frontend-origin)
+            [[ $# -ge 2 ]] || die "missing value for $1"
+            case "$1" in --name) NAME="$2";; --modules) MODULES="$2";; --role) ROLE="$2";; --backend-url) BACKEND_URL="$2";; --frontend-origin) FRONTEND_ORIGIN="$2";; esac; shift 2 ;;
+        *) die "unknown deploy option: $1" ;;
     esac; done
+    [[ "$ROLE" == both || "$ROLE" == frontend || "$ROLE" == backend ]] || die "--role must be both, frontend or backend"
+    [[ "$ROLE" != frontend || -n "$BACKEND_URL" ]] || die "frontend-only deployment requires --backend-url https://api.<name>.isle"
     require_member
-    if [ -z "$NAME" ]; then
-        NAME=$(next_name) || die "could not choose an unused device-based name; check the catalog/device name or supply --name"
-    fi
+    [[ -n "$NAME" ]] || NAME=$(next_name) || die "cannot choose an unused device-based name"
     echo "$NAME" | grep -qE '^[a-z0-9][a-z0-9-]{0,40}$' || die "bad instance name: $NAME"
-    [ -d "$BASE/$NAME" ] && warn "$NAME already has a config dir — redeploying it"
-
-    # Members must import their core-signed leaves before starting workloads.
-    # On the CA host this reuses valid leaves or issues missing ones locally.
-    for dom in "$NAME.isle" "api.$NAME.isle"; do
-        sudo bash "$SCRIPT_DIR/certs.sh" ensure "$dom" \
-            || die "$dom certificate not ready; instance configuration and containers have not been changed"
+    # Never silently change an existing composition and strand its other role.
+    [[ ! -d "$BASE/$NAME" ]] || die "$NAME already exists; use its existing compose configuration or choose another deployment name"
+    local -a DOMAINS=() SERVICES=()
+    if [[ "$ROLE" != backend ]]; then DOMAINS+=("$NAME.isle"); SERVICES+=(frontend); fi
+    if [[ "$ROLE" != frontend ]]; then DOMAINS+=("api.$NAME.isle"); SERVICES+=(backend); fi
+    # Validate before certificates, images or host writes.
+    python3 - "$SCRIPT_DIR" "$NAME" "$MODULES" "$ROLE" "$BASE/$NAME" "$BACKEND_URL" "$FRONTEND_ORIGIN" <<'VALIDATE' || die "invalid component configuration"
+import importlib.util,sys
+spec=importlib.util.spec_from_file_location('config',sys.argv[1]+'/polari-component-config.py');m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
+m.generate(*sys.argv[2:])
+VALIDATE
+    for dom in "${DOMAINS[@]}"; do
+        sudo bash "$SCRIPT_DIR/certs.sh" ensure "$dom" || die "$dom certificate not ready"
     done
-
-    step "1/5 images"
     ensure_images
-    step "2/5 config ($NAME, modules: $MODULES)"
-    write_configs "$NAME" "$MODULES"
-    ok "$BASE/$NAME"
-    step "3/5 containers"
+    write_configs "$NAME" "$MODULES" || die "configuration generation failed"
     (cd "$BASE/$NAME" && sudo docker compose -p "prf-$NAME" up -d) || die "compose up failed"
-    ok "prf-$NAME-backend + prf-$NAME-frontend up"
-    step "4/5 register $NAME.isle + api.$NAME.isle behind the agent"
-    local AM=/usr/share/isle-mesh/isle-agent/scripts/agent-manager.sh
-    sudo bash "$AM" register --name "$NAME" --domain "$NAME.isle" \
-        --container "prf-$NAME-frontend" --port 4200 --protocol http >/dev/null 2>&1 \
-        && ok "$NAME.isle" || die "$NAME.isle registration failed; containers may be running, but deployment is incomplete"
-    sudo bash "$AM" register --name "$NAME-api" --domain "api.$NAME.isle" \
-        --container "prf-$NAME-backend" --port 3000 --protocol http >/dev/null 2>&1 \
-        && ok "api.$NAME.isle" || die "api.$NAME.isle registration failed; containers may be running, but deployment is incomplete"
-    local IP; IP=$(agent_ip)
-    for dom in "$NAME.isle" "api.$NAME.isle"; do
-        sudo /usr/local/bin/isle dns register "$dom" "$IP" >/dev/null 2>&1 \
-            && ok "$dom -> $IP" \
-            || warn "$dom: router DNS not registrable here — the core's dns-reconcile maps it (~2min)"
+    local AM=/usr/share/isle-mesh/isle-agent/scripts/agent-manager.sh service app dom port IP
+    for service in "${SERVICES[@]}"; do
+        if [[ "$service" == frontend ]]; then app="$NAME"; dom="$NAME.isle"; port=4200
+        else app="$NAME-api"; dom="api.$NAME.isle"; port=3000; fi
+        sudo bash "$AM" register --name "$app" --domain "$dom" --container "prf-$NAME-$service" --port "$port" --protocol http || die "$app registration failed"
     done
-    # record the instance's MODULES in its registry entry (modes are
-    # schema-tolerant strings) — the store/coherence surface them
-    if [ -f /etc/isle-mesh/agent/registry.json ]; then
-        sudo python3 - "$NAME" "$MODULES" <<'PYMOD' 2>/dev/null && ok "modules recorded: $MODULES" || warn "could not record modules in the registry"
-import json, sys
-name, modules = sys.argv[1], sys.argv[2]
-path = "/etc/isle-mesh/agent/registry.json"
-reg = json.load(open(path))
-app = reg.get("apps", {}).get(name)
-if app is None:
-    raise SystemExit(1)
-modes = [m for m in (app.get("modes") or [])
-         if not str(m).startswith("modules:")]
-modes.append("modules:" + modules)
-app["modes"] = modes
-json.dump(reg, open(path, "w"), indent=2)
-PYMOD
-    fi
-    step "5/5 report + verify"
+    sudo python3 - "$NAME" "$MODULES" "$ROLE" <<'ROLES' || die "component role recording failed"
+import json,sys
+name,modules,role=sys.argv[1:];path='/etc/isle-mesh/agent/registry.json';reg=json.load(open(path))
+for component,key in [('frontend',name),('backend',name+'-api')]:
+    if role not in ('both',component):continue
+    app=reg['apps'][key]
+    modes=[m for m in app.get('modes',[]) if not str(m).startswith(('polari-role:','modules:'))]
+    app['modes']=modes+['polari-role:'+component,'polari-deployment:'+name]+(['modules:'+modules] if component=='backend' else [])
+json.dump(reg,open(path,'w'),indent=2)
+ROLES
+    IP=$(agent_ip)
+    for dom in "${DOMAINS[@]}"; do
+        sudo /usr/local/bin/isle dns register "$dom" "$IP" || warn "$dom awaits core DNS reconciliation"
+    done
     self_report
     verify_instance "$NAME" || return 1
-    echo
-    ok "polari instance '$NAME' deployed and verified from this device: https://$NAME.isle"
-    echo "   undeploy: isle polari instance undeploy $NAME"
+    ok "Polari $ROLE deployment '$NAME' verified. Isle minimum: one frontend and one backend across any devices."
 }
 
-# Verification is independently retryable: it never recreates containers or
-# rewrites configuration. Use normal DNS and certificate validation so a local
-# address override cannot hide incomplete naming/trust setup.
 verify_instance(){
-    local NAME="${1:?usage: isle polari instance verify <name>}"
-    echo "$NAME" | grep -qE '^[a-z0-9][a-z0-9-]{0,40}$' || die "bad instance name: $NAME"
-    local backend frontend i
+    local NAME="${1:?usage: isle polari instance verify <name>}" ROLE=both BACKEND_URL="" backend frontend i
+    echo "$NAME" | grep -qE '^[a-z0-9][a-z0-9-]{0,40}$' || die "bad instance name"
+    BACKEND_URL="https://api.$NAME.isle"
+    if [[ -f "$BASE/$NAME/deployment.json" ]]; then
+        ROLE=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["role"])' "$BASE/$NAME/deployment.json")
+        BACKEND_URL=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["backend_url"])' "$BASE/$NAME/deployment.json")
+    fi
     for i in $(seq 1 6); do
-        backend=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 6 \
-            "https://api.$NAME.isle/api/health" 2>/dev/null) || backend="transport/DNS/TLS failure"
-        frontend=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 6 \
-            "https://$NAME.isle/" 2>/dev/null) || frontend="transport/DNS/TLS failure"
-        if [ "$backend" = 200 ] && [ "$frontend" = 200 ]; then
-            ok "$NAME: frontend and backend answer through normal DNS with trusted HTTPS from this device"
+        backend=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 6 "$BACKEND_URL/api/health" 2>/dev/null) || backend=000
+        frontend=200
+        if [[ "$ROLE" != backend ]]; then frontend=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 6 "https://$NAME.isle/" 2>/dev/null) || frontend=000; fi
+        if [[ "$backend" == 200 && "$frontend" == 200 ]]; then
+            ok "$NAME: $ROLE endpoints answer with normal DNS and trusted HTTPS"
+            [[ "$ROLE" != frontend ]] || warn "Verify browser access and CORS from https://$NAME.isle at $BACKEND_URL; a host curl is not a browser connectivity check"
             return 0
         fi
-        [ "$i" = 6 ] || sleep 5
+        [[ "$i" == 6 ]] || sleep 5
     done
-    warn "$NAME verification incomplete: backend=$backend; frontend=$frontend. Containers/configuration retained. Check startup, DNS and certificate trust; retry: isle polari instance verify $NAME"
+    warn "$NAME verification incomplete: backend=$backend frontend=$frontend; configuration retained"
     return 1
 }
 
@@ -261,6 +198,7 @@ rebase(){
     echo "$NEWDOM" | grep -qE '^[a-z0-9][a-z0-9-]{0,40}\.isle$' || die "bad domain: $NEWDOM (want <name>.isle)"
     local DIR="$BASE/$NAME"
     [ -d "$DIR" ] || die "no such instance: $DIR"
+    [[ ! -f "$DIR/deployment.json" ]] || [[ "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["role"])' "$DIR/deployment.json")" == both ]] || die "split-role rebasing requires updating frontend backend URLs and CORS explicitly; not supported by this whole-stack command"
     require_member
     local OLDDOM
     OLDDOM=$(python3 -c "import json;print(json.load(open('$DIR/runtime-config.json'))['frontend']['https']['url'])" 2>/dev/null)
@@ -328,15 +266,34 @@ undeploy(){
 # + add to B's + recreate both backends + re-record. Data for a
 # stateful module stays in its origin instance's volume (module
 # LOADING relocates; data migration is a separate, declared step).
-_modules_of_compose(){ # $1 instance dir
-    grep -oE 'POLARI_MODULES=[^ ]*' "$1/docker-compose.yml" 2>/dev/null \
-        | head -1 | cut -d= -f2
+_modules_of_compose(){
+    python3 - "$1/docker-compose.yml" <<'MODULES'
+import json,re,sys
+text=open(sys.argv[1]).read()
+try:
+    data=json.loads(text);env=data['services']['backend']['environment']
+    print(env.get('POLARI_MODULES','') if isinstance(env,dict) else next((e.split('=',1)[1] for e in env if e.startswith('POLARI_MODULES=')),''))
+except json.JSONDecodeError:
+    match=re.search(r'POLARI_MODULES=([^\s]+)',text);print(match.group(1) if match else '')
+MODULES
 }
+
 _set_modules(){ # $1 dir  $2 csv  — rewrite compose + recreate backend
     local DIR="$1" CSV="$2" NAME
     NAME=$(basename "$DIR")
-    sudo sed -i "s|POLARI_MODULES=[^ ]*|POLARI_MODULES=$CSV|" \
-        "$DIR/docker-compose.yml"
+    sudo python3 - "$DIR/docker-compose.yml" "$CSV" <<'MODULES' || die "cannot update modules; backend required"
+import json,re,sys
+p=sys.argv[1];text=open(p).read();csv=sys.argv[2]
+try:
+    data=json.loads(text);env=data['services']['backend']['environment']
+    if isinstance(env,dict):env['POLARI_MODULES']=csv
+    else:data['services']['backend']['environment']=[e for e in env if not e.startswith('POLARI_MODULES=')]+['POLARI_MODULES='+csv]
+    text=json.dumps(data,indent=2)+'\n'
+except json.JSONDecodeError:
+    text,count=re.subn(r'POLARI_MODULES=[^\s]*',lambda m:'POLARI_MODULES='+csv,text)
+    if not count:raise ValueError('no backend module configuration')
+open(p,'w').write(text)
+MODULES
     (cd "$DIR" && sudo docker compose -p "prf-$NAME" up -d) >/dev/null 2>&1 \
         || warn "recreate of prf-$NAME had warnings"
     # re-record the modules note in the registry entry
@@ -345,7 +302,7 @@ import json, sys
 name, csv = sys.argv[1], sys.argv[2]
 path = "/etc/isle-mesh/agent/registry.json"
 reg = json.load(open(path))
-app = reg.get("apps", {}).get(name)
+app = reg.get("apps", {}).get(name + "-api") or reg.get("apps", {}).get(name)
 if app is None:
     raise SystemExit(0)
 modes = [m for m in (app.get("modes") or [])
@@ -568,7 +525,7 @@ case "${1:-help}" in
             verify) shift 2; verify_instance "$@" ;;
             rebase) shift 2; rebase "$@" ;;
             undeploy) shift 2; undeploy "$@" ;;
-            *) echo "usage: isle polari instance [deploy [--name n] [--modules csv]|verify <name>|rebase <n> --domain d|undeploy <name>]" ;;
+            *) echo "usage: isle polari instance [deploy [--name n] [--role both|frontend|backend] [--backend-url https://api.name.isle] [--frontend-origin https://name.isle] [--modules csv]|verify <name>|rebase <n> --domain d|undeploy <name>]" ;;
         esac ;;
     module)
         case "${2:-}" in

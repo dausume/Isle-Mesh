@@ -12,6 +12,11 @@ shift # Remove the sample name from arguments
 ACTION=${1:-help}
 
 case $SAMPLE_NAME in
+    mesh)
+        [[ "$ACTION" == up ]] || { echo "Usage: isle sample mesh up"; exit 2; }
+        # Explicit request; does not recreate the router, agent or membership.
+        exec bash "$SCRIPT_DIR/create.sh" --sample-only
+        ;;
     localhost-mdns)
         echo "⚠️  WARNING: 'isle app sample localhost-mdns' is deprecated"
         echo "   Use 'isle mdns sample' instead"
@@ -25,7 +30,8 @@ case $SAMPLE_NAME in
         bash "$MDNS_SAMPLE_SCRIPT" "$ACTION" "$@"
         ;;
     list)
-        echo "Available sample environments:"
+        echo "Available sample environments (opt-in):
+  mesh up - Deploy the sample Mesh App on this joined device"
         echo ""
         echo "  localhost-mdns - Hand-crafted localhost mDNS demo environment"
         echo "                   (backend, frontend, proxy with mDNS)"

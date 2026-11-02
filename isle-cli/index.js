@@ -47,7 +47,7 @@ const commands = {
   watch: { script: 'watch.sh', desc: 'Member-side ISLE-ENDING listener + core-health poll (unin-7)' },
 
   // Lifecycle
-  create:    { script: 'create.sh',    desc: 'Complete setup (agent + router + sample app)' },
+  create:    { script: 'create.sh',    desc: 'Complete setup (agent + router; --with-sample optional)' },
   destroy:   { script: 'destroy.sh',   desc: 'Complete teardown (apps + agent + router)' },
   recover:   { script: 'boot-bringup.sh', desc: 'Idempotent full-isle bring-up (also run at boot)', aliases: ['boot'] },
   join:      { script: 'join.sh',      desc: 'Join an existing isle from a remote machine' },
@@ -228,7 +228,7 @@ Isle commands are organized into six modules (run \x1b[36misle <module> help\x1b
 ║                    GLOBAL COMMANDS                            ║
 ╚═══════════════════════════════════════════════════════════════╝
 
-  isle create             Complete setup (agent + router + sample app)
+  isle create             Complete setup (agent + router; --with-sample optional)
   isle destroy            Complete teardown (apps + agent + router)
   isle recover            Idempotent full-isle bring-up (also run at boot)
   isle join               Join an existing isle from a remote machine
@@ -272,7 +272,7 @@ For detailed command information:
 1. Complete setup with one command (recommended for first-time users):
    \x1b[33misle create\x1b[0m
 
-   This sets up agent, router, and a sample app to demonstrate Isle Mesh.
+   This sets up agent and router. Add --with-sample to deploy a sample Mesh App.
 
 2. Or set up components individually:
 

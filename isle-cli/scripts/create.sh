@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Isle Create Command
-# One-command setup: Creates agent, router, and sample app
+# One-command setup: Creates agent and router; sample Mesh App is opt-in
 
 set -e
 
@@ -11,9 +11,6 @@ CLI_DIR="$(dirname "$SCRIPT_DIR")"
 PROJECT_ROOT="$(dirname "$CLI_DIR")"
 
 source "$SCRIPT_DIR/offline-runtime.sh"
-if isle_offline; then
-    isle_offline_preflight || exit 1
-fi
 
 # Color codes for output
 RED='\033[0;31m'
@@ -25,6 +22,7 @@ BOLD='\033[1m'
 NC='\033[0m' # No Color
 
 # Configuration
+WITH_SAMPLE=false
 SAMPLE_APP_NAME="sample"
 SAMPLE_DOMAIN="sample.local"  # Using .local for mDNS; nginx will auto-add .isle variant
 SAMPLE_APP_DIR="/tmp/isle-sample-app"
@@ -51,7 +49,7 @@ show_help() {
     echo -e "  ${GREEN}1.${NC} Start the Isle Agent (unified nginx proxy)"
     echo -e "  ${GREEN}2.${NC} Install mDNS system (service discovery infrastructure)"
     echo -e "  ${GREEN}3.${NC} Initialize and start the OpenWRT Router"
-    echo -e "  ${GREEN}4.${NC} Deploy a sample Python app at ${CYAN}${SAMPLE_DOMAIN}${NC}"
+    echo -e "  ${GREEN}4.${NC} Optionally deploy a sample Mesh App (--with-sample) at ${CYAN}${SAMPLE_DOMAIN}${NC}"
     echo -e "      (also accessible via ${CYAN}sample.isle${NC} after join protocol)"
     echo -e ""
     echo -e "The sample app demonstrates how Isle Mesh dual-domain support works"
@@ -875,23 +873,14 @@ show_completion() {
     echo -e "  ✓ Isle Agent (unified proxy)"
     echo -e "  ✓ mDNS System (service discovery)"
     echo -e "  ✓ Isle Router (OpenWRT VM)"
-    echo -e "  ✓ Sample Application"
-    echo ""
-    echo -e "${CYAN}Access Your Sample App:${NC}"
-    echo -e "  ${BOLD}https://${SAMPLE_DOMAIN}${NC} (mDNS, HTTPS)"
-    echo -e "  ${BOLD}https://sample.isle${NC} (after join protocol completes)"
-    echo ""
-    echo -e "${CYAN}View Status:${NC}"
-    echo -e "  isle agent status        View agent and registered apps"
-    echo -e "  isle router status       View router and network info"
-    echo ""
-    echo -e "${CYAN}Next Steps:${NC}"
-    echo -e "  1. Visit ${BOLD}https://${SAMPLE_DOMAIN}${NC} for detailed instructions"
-    echo -e "  2. When ready, remove the sample app and deploy your own"
-    echo -e "  3. Run ${BOLD}isle help${NC} to see all available commands"
-    echo ""
-    echo -e "${YELLOW}Note:${NC} The sample app code is at: ${SAMPLE_APP_DIR}"
-    echo ""
+    if [[ "$WITH_SAMPLE" == true ]]; then
+        echo "  ✓ Sample Mesh App: https://sample.isle"
+        echo "  Sample source: $SAMPLE_APP_DIR"
+    else
+        echo "  Sample Mesh App not requested. Install later: isle sample mesh up"
+    fi
+    echo "View status: isle agent status / isle router status"
+
 }
 
 # Main execution
@@ -916,6 +905,20 @@ setup_discovery() {
 }
 
 main() {
+    local sample_choice="" explicit_sample=false
+    for arg in "$@"; do
+        case "$arg" in
+            --with-sample) WITH_SAMPLE=true; explicit_sample=true ;;
+            --without-sample) WITH_SAMPLE=false; explicit_sample=true ;;
+            --sample-only) setup_sample_app; return $? ;;
+            help|--help|-h) ;;
+            *) log_error "Unknown option: $arg"; return 2 ;;
+        esac
+    done
+    if [[ "$explicit_sample" == false && -t 0 && "${1:-}" != *help && "${1:-}" != -h ]]; then
+        read -r -p "Deploy a sample Mesh App for hosting tests? [y/N]: " sample_choice
+        if [[ "$sample_choice" =~ ^[Yy]([Ee][Ss])?$ ]]; then WITH_SAMPLE=true; fi
+    fi
     case "${1:-}" in
         help|--help|-h)
             show_help
@@ -928,6 +931,7 @@ main() {
             echo -e "${BOLD}╚═══════════════════════════════════════════════════════════════╝${NC}"
             echo ""
 
+            if isle_offline; then isle_offline_preflight || return 1; fi
             check_prerequisites
             ensure_isle_dns
             setup_mdns_system
@@ -943,11 +947,11 @@ main() {
             fi
             add_connected_cables
             setup_agent
-            setup_sample_app
+            if [[ "$WITH_SAMPLE" == true ]]; then setup_sample_app; fi
             setup_discovery
             show_completion
             ;;
     esac
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then main "$@"; fi

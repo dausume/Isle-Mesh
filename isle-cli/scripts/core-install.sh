@@ -31,7 +31,9 @@ die(){ echo -e "${R}[FAIL]${N} $*"; exit 1; }
 CA=/etc/isle-mesh/ca/isle-root.crt
 MODULES="islemesh,polariapps"
 SKIP_SECURITY=0
+SAMPLE_OPTION=""
 while [ $# -gt 0 ]; do case "$1" in
+    --with-sample|--without-sample) SAMPLE_OPTION="$1"; shift ;;
     --modules) MODULES="$2"; shift 2 ;;
     --skip-security) SKIP_SECURITY=1; shift ;;
     *) shift ;;
@@ -53,9 +55,10 @@ fi
 step "1/7 isle networking (router + agent)"
 if docker ps --format '{{.Names}}' | grep -q '^isle-vlan-agent$'; then
     ok "isle agent already running"
+    if [[ "$SAMPLE_OPTION" == --with-sample ]]; then isle sample mesh up || die "sample Mesh App setup failed"; fi
 else
     warn "no agent — running isle create (router VM + agent + bridges)"
-    isle create || die "isle create failed"
+    isle create ${SAMPLE_OPTION:+"$SAMPLE_OPTION"} || die "isle create failed"
 fi
 
 # Recover the installed core on subsequent boots, after Docker/libvirt are ready.
