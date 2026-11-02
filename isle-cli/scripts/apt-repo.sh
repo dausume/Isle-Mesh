@@ -278,6 +278,7 @@ EOF
         echo "127.0.0.1 apt.isle" | sudo tee -a /etc/hosts >/dev/null
         ok "core hairpin: pinned apt.isle -> 127.0.0.1 in /etc/hosts"
     fi
+    python3 "$SCRIPT_DIR/release_notice.py" "$REPO" || warn "Package publication succeeded, but remote update notification could not be published. Retry apt-repo publish after the backend is ready."
     echo "clients: isle apt-repo enable && sudo apt update"
     echo "humans:  https://apt.isle/  (debs + CA + join instructions)"
 }
