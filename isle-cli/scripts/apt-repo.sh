@@ -135,7 +135,7 @@ PYPACKAGES
     # leaves the committed generation intact for clients already using it.
     local METADATA
     METADATA=$(mktemp -d) || die "cannot create private metadata stage"
-    if ! ( cd "$REPO" && sudo sh -c 'dpkg-scanpackages --multiversion . /dev/null > "$1/Packages" 2>/dev/null' sh "$METADATA" \
+    if ! ( cd "$REPO" && sudo nice -n 15 ionice -c 3 sh -c 'dpkg-scanpackages --multiversion . /dev/null > "$1/Packages" 2>/dev/null' sh "$METADATA" \
       && sudo gzip -kf "$METADATA/Packages" \
       && cd "$METADATA" \
       && sudo sh -c 'apt-ftparchive -o APT::FTPArchive::Release::Origin=isle-mesh \
