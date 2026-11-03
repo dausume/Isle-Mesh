@@ -42,6 +42,9 @@ for d in isle-cli isle-agent mdns mesh-app-scaffolding openwrt-router polari-isl
         -cf - "$d" | tar -C "$STAGE/$SHARE" -xf -
 done
 
+mkdir -p "$STAGE/usr/share/polkit-1/actions"
+install -m 0644 "$REPO/isle-cli/polkit/org.islemesh.keycloak.policy" "$STAGE/usr/share/polkit-1/actions/"
+
 mkdir -p "$STAGE/usr/lib/systemd/system"
 install -m 0644 "$REPO/isle-mesh-boot.service" "$STAGE/usr/lib/systemd/system/isle-mesh-boot.service"
 install -m 0644 "$REPO/isle-cert-authority.service" "$STAGE/usr/lib/systemd/system/"

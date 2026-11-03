@@ -254,3 +254,21 @@ own authentication. This does not automatically discover undeclared module depen
 Changes preserve the bind-mounted file inode and retain the first previous configuration
 in `runtime-config.json.before-security`. The Isle App Security tab displays status and
 commands; changing the shared deployment requires host administration, not a browser preference.
+
+The native Security tab additionally supports a local PolicyKit toggle. It calls
+only `/usr/share/isle-mesh/isle-cli/scripts/security-toggle.py` with a fixed
+`enable` or `disable` action and the shell's configured HTTPS frontend origin.
+The page cannot supply a command, config path, or remote device. The dedicated
+`org.islemesh.keycloak.toggle` action requires fresh administrator authentication
+from an active local session (`auth_admin`, not `auth_admin_keep`). Cancelling or
+refusing authentication leaves the setting unchanged. The native shell accepts
+these calls only from its configured frontend's main frame.
+
+The helper discovers one locally registered frontend config, refuses symlinks and
+hardlinks, locks and re-reads the file, and enforces requiredBy before changing it.
+User-owned core configuration is written after dropping root privileges to the
+requesting desktop user. System deployment configuration must be root-owned and
+not group/world writable. Enabling checks trusted HTTPS OIDC discovery and its
+issuer before saving; it does not deploy Keycloak. The frontend reloads only after
+successful readback. This toggle changes sign-in availability; it is deliberately
+separate from `POLARI_APP_PERMISSIONS` and backend enforcement policy.
