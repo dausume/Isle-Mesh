@@ -521,6 +521,7 @@ for a in d.get("assessments", []):
 }
 
 case "${1:-help}" in
+    security) shift; exec python3 "$SCRIPT_DIR/polari-security.py" "$@" ;;
     instance)
         case "${2:-}" in
             deploy) shift 2; deploy "$@" ;;
@@ -542,5 +543,5 @@ case "${1:-help}" in
             *) echo "usage: isle polari app [plan <app>|ensure <app> [--yes]]" ;;
         esac ;;
     instances) instances ;;
-    *) echo "usage: isle polari [instance deploy|instance verify <n>|instance rebase|instance undeploy <n>|module move <m> --from A --to B|instances]" ;;
+    *) echo "usage: isle polari [security status|enable|disable|require|release --config FILE [--feature NAME]|instance deploy|instance verify <n>|instance rebase|instance undeploy <n>|module move <m> --from A --to B|instances]" ;;
 esac

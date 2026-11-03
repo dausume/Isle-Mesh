@@ -221,3 +221,36 @@ For comprehensive documentation, see:
 - [QUICK-REFERENCE.md](QUICK-REFERENCE.md) - Command reference
 - [EXTENSION-GUIDE.md](EXTENSION-GUIDE.md) - Adding new features
 - [UNINSTALL-GUIDE.md](UNINSTALL-GUIDE.md) - Uninstallation guide
+
+### Optional Keycloak sign-in
+
+On the device hosting a Polari frontend, manage its deployment-owned setting:
+
+```
+sudo isle polari security disable --config ~/polari-isle/runtime-config.json
+sudo isle polari security enable --config ~/polari-isle/runtime-config.json
+isle polari security status --config ~/polari-isle/runtime-config.json
+```
+
+Reload the frontend after changing the setting. Disabling retains provider details,
+skips OIDC startup checks and hides sign-in controls. It does **not** disable backend
+access control or make protected operations available anonymously. Enabling requires
+an HTTPS authority and client ID; the Keycloak service must also be deployed and healthy.
+Existing configurations without `keycloak.enabled` retain their prior enabled behavior.
+New lean core configurations explicitly disable the absent provider.
+
+Apps/features that require sign-in must declare their dependency in deployment configuration:
+
+```
+sudo isle polari security require --feature private-files --config /path/to/runtime-config.json
+```
+
+This enables Keycloak and records the feature in `keycloak.requiredBy`. Disable is
+refused while any dependency remains. After removing the feature, use `release` with
+the same name. An inconsistent required-but-disabled config raises a critical service
+configuration warning in the frontend. These declarations are deployment metadata;
+module installers must register/release them, and backend routes must enforce their
+own authentication. This does not automatically discover undeclared module dependencies.
+Changes preserve the bind-mounted file inode and retain the first previous configuration
+in `runtime-config.json.before-security`. The Isle App Security tab displays status and
+commands; changing the shared deployment requires host administration, not a browser preference.
