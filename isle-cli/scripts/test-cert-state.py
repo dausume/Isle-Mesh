@@ -113,19 +113,19 @@ sync_certs
                 self.assertNotIn('all leaves current', result.stdout)
 
     def test_ensure_reuses_valid_identity_and_never_signs_on_member(self):
-        for scenario in ('valid', 'member_missing', 'core_missing', 'core_sign_failure'):
+        for scenario in ('valid', 'member_missing', 'member_paired', 'core_missing', 'core_sign_failure'):
             with self.subTest(scenario=scenario):
                 result = subprocess.run(['bash', '-c', '''source "$1"
 scenario="$2"; checks=0
-sudo(){ [[ "$scenario" == core* ]]; }
+sudo(){ if [[ "$*" == *" automatic "* ]]; then echo ENROLLING; [[ "$scenario" == member_paired ]]; else [[ "$scenario" == core* ]]; fi; }
 check_leaf(){ checks=$((checks+1)); [[ "$scenario" == valid || "$checks" -gt 1 ]]; }
 issue_leaf(){ echo ISSUING; [[ "$scenario" != core_sign_failure ]]; }
 ensure_leaf app.isle
 ''', 'test', str(self.definitions), scenario], capture_output=True, text=True)
-                self.assertEqual(result.returncode == 0, scenario in ('valid', 'core_missing'), result.stdout)
+                self.assertEqual(result.returncode == 0, scenario in ('valid', 'member_paired', 'core_missing'), result.stdout)
                 self.assertEqual('ISSUING' in result.stdout, scenario.startswith('core'))
-                if scenario == 'member_missing':
-                    self.assertIn('Create a CSR:', result.stdout)
+                if scenario.startswith('member_'):
+                    self.assertIn('ENROLLING', result.stdout)
 
 
 if __name__ == '__main__':
