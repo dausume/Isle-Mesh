@@ -182,4 +182,14 @@ def main():
         print('Capability report accepted for '+args.device)
     return 0
 
-if __name__=='__main__':sys.exit(main())
+if __name__ == '__main__':
+    try:
+        result = main()
+        sys.stdout.flush()
+        sys.exit(result)
+    except BrokenPipeError:
+        # A closing shell window cancels the reader of this read-only report.
+        # Redirect before interpreter shutdown, which would otherwise flush again.
+        with open(os.devnull, 'w') as sink:
+            os.dup2(sink.fileno(), sys.stdout.fileno())
+        sys.exit(0)
