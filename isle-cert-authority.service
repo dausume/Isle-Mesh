@@ -15,6 +15,11 @@ CPUQuota=20%
 Nice=15
 LimitCORE=0
 UMask=0077
+NoNewPrivileges=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/etc/isle-mesh/ca/enrollment
+PrivateTmp=true
 
 [Install]
 WantedBy=multi-user.target

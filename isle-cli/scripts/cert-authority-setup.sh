@@ -12,6 +12,7 @@ if [[ ${1:-} == serve ]]; then
     exec python3 "$SCRIPT_DIR/cert-authority.py" serve --bind "$GATEWAY"
 fi
 systemctl daemon-reload
+install -d -m 700 /etc/isle-mesh/ca/enrollment
 systemctl enable --now isle-cert-authority.service
 bash "$SCRIPT_DIR/certs.sh" ensure certs.isle
 bash "$SCRIPT_DIR/../../isle-agent/scripts/agent-manager.sh" register \

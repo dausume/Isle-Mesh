@@ -86,6 +86,9 @@ fi
 case "$(cat /etc/isle-mesh/agent/agent.mode 2>/dev/null)" in
     core|remote) systemctl daemon-reload; systemctl enable --now isle-resource-report.timer ;;
 esac
+if systemctl is-enabled --quiet isle-cert-authority.service; then
+    systemctl try-restart isle-cert-authority.service
+fi
 echo "isle CLI installed. On a core: sudo isle core-install"
 echo "  (ends with the production-security walkthrough; any time:"
 echo "   isle security setup — passwords/domain/certs put in at deploy)"
@@ -100,6 +103,7 @@ EOF
 cat > "$STAGE/DEBIAN/prerm" <<'EOF'
 #!/bin/sh
 if [ "$1" = remove ]; then
+    systemctl disable --now isle-cert-authority.service >/dev/null 2>&1 || true
     systemctl disable --now isle-resource-report.timer >/dev/null 2>&1 || true
     systemctl stop isle-resource-report.service >/dev/null 2>&1 || true
     SCRIPTS=/usr/share/isle-mesh/isle-cli/scripts
