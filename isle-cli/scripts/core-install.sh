@@ -176,6 +176,9 @@ else
 fi
 
 echo
+
+# Enable authenticated service enrollment on cores after networking is ready.
+sudo bash "$SCRIPT_DIR/cert-authority-setup.sh" || die "member certificate authority setup failed"
 echo -e "${G}════════ ISLE CORE READY — JOIN INFO for remotes ════════${N}"
 echo "CA fingerprint (verify on every joining device):"
 echo "  $FP"

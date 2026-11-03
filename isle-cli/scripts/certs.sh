@@ -125,8 +125,27 @@ cert_state() {
 }
 
 issue_leaf() {
+    if [ "$EUID" != 0 ]; then
+        sudo bash "${BASH_SOURCE[0]}" issue-local "$1"
+    else
+        issue_leaf_locked "$1"
+    fi
+}
+
+issue_leaf_locked() (
     local dom=$1
+    mkdir -p /etc/isle-mesh/ca/enrollment
+    chmod 700 /etc/isle-mesh/ca/enrollment
+    exec 9>>/etc/isle-mesh/ca/enrollment/authority.lock
+    flock -x 9
     require_signing
+    sudo python3 - "$dom" <<'PYCLAIM' || return 1
+import json,sys
+from pathlib import Path
+p=Path('/etc/isle-mesh/ca/enrollment/claims.json')
+owner=json.loads(p.read_text()).get(sys.argv[1]) if p.exists() else None
+if owner:sys.exit('Service name is reserved for member '+owner+'; choose another name on the core.')
+PYCLAIM
     # tmp is USER-owned (0700) so shell redirects work; sudo only
     # where the signing key is actually read or agent dirs written
     local tmp; tmp=$(mktemp -d); chmod 700 "$tmp"
@@ -148,7 +167,7 @@ issue_leaf() {
     sudo chmod 644 "$CRTD/$dom.crt"; sudo chmod 640 "$KEYD/$dom.key"
     rm -rf "$tmp"
     ok "issued $dom (explicit SAN, ${DAYS}d, chained to the isle intermediate)"
-}
+)
 
 reload_agent() {
     local running agent found=0 failed=0
@@ -199,15 +218,21 @@ ensure_leaf() {
         issue_leaf "$dom" || return 1
         check_leaf "$dom" || return 1
     else
-        fail "$dom has no usable service certificate on this member; hosting setup incomplete"
-        echo "Create a CSR: sudo isle certs request $dom --output <new-csr-file>"
-        echo "Have the core operator verify device/name ownership and sign it; import with isle certs install, then retry deployment."
-        return 1
+        sudo python3 "$(dirname "${BASH_SOURCE[0]}")/certs-enroll.py" automatic "$dom" || return 1
+        check_leaf "$dom" || return 1
     fi
 }
 
 case "${1:-status}" in
-    request|sign|install|check)
+    issue-local)
+        issue_leaf "${2:?service name required}" ;;
+    setup-authority)
+        sudo bash "$(dirname "${BASH_SOURCE[0]}")/cert-authority-setup.sh" ;;
+    authorize-member|revoke-member)
+        action=authorize; [ "$1" != revoke-member ] || action=revoke
+        shift
+        sudo python3 "$(dirname "${BASH_SOURCE[0]}")/cert-authority.py" "$action" "$@" ;;
+    request|sign|install|check|pair)
         # Explicit operator-mediated CSR exchange. The helper never copies
         # signing keys, changes trust or automatically grants a service name.
         python3 "$(dirname "${BASH_SOURCE[0]}")/certs-enroll.py" "$@" ;;

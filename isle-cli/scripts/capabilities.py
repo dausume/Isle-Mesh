@@ -163,13 +163,23 @@ def main():
     body=json.dumps(report,indent=2)
     if args.publish:
         # No insecure fallback, no guessed localhost route and no embedded credentials.
-        result=subprocess.run(['curl','--fail','--silent','--show-error','--max-time','12',
+        result=subprocess.run(['curl','--fail','--silent','--show-error','--connect-timeout','5','--max-time','12',
+            '--retry','2','--retry-delay','2','--retry-max-time','40','--retry-connrefused',
             '-H','Content-Type: application/json','--data-binary','@-',args.publish+'/api/islemesh/ingest/device'],input=body,text=True,capture_output=True)
         try: accepted=json.loads(result.stdout).get('ok') is True
         except (ValueError,AttributeError): accepted=False
         if result.returncode or not accepted:
-            print('Capability report not accepted; local observations follow. Check API access/authorization.',file=sys.stderr)
+            # Report transport/startup failure without filling the journal
+            # with the full resource snapshot every two minutes.
+            detail=result.stderr.strip() or result.stdout[:500] or 'empty API response'
+            print('Capability report not accepted: '+detail,file=sys.stderr)
+            if not args.json:
+                return 1
             print(body);return 1
-    print(body);return 0
+    if not args.publish or args.json:
+        print(body)
+    else:
+        print('Capability report accepted for '+args.device)
+    return 0
 
 if __name__=='__main__':sys.exit(main())

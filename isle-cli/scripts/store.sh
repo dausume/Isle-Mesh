@@ -99,14 +99,19 @@ for s in p["steps"]: print("  $ %s" % s)
             if [ "${N_INST:-0}" -gt 0 ]; then
                 echo -e "${Y}'$NAME' already runs on the isle:${N}"
                 echo "$RESP" | python3 -c 'import json,sys; [print("    %s on %s (%s)" % (i["app"], i["device"] or "?", i["domain"] or "-")) for i in json.load(sys.stdin)["entry"].get("instances",[])]'
+                DEVICE=$(python3 "$SCRIPT_DIR/names.py" current-device)
                 DUP_NAME=$(echo "$RESP" | python3 -c '
 import json, sys
 e = json.load(sys.stdin)["entry"]
-taken = {i["app"] for i in e.get("instances", [])}
-n = 2
-while "%s-%d" % (e["name"], n) in taken: n += 1
-print("%s-%d" % (e["name"], n))')
-                echo -e "    installing here creates a ${Y}DUPLICATE${N} instance: $DUP_NAME (${DUP_NAME}.isle)"
+local = sorted(i["app"] for i in e.get("instances", []) if i.get("device") == sys.argv[1])
+if local:
+    print(local[0])
+else:
+    taken = {i["app"] for i in e.get("instances", [])}
+    n = 2
+    while "%s-%d" % (e["name"], n) in taken: n += 1
+    print("%s-%d" % (e["name"], n))' "$DEVICE")
+                echo -e "    installing/retrying local instance: $DUP_NAME (${DUP_NAME}.isle)"
             fi
         elif [ "$KIND" = "polari-app" ]; then
             VER=$(dpkg-query -W -f '${Version}' "isle-app-$NAME" 2>/dev/null || true)

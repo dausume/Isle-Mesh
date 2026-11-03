@@ -31,7 +31,7 @@ const commands = {
   mdns:     { script: 'mdns.sh',     desc: 'mDNS infrastructure (.local domains)' },
   dns:      { script: 'dns.sh',      desc: 'Router DNS management (.isle domains)' },
   trust:    { script: 'trust.sh',    desc: 'CA trust install-step (status/install/cert)' },
-  certs:    { script: 'certs.sh',    desc: 'Service certificate checks, member CSR exchange and core issuance' },
+  certs:    { script: 'certs.sh',    desc: 'Service certificates, authenticated member enrollment and core issuance' },
   registry: { script: 'registry.sh', desc: 'Isle image registry setup and trusted access verification' },
   store:    { script: 'store.sh',    desc: 'The general isle app store (list/show/install/uninstall)' },
   apt:      { script: 'apt.sh', desc: 'Install packages from local Isle supply first (online fallback only)' },

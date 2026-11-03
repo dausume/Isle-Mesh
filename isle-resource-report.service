@@ -1,6 +1,6 @@
 [Unit]
 Description=Publish a dated Isle device capability and resource report
-After=network-online.target docker.service
+After=network-online.target docker.service isle-mesh-boot.service
 ConditionPathExists=/etc/isle-mesh/agent/agent.mode
 
 [Service]

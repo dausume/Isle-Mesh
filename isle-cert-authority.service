@@ -1,0 +1,20 @@
+[Unit]
+Description=Isle authenticated member service certificate authority
+After=docker.service network-online.target
+Requires=docker.service
+ConditionPathExists=/etc/isle-mesh/ca/signing/intermediate_ca_key
+
+[Service]
+Type=simple
+ExecStart=/bin/bash /usr/share/isle-mesh/isle-cli/scripts/cert-authority-setup.sh serve
+Restart=on-failure
+RestartSec=10
+MemoryMax=96M
+MemorySwapMax=0
+CPUQuota=20%
+Nice=15
+LimitCORE=0
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

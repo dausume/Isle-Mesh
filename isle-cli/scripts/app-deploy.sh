@@ -92,7 +92,7 @@ fi
 echo "deploying '$NAME' -> https://$DOMAIN (service $SERVICE:$PORT, ${#SERVICES[@]} service(s))"
 
 # Resolve the service identity before launching containers. Members use the
-# explicit CSR exchange; only the CA host can issue a new leaf locally.
+# authenticated enrollment; only the CA host can issue a leaf locally.
 if [[ "$DOMAIN" == *.isle ]]; then
     sudo bash "$SCRIPT_DIR/certs.sh" ensure "$DOMAIN" \
         || die "$DOMAIN certificate not ready; app containers have not been changed"
@@ -190,11 +190,11 @@ REG=/etc/isle-mesh/agent/registry.json
 if [ -f "$REG" ]; then
     # canonical device name (same normalization as the core pusher)
     # + device facts so coherence knows the agent state
-    HOSTN=$(hostname | sed "s/dustin-etts-mesh-core/isle-core/")
+    HOSTN=$(python3 "$SCRIPT_DIR/names.py" current-device)
     AGENTN=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -cE '^isle-(vlan|remote)-agent$' || true)
     printf '{"device":"%s","facts":{"machine_name":"%s","agent_present":%s}}' \
         "$HOSTN" "$HOSTN" "$([ "${AGENTN:-0}" -gt 0 ] && echo true || echo false)" \
-        | curl -skf --max-time 8 -X POST -H "Content-Type: application/json" \
+        | curl -sf --max-time 8 -X POST -H "Content-Type: application/json" \
             --data-binary @- https://api.polari.isle/api/islemesh/ingest/device >/dev/null 2>&1 || true
     RPT=$(mktemp)
     python3 - "$HOSTN" "$REG" > "$RPT" 2>/dev/null <<'PYEOF'
@@ -202,14 +202,25 @@ import json, sys
 host, reg = sys.argv[1], sys.argv[2]
 print(json.dumps({'device': host, 'registry': json.load(open(reg))}))
 PYEOF
-    if [ -s "$RPT" ] && { curl -skf --max-time 8 -X POST -H "Content-Type: application/json" \
-            --data-binary @"$RPT" https://api.polari.isle/api/islemesh/ingest/registry >/dev/null 2>&1 \
-        || curl -skf --max-time 8 --resolve api.polari.isle:443:127.0.0.1 -X POST \
-            -H "Content-Type: application/json" \
-            --data-binary @"$RPT" https://api.polari.isle/api/islemesh/ingest/registry >/dev/null 2>&1; }; then
+    if [ -s "$RPT" ] && curl -sf --max-time 8 -X POST -H "Content-Type: application/json" \
+            --data-binary @"$RPT" https://api.polari.isle/api/islemesh/ingest/registry >/dev/null 2>&1; then
         ok "instances reported to the isle topology"
     else
         warn "topology report skipped (api.polari.isle unreachable)"
     fi
     rm -f "$RPT"
 fi
+
+# Do not report installation success until the actual certified route works.
+# The registry/DNS relay may need a short interval after a remote registration.
+bash "$SCRIPT_DIR/certs.sh" reload || die "hosting agent reload failed"
+READY=0
+for attempt in {1..12}; do
+    if curl --fail --silent --show-error --connect-timeout 2 --max-time 4 "https://$DOMAIN/" -o /dev/null 2>/dev/null; then
+        READY=1; break
+    fi
+    sleep 2
+done
+[ "$READY" = 1 ] || die "installed files retained, but https://$DOMAIN is not healthy yet; retry this same instance after checking its route and service logs"
+python3 "$SCRIPT_DIR/capabilities.py" status --publish https://api.polari.isle || warn "app is reachable, but resource publication needs retry"
+ok "Deployment verified: $NAME on $(python3 "$SCRIPT_DIR/names.py" current-device), trusted HTTPS https://$DOMAIN"

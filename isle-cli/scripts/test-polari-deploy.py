@@ -32,7 +32,7 @@ curl(){
 sleep(){ :; }
 require_member(){ :; }
 ensure_images(){ :; }
-write_configs(){ :; }
+write_configs(){ mkdir -p "$BASE/$1"; }
 agent_ip(){ echo 10.10.0.147; }
 self_report(){ :; }
 BASE="$TEST_BASE"
@@ -43,7 +43,8 @@ class PolariDeployTest(unittest.TestCase):
     def run_case(self, case, action='deploy --name demo'):
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp)
-            (base / 'demo').mkdir()
+            if not action.startswith("deploy "):
+                (base / "demo").mkdir()
             calls = base / 'calls'
             result = subprocess.run(
                 ['bash', '-c', 'source "$1" help >/dev/null\n' + MOCK + '\n' + action,
@@ -78,14 +79,14 @@ class PolariDeployTest(unittest.TestCase):
                 result, calls = self.run_case(case)
                 self.assertNotEqual(result.returncode, 0, result.stdout)
                 self.assertIn('verification incomplete', result.stdout)
-                self.assertIn('instance verify demo', result.stdout)
+                self.assertIn('configuration retained', result.stdout)
                 self.assertNotIn('deployed and verified', result.stdout)
                 self.assertEqual(calls.count('curl '), 12)
 
     def test_success_requires_both_trusted_endpoints(self):
         result, calls = self.run_case('healthy')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn('deployed and verified from this device', result.stdout)
+        self.assertIn("Polari both deployment 'demo' verified", result.stdout)
         self.assertIn('https://demo.isle/', calls)
         self.assertIn('https://api.demo.isle/api/health', calls)
         self.assertNotIn('--resolve', calls)

@@ -32,6 +32,7 @@ DEVICE_NAME=""
 SELECT_ISLE=""
 FINGERPRINT=""
 FINISH=false
+ENROLLMENT_FILE=""
 WITH_SAMPLE=false
 
 # Color codes
@@ -70,6 +71,7 @@ ${CYAN}OPTIONS:${NC}
   --isle <router-ip>       Select a discovered Isle without a selection prompt
   --fingerprint <sha256>   Expected Isle CA fingerprint (otherwise confirm it)
   --with-sample           Deploy the optional sample Mesh App after joining (default: off)
+  --enrollment <file>     Core-issued member hosting credential (private, one-time pairing)
   --finish                Retry DNS/certificate checks after an incomplete join
   --help, -h                Show this help message
 
@@ -114,12 +116,13 @@ parse_args() {
                 TIMEOUT="$2"
                 shift 2
                 ;;
-            --device-name|--isle|--fingerprint)
+            --device-name|--isle|--fingerprint|--enrollment)
                 [[ $# -ge 2 && -n "$2" ]] || { log_error "$1 needs a value"; exit 1; }
                 case "$1" in
                     --device-name) DEVICE_NAME="$2" ;;
                     --isle) SELECT_ISLE="$2" ;;
                     --fingerprint) FINGERPRINT="$2" ;;
+                    --enrollment) ENROLLMENT_FILE="$2" ;;
                 esac
                 shift 2 ;;
             --with-sample) WITH_SAMPLE=true; shift ;;
@@ -577,6 +580,9 @@ finish_join() {
         log_error "Certificate installed, but trusted access to Polari failed. Retry: sudo isle join --finish"; return 1;
     }
     log_success "Certificate trust installed and Polari HTTPS verified"
+    if [[ -n "$ENROLLMENT_FILE" ]]; then
+        python3 "$SCRIPT_DIR/certs-enroll.py" pair "$ENROLLMENT_FILE" || return 1
+    fi
     python3 "$SCRIPT_DIR/capabilities.py" status --publish https://api.polari.isle >/dev/null ||
         log_warning "Joined, but capability reporting needs a retry: isle capabilities status --publish https://api.polari.isle"
     systemctl daemon-reload

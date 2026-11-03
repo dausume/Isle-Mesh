@@ -44,6 +44,7 @@ done
 
 mkdir -p "$STAGE/usr/lib/systemd/system"
 install -m 0644 "$REPO/isle-mesh-boot.service" "$STAGE/usr/lib/systemd/system/isle-mesh-boot.service"
+install -m 0644 "$REPO/isle-cert-authority.service" "$STAGE/usr/lib/systemd/system/"
 install -m 0644 "$REPO/isle-resource-report.service" "$REPO/isle-resource-report.timer" "$STAGE/usr/lib/systemd/system/"
 
 # ---- shell tools + icons (synced from polari-app-shell — see
@@ -135,7 +136,7 @@ if [ "$1" = purge ]; then
             docker run --rm -v "$v":/v:ro -v "$BK":/b alpine                 tar czf "/b/$v.tgz" -C /v . >/dev/null 2>&1                 && docker volume rm "$v" >/dev/null 2>&1                 && echo "isle-mesh-cli purge: volume $v backed up + removed"
         done
     fi
-    for unit in polari-isle-push isle-trust-update isle-host-agent isle-mesh-boot isle-watch isle-resource-report; do
+    for unit in polari-isle-push isle-trust-update isle-host-agent isle-mesh-boot isle-watch isle-resource-report isle-cert-authority; do
         systemctl stop "$unit.timer" "$unit.service" >/dev/null 2>&1 || true
         systemctl disable "$unit.timer" "$unit.service" >/dev/null 2>&1 || true
         rm -f "/etc/systemd/system/$unit.service" "/etc/systemd/system/$unit.timer"

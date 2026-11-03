@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
-"""Explicit member CSR exchange. No networking and no export of private keys.
-
-The core operator authorizes a service name by invoking sign with --domain
-after checking the requesting device and name ownership. This is not an
-automatic enrollment endpoint or a replacement for that authorization layer.
+"""Service identity lifecycle: paired HTTPS enrollment or explicit CSR exchange.
+Private service keys stay on their member; only the core holds signing keys.
 """
 import argparse
 import hashlib
@@ -14,6 +11,10 @@ import secrets
 import subprocess
 import sys
 import tempfile
+import json
+import ssl
+import urllib.request
+import urllib.error
 
 
 def openssl(*args):
@@ -45,6 +46,40 @@ class Enrollment:
         self.certs = self.state / 'agent/ssl/certs'
         self.root = self.state / 'ca/isle-root.crt'
         self.signing = self.state / 'ca/signing'
+
+    def automatic(self, domain):
+        """Use the member's paired credential over verified Isle HTTPS."""
+        domain = domain_name(domain)
+        credential = self.state / 'ca/member-enrollment.json'
+        if not credential.is_file():
+            raise ValueError('member hosting enrollment is missing; pair this device with the core before hosting apps')
+        if credential.stat().st_mode & 0o077:
+            raise ValueError('member enrollment credential must be readable only by root')
+        config = json.loads(credential.read_text())
+        if config.get('endpoint') != 'https://certs.isle/enroll':
+            raise ValueError('invalid member enrollment endpoint')
+        with tempfile.TemporaryDirectory() as temp:
+            csr, chain = Path(temp)/'request.pem', Path(temp)/'chain.pem'
+            self.request(domain, csr)
+            body = json.dumps({'device': config['device'], 'domain': domain,
+                               'csr': csr.read_text()}).encode()
+            request = urllib.request.Request(config['endpoint'], body, headers={
+                'Content-Type': 'application/json', 'Authorization': 'Bearer '+config['token']})
+            # No redirects: a bearer credential must never follow an unrelated URL.
+            class NoRedirect(urllib.request.HTTPRedirectHandler):
+                def redirect_request(self, *args, **kwargs): return None
+            opener = urllib.request.build_opener(NoRedirect(), urllib.request.HTTPSHandler(
+                context=ssl.create_default_context(cafile=str(self.root))))
+            try:
+                with opener.open(request, timeout=20) as reply:
+                    result = json.loads(reply.read(65537))
+            except urllib.error.URLError as exc:
+                raise ValueError('core enrollment unavailable or refused: '+str(exc)) from exc
+            if result.get('ok') is not True or not isinstance(result.get('certificate'), str):
+                raise ValueError('core did not return a service certificate')
+            chain.write_text(result['certificate'])
+            self.install(domain, chain)
+            self.check(domain)
 
     def request(self, domain, output):
         domain = domain_name(domain)
@@ -157,10 +192,26 @@ def main():
     install.add_argument('--certificate', required=True)
     check = commands.add_parser('check', help='verify the installed service chain and key without changing them')
     check.add_argument('domain')
+    automatic = commands.add_parser('automatic', help='paired member: enroll a service automatically over verified HTTPS')
+    automatic.add_argument('domain')
+    pair = commands.add_parser('pair', help='install a privately transferred core-issued member hosting credential')
+    pair.add_argument('credential')
     args = parser.parse_args()
     enrollment = Enrollment()
     try:
-        if args.action == 'request':
+        if args.action == 'pair':
+            from names import current_device
+            if os.geteuid() != 0: raise ValueError('pairing requires root')
+            config = json.loads(Path(args.credential).read_text())
+            if (config.get('device') != current_device() or config.get('endpoint') != 'https://certs.isle/enroll'
+                    or not re.fullmatch(r'[A-Za-z0-9_-]{64}', config.get('token', ''))):
+                raise ValueError('credential does not match this named member')
+            destination = enrollment.state / 'ca/member-enrollment.json'
+            if destination.exists() and json.loads(destination.read_text()) != config:
+                raise ValueError('existing member credential differs; revoke/re-pair explicitly')
+            if not destination.exists(): write_new(destination, json.dumps(config).encode(), 0o600)
+            print('Member hosting credential installed for', config['device'])
+        elif args.action == 'request':
             digest = enrollment.request(args.domain, args.output)
             print('Public CSR exported; private key retained on this member. CSR SHA256:', digest)
         elif args.action == 'sign':
@@ -170,6 +221,9 @@ def main():
             destination = enrollment.install(args.domain, args.certificate)
             print('Verified chain installed:', destination)
             print('Next: sudo isle certs reload; then verify trusted HTTPS from another device. Installation alone is not hosting proof.')
+        elif args.action == 'automatic':
+            enrollment.automatic(args.domain)
+            print('Service certificate automatically enrolled and verified for', args.domain)
         else:
             enrollment.check(args.domain)
             print('Installed service chain and private key verified for', args.domain)

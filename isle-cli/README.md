@@ -146,6 +146,23 @@ automatically publish images or choose a compatible app version.
 
 ### Member service certificates
 
+Normal app deployment uses authenticated automatic enrollment. On the core,
+`sudo isle certs setup-authority` enables the bounded signing service behind
+`https://certs.isle`. Pair a named member once with
+`sudo isle certs authorize-member <device> --output <private-file>` and transfer
+that file privately to the corresponding device. There, run
+`sudo isle certs pair <private-file>` (or pass `--enrollment <private-file>` to
+`isle join`). Delete the transfer copy after pairing. The credential is not a
+CA key; it is scoped to one member and must never enter a package or repository.
+
+Subsequent `isle app deploy` and Polari instance deployments generate a local
+service key, send only a CSR over verified HTTPS, and install the verified chain.
+The authority reserves each name to its authenticated member; another member
+cannot claim it. Core service names are reserved. Renewal/retry keeps the member
+key and ownership. `sudo isle certs revoke-member <device>` prevents further
+issuance; already issued leaves remain valid until expiry. Pairing is an explicit
+core authorization step, not an automatic grant to every device on the LAN.
+
 Members keep their service private keys locally. For an operator-mediated
 certificate exchange, use the existing Isle root trust and transfer the public
 CSR and chain over a verified channel. On the member:
