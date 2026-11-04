@@ -12,6 +12,7 @@
 #       [--scope instance|app] [--app-name <PolariAppDefinition>] \
 #       [--start-route </route>] [--capabilities <csv>] \
 #       [--registration <polari-shell.json>] \
+#       [--app-kind hardware-app --realization bridge] \
 #       [--version 0.1.0] [--output dist]
 #
 # The config is the shell's registration document (ShellConfig).
@@ -22,12 +23,20 @@
 # carries scope/appName/startRoute/capabilities instead of
 # hardcoding scope=instance. No runtime, no jars — that all lives
 # in polari-shell-core.
+#
+# ucd-app: --app-kind/--realization stamp the manifest's app.kind /
+# app.realization into the app block of polari-shell.json (patched
+# into a --registration document too). kind hardware-app + realization
+# bridge makes the shell open its native Hardware Bridge panel, and
+# the deb then also Depends on avrdude (the flash tool) and a JRE (the
+# generated bridge jar runs as a child process). (--kind stays the
+# package prefix polari|isle.)
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SELF_DIR="$(cd "$(dirname "$0")" && pwd)"  # assets beside the script (both layouts)
 NAME=""; TITLE=""; URL=""; KIND="isle"; INSTANCE=""; CA=""; ICON=""
 SCOPE="instance"; APP_NAME=""; START_ROUTE=""; CAPABILITIES=""
-REGISTRATION=""
+REGISTRATION=""; APP_KIND=""; REALIZATION=""
 VERSION=0.1.0; OUTPUT="$ROOT/dist"
 while [ $# -gt 0 ]; do case "$1" in
     --name) NAME="$2"; shift 2 ;;
@@ -42,9 +51,11 @@ while [ $# -gt 0 ]; do case "$1" in
     --start-route) START_ROUTE="$2"; shift 2 ;;
     --capabilities) CAPABILITIES="$2"; shift 2 ;;
     --registration) REGISTRATION="$2"; shift 2 ;;
+    --app-kind) APP_KIND="$2"; shift 2 ;;
+    --realization) REALIZATION="$2"; shift 2 ;;
     --version) VERSION="$2"; shift 2 ;;
     --output) OUTPUT="$2"; shift 2 ;;
-    -h|--help) sed -n '2,23p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,32p' "$0"; exit 0 ;;
     *) echo "unknown arg: $1" >&2; exit 1 ;;
 esac; done
 
@@ -100,13 +111,33 @@ mkdir -p "$OUTPUT"
 # path. Built with python so the multi-line PEM escapes correctly.
 if [ -n "$REGISTRATION" ]; then
     cp "$REGISTRATION" "$STAGE$SHARE/polari-shell.json"
+    if [ -n "$APP_KIND" ] || [ -n "$REALIZATION" ]; then
+        python3 - "$STAGE$SHARE/polari-shell.json" "$APP_KIND" "$REALIZATION" <<'PYEOF'
+import json, sys
+path, kind, real = sys.argv[1:4]
+doc = json.load(open(path))
+app = doc.setdefault('app', {})
+if kind: app['kind'] = kind
+if real: app['realization'] = real
+json.dump(doc, open(path, 'w'), indent=2)
+PYEOF
+    fi
+    # a registration that already carries the pair counts too
+    eval "$(python3 - "$STAGE$SHARE/polari-shell.json" <<'PYEOF'
+import json, shlex, sys
+app = json.load(open(sys.argv[1])).get('app') or {}
+print('APP_KIND=%s; REALIZATION=%s' % (shlex.quote(app.get('kind') or ''), shlex.quote(app.get('realization') or '')))
+PYEOF
+)"
 else
 python3 - "$NAME" "$TITLE" "$URL" "$INSTANCE" "$KIND" "${CA:-}" \
     "$SCOPE" "$APP_NAME" "$START_ROUTE" "$CAPABILITIES" \
+    "$APP_KIND" "$REALIZATION" \
     > "$STAGE$SHARE/polari-shell.json" <<'PYEOF'
 import json, sys
 (name, title, url, instance, kind, ca,
- scope, app_name, start_route, capabilities) = sys.argv[1:11]
+ scope, app_name, start_route, capabilities,
+ app_kind, realization) = sys.argv[1:13]
 ca_pem = []
 if ca:
     try:
@@ -121,7 +152,8 @@ doc = {
             "brandColor": "", "icon": "",
             "capabilities": [c.strip()
                              for c in capabilities.split(',')
-                             if c.strip()]},
+                             if c.strip()],
+            "kind": app_kind, "realization": realization},
     "instances": [{
         "id": instance,
         "displayName": title,
@@ -171,6 +203,12 @@ StartupWMClass=$PKG
 EOF
 
 # ---- control: Depends on the shared runtime ----
+DEPENDS="polari-shell-core"
+EXTRA_DESC=""
+if [ "$APP_KIND" = "hardware-app" ] && [ "$REALIZATION" = "bridge" ]; then
+    DEPENDS="polari-shell-core, avrdude, default-jre-headless"
+    EXTRA_DESC=$'\n Hardware Bridge App: flashes a board with avrdude and\n runs the generated Java bridge (needs a JRE).'
+fi
 INSTALLED_KB=$(du -sk "$STAGE$SHARE" | cut -f1)
 cat > "$STAGE/DEBIAN/control" <<EOF
 Package: $PKG
@@ -178,13 +216,13 @@ Version: $VERSION
 Section: web
 Priority: optional
 Architecture: all
-Depends: polari-shell-core
+Depends: $DEPENDS
 Installed-Size: $INSTALLED_KB
 Maintainer: Polari <polari@localhost>
 Description: $TITLE — Polari/Isle app launcher
  A thin launcher for the "$TITLE" app. Carries only its config and
  icon; the JavaFX/JCEF runtime is shared via polari-shell-core.
- Opens $URL in its own window, feeling like a native app.
+ Opens $URL in its own window, feeling like a native app.$EXTRA_DESC
 EOF
 
 DEB="$OUTPUT/${PKG}_${VERSION}_all.deb"
