@@ -20,11 +20,19 @@ def file_digest(path):
 def validate(release):
     packages=release['packages']
     if len(packages)!=3 or {p['name'] for p in packages}!=PACKAGES: raise ValueError('Incomplete/unsupported release package set')
-    for p in packages:
+    bundles=release.get('bundles',{})
+    if not isinstance(bundles,dict) or set(bundles)-{'polari-complete','polari-complete-offline'}:raise ValueError('Unsupported package bundle')
+    for name,p in bundles.items():
+        if p.get('name')!=name:raise ValueError('Bundle identity mismatch')
+    for p in packages+list(bundles.values()):
         if not re.fullmatch(r'[0-9A-Za-z.+:~_-]{1,100}',p['version']): raise ValueError('Invalid version')
         if not re.fullmatch(r'[a-zA-Z0-9_.+~-]+\.deb',p['file']): raise ValueError('Invalid package filename')
         if not re.fullmatch('[a-f0-9]{64}',p['sha256']): raise ValueError('Missing SHA256')
-    digest=hashlib.sha256(json.dumps(packages,sort_keys=True).encode()).hexdigest()
+    from runtime_reconcile import targets
+    for mode in ('core','remote'):targets(release,mode)
+    extras={k:release[k] for k in ('bundles','runtimes') if k in release}
+    identity={'packages':packages,**extras} if extras else packages
+    digest=hashlib.sha256(json.dumps(identity,sort_keys=True).encode()).hexdigest()
     if release['id']!=digest: raise ValueError('Release ID does not match package manifest')
     return release
 
@@ -38,11 +46,19 @@ def installed(name):
     status,_,version=p.stdout.partition('\t')
     return version.strip() if p.returncode==0 and status=='install ok installed' else None
 
+def selected_packages(release):
+    providers=[p for p in ('polari-complete','polari-complete-offline') if installed(p)]
+    if len(providers)>1:raise ValueError('Multiple combined package providers; reconcile package state first')
+    if providers:
+        if providers[0] not in release.get('bundles',{}):raise ValueError('This release has no update for the installed combined package')
+        return [release['bundles'][providers[0]]]
+    return release['packages']
+
 def main(args):
     action=args[0] if args else 'plan'
     if action=='plan' and len(args)<=1:
         release=fetch()
-        print(json.dumps(dict(release=release,installed={p:installed(p) for p in sorted(PACKAGES)},command='sudo isle update apply '+release['id'])))
+        print(json.dumps(dict(release=release,selectedPackages=selected_packages(release),installed={p:installed(p) for p in sorted(PACKAGES|{'polari-complete','polari-complete-offline'})},command='sudo isle update apply '+release['id'])))
         return 0
     if action!='apply' or len(args)!=2 or not re.fullmatch('[a-f0-9]{64}',args[1]): raise ValueError('Usage: isle update plan | sudo isle update apply <release-id>')
     ident=os.environ.get('ISLE_OPERATION_ID','')
@@ -54,8 +70,9 @@ def main(args):
     if release['id']!=args[1]: raise ValueError('Release changed; review isle update plan again')
     if not saved.exists(): atomic(saved,release,0o600)
     stage(ident,'verifying-artifacts')
+    packages=selected_packages(release)
     paths=[]
-    for p in release['packages']:
+    for p in packages:
         current=installed(p['name'])
         if current and subprocess.run(['dpkg','--compare-versions',current,'gt',p['version']]).returncode==0:
             raise ValueError('Refusing implicit downgrade of '+p['name'])
@@ -72,9 +89,11 @@ def main(args):
     stage(ident,'installing-packages')
     result=subprocess.run(['apt-get','--no-remove','install','-y',*paths])
     if result.returncode: return result.returncode
-    if any(installed(p['name'])!=p['version'] for p in release['packages']): raise RuntimeError('Installed package verification failed')
+    if any(installed(p['name'])!=p['version'] for p in packages): raise RuntimeError('Installed package verification failed')
+    from runtime_reconcile import DESIRED
+    atomic(DESIRED,release,0o600)
     stage(ident,'reconciling')
-    return subprocess.run(['bash',str(Path(__file__).with_name('reconcile.sh'))]).returncode
+    return subprocess.run(['bash',str(Path(__file__).with_name('reconcile.sh')),'apply','device']).returncode
 if __name__=='__main__':
     try:sys.exit(main(sys.argv[1:]))
     except (OSError,ValueError,KeyError,TypeError,RuntimeError,subprocess.TimeoutExpired) as e:

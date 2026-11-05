@@ -18,7 +18,7 @@
 set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 API="${POLARI_ISLE_API:-https://api.polari.isle}"
-CURL="curl -sSf --max-time 8"
+CURL="curl --http1.1 -sSf --max-time 8"
 G="\033[0;32m"; Y="\033[1;33m"; C="\033[0;36m"; R="\033[0;31m"; N="\033[0m"
 
 api_get() { $CURL "$API$1" 2>/dev/null && return 0; $CURL --resolve api.polari.isle:443:127.0.0.1 "$API$1" 2>/dev/null; }
@@ -34,6 +34,10 @@ fi
 
 record_stage() { python3 "$SCRIPT_DIR/operations.py" stage "$ISLE_OPERATION_ID" "$1" || exit 1; }
 case "${1:-list}" in
+    require-protocol)
+        [[ "${2:-}" == 1 ]] || { echo 'Unsupported store protocol'; exit 1; }; exit 0 ;;
+    publish)
+        exec python3 "$SCRIPT_DIR/catalog_publish.py" "${2:?usage: isle store publish <release.json>}" ;;
     list)
         api_get /api/islemesh/catalog | python3 -c '
 import json, sys
@@ -89,7 +93,7 @@ for s in p["steps"]: print("  $ %s" % s)
             RESP=$(cat "$ISLE_OPERATION_DIR/catalog.json")
         else
             RESP=$(api_get "/api/islemesh/catalog/$NAME") || exit 1
-            printf '%s' "$RESP" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("ok") and isinstance(d["entry"]["install_plan"]["steps"],list)' || exit 1
+            printf '%s' "$RESP" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("ok") and d["entry"]["install_plan"].get("ok") is True and isinstance(d["entry"]["install_plan"]["steps"],list)' || exit 1
             (umask 077; printf '%s' "$RESP" > "$ISLE_OPERATION_DIR/catalog.json.tmp")
             mv "$ISLE_OPERATION_DIR/catalog.json.tmp" "$ISLE_OPERATION_DIR/catalog.json"
         fi
@@ -139,6 +143,9 @@ else:
         echo "$RESP" | python3 -c 'import json,sys; [print("  $ "+s) for s in json.load(sys.stdin)["entry"]["install_plan"]["steps"]]'
         if [ "${3:-}" != "--yes" ]; then
             read -r -p "Proceed? [y/N] " a; [ "$a" = y ] || [ "$a" = Y ] || { echo aborted; exit 130; }
+        fi
+        if python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1]))["entry"]["install_plan"].get("release") else 1)' "$ISLE_OPERATION_DIR/catalog.json"; then
+            exec python3 "$SCRIPT_DIR/catalog_artifacts.py" install "$ISLE_OPERATION_DIR/catalog.json" "${DUP_NAME:-$NAME}"
         fi
         record_stage executing
         echo "$RESP" | python3 -c 'import json,sys; [print(s) for s in json.load(sys.stdin)["entry"]["install_plan"]["steps"]]' | while IFS= read -r step; do

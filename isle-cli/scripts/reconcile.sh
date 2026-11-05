@@ -8,5 +8,7 @@ if [[ -z "${ISLE_OPERATION_ID:-}" ]]; then
 fi
 [[ $# == 2 && "$1" == apply && "$2" == device && "${ISLE_OPERATION_ID:-}" =~ ^[a-f0-9]{32}$ ]] || { echo "Invalid reconcile context"; exit 1; }
 [[ $EUID == 0 ]] || { echo 'Use sudo isle reconcile'; exit 1; }
+python3 "$DIR/host_network.py"
+python3 "$DIR/runtime_reconcile.py"
 bash "$DIR/hosts-reconcile.sh"
 python3 "$DIR/capabilities.py" status --publish https://api.polari.isle

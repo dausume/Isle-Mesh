@@ -1457,6 +1457,8 @@ cmd_help() {
 
 # Main command router
 case "$SUBCOMMAND" in
+    trust-key)
+        exec python3 "$(dirname "${BASH_SOURCE[0]}")/router_trust.py" "$@" ;;
     init)
         cmd_init "$@"
         ;;

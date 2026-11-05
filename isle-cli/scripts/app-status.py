@@ -32,11 +32,17 @@ def status(name):
         import re
         if not re.fullmatch(r'(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+isle',domain):
             out['error']='No valid registered Isle domain';return out
-        result=run(['curl','--http1.1','--fail','--silent','--show-error','--connect-timeout','2','--max-time','5','--output','/dev/null','https://'+domain+'/'])
+        health_path='/'
+        release_path=APPS/name/'release.json'
+        if release_path.is_file():
+            health_path=json.loads(release_path.read_text()).get('health',{}).get('path','/')
+            if not isinstance(health_path,str) or not health_path.startswith('/') or len(health_path)>512 or any(ord(c)<33 for c in health_path):raise ValueError('Invalid health path')
+        out['healthPath']=health_path
+        result=run(['curl' ,'--http1.1','--fail','--silent','--show-error','--connect-timeout','2','--max-time','5','--output','/dev/null','https://'+domain+health_path])
         out['routeReady']=result.returncode==0
         out['deployed']=out['routeReady']
         out['state']='ready' if out['deployed'] else 'runtime-started'
-        if result.returncode: out['error']='Trusted local HTTPS readiness probe failed (application root must return success)'
+        if result.returncode: out['error']='Trusted local HTTPS readiness probe failed'
     except (OSError,ValueError,RuntimeError,subprocess.TimeoutExpired) as exc:
         out['error']=str(exc)
     return out

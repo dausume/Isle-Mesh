@@ -27,8 +27,8 @@ def collect(device, images=()):
         facts[dep] = dict(status='error' if error else 'observed', source=source,
                           observed_at=datetime.now(timezone.utc).isoformat())
         if not error: facts[dep]['value'] = value
-    code,versions,_=run(['dpkg-query','-W','-f','${Package}=${Version}\n','isle-mesh-cli','isle-app-store','polari-shell-core','polari-complete-offline'])
-    packages=dict(line.split('=',1) for line in versions.splitlines() if '=' in line)
+    code,versions,_=run(['dpkg-query','-W','-f','${Package}\t${Status}\t${Version}\n','isle-mesh-cli','isle-app-store','polari-shell-core','polari-complete-offline','polari-complete'])
+    packages={parts[0]:parts[2] for line in versions.splitlines() if len(parts:=line.split('\t'))==3 and parts[1]=='install ok installed' and parts[2]}
     record('isle.package_versions',json.dumps(packages),'dpkg-query exact installed package versions')
     record('host.architecture', platform.machine(), 'platform.machine')
     try:

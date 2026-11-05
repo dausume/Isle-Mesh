@@ -5,11 +5,12 @@ from unittest.mock import patch
 import operations as op
 spec=importlib.util.spec_from_file_location('app_status',Path(__file__).with_name('app-status.py')); status=importlib.util.module_from_spec(spec);spec.loader.exec_module(status)
 import update
+import runtime_reconcile
 class Operations(unittest.TestCase):
  def setUp(self):
   self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup);self.root=Path(self.temp.name)
   self.stack=[]
-  for obj,key,value in [(op,'ROOT',self.root/'ops'),(op,'SCRIPTS',self.root),(update,'stage',lambda *args:0)]:
+  for obj,key,value in [(op,'ROOT',self.root/'ops'),(op,'SCRIPTS',self.root),(update,'stage',lambda *args:0),(runtime_reconcile,'DESIRED',self.root/'desired.json')]:
    p=patch.object(obj,key,value);p.start();self.addCleanup(p.stop)
   p=patch('os.geteuid',return_value=0);p.start();self.addCleanup(p.stop)
   (self.root/'store.sh').write_text('''#!/bin/bash
@@ -43,7 +44,7 @@ test "$(cat "$ISLE_OPERATION_DIR/catalog.json")" = pinned
   }.items():
    f=bin/cmd;f.write_text('#!/bin/sh\n'+body+'\n');f.chmod(0o755)
   for name in ['alpha','bravo']:
-   cat=self.root/(name+'.json');cat.write_text(json.dumps({'ok':True,'entry':{'kind':'mesh-app','name':name,'instances':[], 'install_plan':{'steps':['isle app deploy '+name+' --image example@sha256:'+'a'*64]}}}))
+   cat=self.root/(name+'.json');cat.write_text(json.dumps({'ok':True,'entry':{'kind':'mesh-app','name':name,'instances':[], 'install_plan':{'ok':True,'steps':['isle app deploy '+name+' --image example@sha256:'+'a'*64]}}}))
    env={'PATH':str(bin)+':'+os.environ['PATH'],'CATALOG':str(cat),'CALLS':str(self.root/'calls'),'MARKER':str(self.root/(name+'.once'))}
    with patch.dict(os.environ,env):
     self.assertNotEqual(op.execute(['store','install',name,'--yes']),0)
@@ -120,7 +121,7 @@ test "$(cat "$ISLE_OPERATION_DIR/catalog.json")" = pinned
    p=next(p for p in packages if argv[-2].endswith(p['file']))
    return p['name'] if argv[-1]=='Package' else p['version']
   def process(argv,**kw):executed.append(argv);return subprocess.CompletedProcess(argv,0,'','')
-  with patch.object(update,'OP_ROOT',self.root),patch.object(update,'fetch',return_value=release),patch.object(update,'command',side_effect=fake_command),patch.object(update,'installed',side_effect=[None]*3+['0.1.1']*3),patch.object(update.subprocess,'run',side_effect=process),patch.dict(os.environ,ISLE_OPERATION_ID=ident):
+  with patch.object(update,'OP_ROOT',self.root),patch.object(update,'fetch',return_value=release),patch.object(update,'command',side_effect=fake_command),patch.object(update,'selected_packages',return_value=packages),patch.object(update,'installed',side_effect=[None]*3+['0.1.1']*3),patch.object(update.subprocess,'run',side_effect=process),patch.dict(os.environ,ISLE_OPERATION_ID=ident):
    self.assertEqual(update.main(['apply',release['id']]),0)
   self.assertEqual(executed[0][:4],['apt-get','--no-remove','install','-y'])
   self.assertEqual(set(executed[0][4:]),{str(directory/p['file']) for p in packages})
@@ -131,6 +132,13 @@ test "$(cat "$ISLE_OPERATION_DIR/catalog.json")" = pinned
   with patch.object(update,'OP_ROOT',self.root),patch.object(update,'command',side_effect=corrupt),patch.object(update,'installed',return_value=None),patch.object(update.subprocess,'run',side_effect=process),patch.dict(os.environ,ISLE_OPERATION_ID=ident):
    with self.assertRaises(ValueError):update.main(['apply',release['id']])
   self.assertEqual(executed,[])
+ def test_preserve_combined_provider_update(self):
+  bundle={'name':'polari-complete-offline','version':'0.1.74'}
+  release={'packages':[{'name':'isle-mesh-cli'}],'bundles':{'polari-complete-offline':bundle}}
+  with patch.object(update,'installed',side_effect=lambda p:'0.1.73' if p=='polari-complete-offline' else None):
+   self.assertEqual(update.selected_packages(release),[bundle])
+   with self.assertRaises(ValueError):update.selected_packages({'packages':release['packages']})
+  with patch.object(update,'installed',return_value=None):self.assertEqual(update.selected_packages(release),release['packages'])
  def test_dpkg_empty_version_not_installed(self):
   with patch('subprocess.run',return_value=subprocess.CompletedProcess([],0,'unknown ok not-installed\t','')):
    self.assertIsNone(update.installed('isle-mesh-cli'))
