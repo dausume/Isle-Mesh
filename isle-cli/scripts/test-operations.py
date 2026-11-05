@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import importlib.util,json,os,subprocess,tempfile,unittest
+import importlib.util,json,os,subprocess,tempfile,unittest,sys
 from pathlib import Path
 from unittest.mock import patch
 import operations as op
@@ -63,6 +63,28 @@ test "$(cat "$ISLE_OPERATION_DIR/catalog.json")" = pinned
   with (op.ROOT/'app-alpha.lock').open('a+') as lock:
    fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
    with self.assertRaises(RuntimeError):op.execute(ident=d['id'])
+ def test_worker_keeps_lock_if_controller_dies(self):
+  import time,signal
+  helper=Path(op.__file__).read_text().replace("Path('/var/lib/isle-mesh/operations')",repr(op.ROOT)).replace('PosixPath(', 'Path(').replace('os.geteuid()!=0','False')
+  (self.root/'operations.py').write_text(helper)
+  (self.root/'store.sh').write_text('touch "$ISLE_OPERATION_DIR/started"; sleep 2')
+  proc=subprocess.Popen([sys.executable,str(self.root/'operations.py'),'run','store','install','alpha','--yes'],stdout=subprocess.DEVNULL,start_new_session=True)
+  try:
+   deadline=time.monotonic()+3
+   while time.monotonic()<deadline:
+    d=op.latest('alpha')
+    if d and (op.path_for(d['id'])/'started').exists():break
+    time.sleep(.02)
+   self.assertIsNotNone(d)
+   proc.kill();proc.wait()
+   self.assertEqual(op.read(d['id'])['state'],'running')
+   with self.assertRaises(RuntimeError):op.execute(ident=d['id'])
+   time.sleep(2.1)
+   self.assertEqual(op.read(d['id'])['state'],'interrupted')
+  finally:
+   try:os.killpg(proc.pid,signal.SIGKILL)
+   except ProcessLookupError:pass
+   proc.wait()
  def test_partial_directory_is_not_deployed(self):
   with patch.object(status,'APPS',self.root),patch.object(status,'latest',return_value=None):
    (self.root/'alpha').mkdir();(self.root/'alpha'/'docker-compose.yml').write_text('services: {}')

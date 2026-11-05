@@ -88,7 +88,7 @@ def execute(args=None, ident=None):
         env=dict(os.environ,ISLE_OPERATION_ID=ident,ISLE_OPERATION_DIR=str(p))
         code=1
         try:
-            code=subprocess.run(['bash',str(SCRIPTS/(args[0]+'.sh')),*args[1:]],env=env).returncode
+            code=subprocess.run(['bash',str(SCRIPTS/(args[0]+'.sh')),*args[1:]],env=env,pass_fds=(al.fileno(),lock.fileno())).returncode
         except (KeyboardInterrupt,OSError) as exc:
             print(str(exc),file=sys.stderr);code=130 if isinstance(exc,KeyboardInterrupt) else 1
         d=json.loads((p/'status.json').read_text())
