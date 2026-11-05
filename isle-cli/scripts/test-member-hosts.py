@@ -35,6 +35,23 @@ class MemberHosts(unittest.TestCase):
             self.assertNotIn('unexpected-curl',r.stderr)
             self.assertEqual(self.run_probe(BRIDGE_IP=ip).returncode,0)
             self.assertEqual(self.hosts.read_text(),contents)
+    def test_service_subdomains_and_legacy_aliases(self):
+        self.registry.write_text(json.dumps({'apps': {
+            'alpha': {'domain': 'alpha.isle', 'services': [
+                {'subdomain': 'api', 'container': 'alpha-api'},
+                {'subdomain': 'admin.v2', 'container': 'alpha-admin'},
+                {'subdomain': 'unused'},
+                {'subdomain': 'bad\n127.0.0.1 injected', 'container': 'bad'}]},
+            'bravo': {'domain': 'bravo.local', 'services': [
+                {'subdomain': 'api', 'container': 'bravo-api'}]}}}))
+        r=self.run_probe();self.assertEqual(r.returncode,0,r.stderr)
+        contents=self.hosts.read_text()
+        for name in ['alpha.isle','api.alpha.isle','admin.v2.alpha.isle','bravo.isle','api.bravo.isle']:
+            self.assertIn(name,contents)
+        for name in ['unused.alpha', 'injected', 'bravo.local']:
+            self.assertNotIn(name,contents)
+        self.set_apps('alpha.isle');self.assertEqual(self.run_probe().returncode,0)
+        self.assertNotIn('api.alpha.isle',self.hosts.read_text())
     def test_remove_and_rename_apps(self):
         self.assertEqual(self.run_probe().returncode,0)
         self.set_apps('new.isle');self.assertEqual(self.run_probe().returncode,0)

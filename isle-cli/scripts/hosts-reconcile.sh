@@ -41,10 +41,22 @@ for e in d.get("entries", []):
 try:
     with open('/etc/isle-mesh/agent/registry.json') as f:
         registry = json.load(f)
+    def add_domain(domain):
+        # Match the proxy's legacy .local -> .isle alias, without overriding
+        # mDNS names. Validate the complete name before writing hosts syntax.
+        if not isinstance(domain, str):
+            return
+        if domain.endswith('.local'):
+            domain = domain[:-6] + '.isle'
+        if len(domain) <= 253 and re.fullmatch(r'(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+isle', domain):
+            doms.add(domain.lower())
     for app in registry.get('apps', {}).values():
         dom = app.get('domain', '')
-        if isinstance(dom, str) and re.fullmatch(r'(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+isle', dom):
-            doms.add(dom.lower())
+        add_domain(dom)
+        for service in app.get('services', []):
+            sub = service.get('subdomain', '')
+            if service.get('container') and isinstance(dom, str) and isinstance(sub, str):
+                add_domain(sub + '.' + dom if sub and sub != 'null' else dom)
 except (OSError, ValueError, AttributeError):
     if os.environ["ROLE"] == "remote":
         raise SystemExit("Cannot read member registry; preserving existing hosts")
