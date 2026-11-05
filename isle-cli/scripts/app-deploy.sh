@@ -46,11 +46,7 @@ while [ $# -gt 0 ]; do case "$1" in
     --health-path) HEALTH_PATH="$2"; shift 2 ;;
     *) die "unknown arg: $1" ;;
 esac; done
-python3 - "$HEALTH_PATH" <<'PYHEALTH' || die "invalid health path"
-import sys
-p=sys.argv[1]
-sys.exit(0 if p.startswith('/') and len(p)<=512 and all(ord(c)>=33 for c in p) and '#' not in p else 1)
-PYHEALTH
+python3 "$SCRIPT_DIR/health_probe.py" "$HEALTH_PATH" || die "invalid health path"
 # --image <ref> synthesizes a one-service compose (the catalog's
 # bare-image path); --compose is the file path otherwise.
 if [ -z "$COMPOSE" ] && [ -n "$IMAGE" ]; then

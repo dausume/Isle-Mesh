@@ -73,6 +73,23 @@ class Artifacts(unittest.TestCase):
   with patch.object(artifacts,'CACHE',self.root/'cache'),patch.object(artifacts,'fetch',return_value=next((self.root/'repo/catalog/alpha/v1').glob('*.json'))),patch.object(artifacts.subprocess,'run') as run:
    with self.assertRaisesRegex(ValueError,'service/port'):artifacts.prepare(release,'alpha')
    run.assert_not_called()
+ def test_invalid_probe_manifest_rejected_before_assets_or_docker(self):
+  source,definition=self.fixture('alpha');repo=self.root/'repo'
+  _,release=publish(source,repo)
+  published=next((repo/'catalog/alpha/v1').glob('*.json'))
+  valid=json.loads(published.read_text());bad=self.root/'bad-manifest.json'
+  for path in ('/health#fragment','/health#','relative','/bad path','/'+('x'*512)):
+   with self.subTest(path=path):
+    invalid={**valid,'health':{'path':path}};bad.write_text(json.dumps(invalid))
+    with self.assertRaisesRegex(ValueError,'health path'):artifacts.validate_manifest(invalid)
+    with patch.object(artifacts,'CACHE',self.root/'cache'),patch.object(artifacts,'fetch',return_value=bad) as fetch,patch.object(artifacts.subprocess,'run') as run:
+     with self.assertRaisesRegex(ValueError,'health path'):artifacts.prepare(release,'alpha')
+     fetch.assert_called_once() # only the manifest, no compose or image fetch
+     run.assert_not_called() # no Docker config/load or other process
+    source.write_text(json.dumps({**definition,'health':{'path':path}}))
+    with patch('catalog_publish.publish_asset') as asset,patch('catalog_publish.verify_archive') as verify:
+     with self.assertRaisesRegex(ValueError,'health path'):publish(source,repo)
+     asset.assert_not_called();verify.assert_not_called()
  def test_descriptor_and_bad_checksum_fail_before_docker(self):
   for url in ['http://apt.isle/x','https://evil.example/x','https://user:pass@apt.isle/x']:
    with self.assertRaises(ValueError):artifacts.descriptor(dict(url=url,sha256='a'*64,size=1))

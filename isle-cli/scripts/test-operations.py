@@ -117,8 +117,9 @@ test "$(cat "$ISLE_OPERATION_DIR/catalog.json")" = pinned
    with patch.object(status,'APPS',self.root),patch.object(status,'REGISTRY',reg),patch.object(status,'latest',return_value=None),patch.object(status,'run',side_effect=fake):
     d=status.status(name);self.assertTrue(d['deployed']);self.assertEqual(d['healthPath'],path)
     self.assertEqual(calls[-1][-1],'https://'+name+'.isle'+path);self.assertNotIn('-k',calls[-1])
-    (app/'release.json').write_text(json.dumps({'health':{'path':'relative'}}));calls.clear()
-    d=status.status(name);self.assertFalse(d['deployed']);self.assertFalse(any(a[0]=='curl' for a in calls))
+    for invalid in ('relative','/health#fragment'):
+     (app/'release.json').write_text(json.dumps({'health':{'path':invalid}}));calls.clear()
+     d=status.status(name);self.assertFalse(d['deployed']);self.assertFalse(any(a[0]=='curl' for a in calls))
  def test_update_manifest_validation(self):
   packages=[dict(name=n,version='0.1.1',file=n+'_0.1.1_all.deb',sha256='a'*64) for n in sorted(update.PACKAGES)]
   import hashlib

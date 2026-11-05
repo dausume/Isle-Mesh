@@ -4,6 +4,7 @@ import json, subprocess, sys
 from pathlib import Path
 from datetime import datetime, timezone
 from operations import NAME, latest
+from health_probe import validate_path
 APPS=Path('/etc/isle-mesh/apps')
 REGISTRY=Path('/etc/isle-mesh/agent/registry.json')
 def run(argv):
@@ -36,7 +37,7 @@ def status(name):
         release_path=APPS/name/'release.json'
         if release_path.is_file():
             health_path=json.loads(release_path.read_text()).get('health',{}).get('path','/')
-            if not isinstance(health_path,str) or not health_path.startswith('/') or len(health_path)>512 or any(ord(c)<33 for c in health_path):raise ValueError('Invalid health path')
+            validate_path(health_path)
         out['healthPath']=health_path
         result=run(['curl' ,'--http1.1','--fail','--silent','--show-error','--connect-timeout','2','--max-time','5','--output','/dev/null','https://'+domain+health_path])
         out['routeReady']=result.returncode==0

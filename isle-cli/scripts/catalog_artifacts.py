@@ -4,6 +4,7 @@ import hashlib,json,os,re,shutil,subprocess,sys,tempfile,time,importlib.util
 from pathlib import Path,PurePosixPath
 from urllib.parse import urlsplit
 from operations import atomic,stage,NAME
+from health_probe import validate_path
 from image_identity import verify_archive,admit_installed,digest
 CACHE=Path('/var/lib/isle-mesh/artifacts')
 SCRIPTS=Path(__file__).resolve().parent
@@ -43,7 +44,7 @@ def validate_manifest(m):
     if not isinstance(service,str) or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}',service) or type(port)is not int or not 1<=port<=65535:raise ValueError('Invalid release service/port')
     if d.get('engine') and not NAME.fullmatch(d['engine']):raise ValueError('Invalid engine kind')
     path=m.get('health',{'path':'/'}).get('path')
-    if not isinstance(path,str) or not path.startswith('/') or len(path)>512 or any(ord(c)<33 for c in path):raise ValueError('Invalid release health path')
+    validate_path(path)
     for image in m['images']:
         ref=image['ref']
         if not isinstance(ref,str) or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_./:@-]{0,255}',ref):raise ValueError('Invalid image reference')
@@ -112,7 +113,7 @@ def install(catalog,instance):
         args+=['--engine',d['engine']]
     health=m.get('health',{'path':'/'})
     path=health.get('path')
-    if not isinstance(path,str) or not path.startswith('/') or len(path)>512 or any(ord(c)<33 for c in path):raise ValueError('Invalid release health path')
+    validate_path(path)
     args+=['--health-path',path]
     stage(ident,'deploying-verified-release')
     result=subprocess.run(args).returncode
