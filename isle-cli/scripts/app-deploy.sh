@@ -5,7 +5,7 @@
 #
 #   isle app deploy <name> --compose <file> [--service <svc>]
 #                   [--port <p>] [--domain <name>.isle]
-#                   [--protocol http] [--engine <kind>[@<url>]]
+#                   [--health-path /] [--protocol http] [--engine <kind>[@<url>]]
 #
 # --engine business-ops            → https://<app-domain> (auto, Isle-wide)
 # --engine business-ops@http://x   → explicit url (no <> chars)
@@ -34,7 +34,7 @@ die(){ echo -e "${R}[FAIL]${N} $*"; exit 1; }
 
 NAME="${1:-}"; shift || true
 [ -n "$NAME" ] && [ "${NAME#-}" = "$NAME" ] || die "usage: isle app deploy <name> --compose <file> [--service <svc>] [--port <p>] [--domain <d>] [--engine <kind>=<url>]"
-COMPOSE=""; IMAGE=""; SERVICE=""; PORT=""; DOMAIN="$NAME.isle"; PROTOCOL="http"; ENGINE=""
+COMPOSE=""; IMAGE=""; SERVICE=""; PORT=""; DOMAIN="$NAME.isle"; PROTOCOL="http"; ENGINE=""; HEALTH_PATH="/"
 while [ $# -gt 0 ]; do case "$1" in
     --compose) COMPOSE="$2"; shift 2 ;;
     --image) IMAGE="$2"; shift 2 ;;
@@ -43,8 +43,14 @@ while [ $# -gt 0 ]; do case "$1" in
     --domain) DOMAIN="$2"; shift 2 ;;
     --protocol) PROTOCOL="$2"; shift 2 ;;
     --engine) ENGINE="$2"; shift 2 ;;
+    --health-path) HEALTH_PATH="$2"; shift 2 ;;
     *) die "unknown arg: $1" ;;
 esac; done
+python3 - "$HEALTH_PATH" <<'PYHEALTH' || die "invalid health path"
+import sys
+p=sys.argv[1]
+sys.exit(0 if p.startswith('/') and len(p)<=512 and all(ord(c)>=33 for c in p) and '#' not in p else 1)
+PYHEALTH
 # --image <ref> synthesizes a one-service compose (the catalog's
 # bare-image path); --compose is the file path otherwise.
 if [ -z "$COMPOSE" ] && [ -n "$IMAGE" ]; then
@@ -194,7 +200,7 @@ if [ -f "$REG" ]; then
     AGENTN=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -cE '^isle-(vlan|remote)-agent$' || true)
     printf '{"device":"%s","facts":{"machine_name":"%s","agent_present":%s}}' \
         "$HOSTN" "$HOSTN" "$([ "${AGENTN:-0}" -gt 0 ] && echo true || echo false)" \
-        | curl -sf --max-time 8 -X POST -H "Content-Type: application/json" \
+        | curl --http1.1 -sf --max-time 8 -X POST -H "Content-Type: application/json" \
             --data-binary @- https://api.polari.isle/api/islemesh/ingest/device >/dev/null 2>&1 || true
     RPT=$(mktemp)
     python3 - "$HOSTN" "$REG" > "$RPT" 2>/dev/null <<'PYEOF'
@@ -202,7 +208,7 @@ import json, sys
 host, reg = sys.argv[1], sys.argv[2]
 print(json.dumps({'device': host, 'registry': json.load(open(reg))}))
 PYEOF
-    if [ -s "$RPT" ] && curl -sf --max-time 8 -X POST -H "Content-Type: application/json" \
+    if [ -s "$RPT" ] && curl --http1.1 -sf --max-time 8 -X POST -H "Content-Type: application/json" \
             --data-binary @"$RPT" https://api.polari.isle/api/islemesh/ingest/registry >/dev/null 2>&1; then
         ok "instances reported to the isle topology"
     else
@@ -216,7 +222,7 @@ fi
 bash "$SCRIPT_DIR/certs.sh" reload || die "hosting agent reload failed"
 READY=0
 for attempt in {1..12}; do
-    if curl --fail --silent --show-error --connect-timeout 2 --max-time 4 "https://$DOMAIN/" -o /dev/null 2>/dev/null; then
+    if curl --http1.1 --fail --silent --show-error --connect-timeout 2 --max-time 4 "https://$DOMAIN$HEALTH_PATH" -o /dev/null 2>/dev/null; then
         READY=1; break
     fi
     sleep 2

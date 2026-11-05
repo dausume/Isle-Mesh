@@ -111,6 +111,7 @@ def install(catalog,instance):
     health=m.get('health',{'path':'/'})
     path=health.get('path')
     if not isinstance(path,str) or not path.startswith('/') or len(path)>512 or any(ord(c)<33 for c in path):raise ValueError('Invalid release health path')
+    args+=['--health-path',path]
     stage(ident,'deploying-verified-release')
     result=subprocess.run(args).returncode
     installed=Path('/etc/isle-mesh/apps')/instance
