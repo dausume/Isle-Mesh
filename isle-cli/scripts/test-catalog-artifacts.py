@@ -43,6 +43,7 @@ class Artifacts(unittest.TestCase):
     Path(argv[argv.index('--output')+1]).write_bytes(file.read_bytes());return subprocess.CompletedProcess(argv,0)
    if argv[:2]==['docker','compose']:
     current=json.loads((Path(argv[argv.index('-f')+1]).parent/'manifest.json').read_text())
+    self.assertEqual(argv[argv.index('--project-name')+1],'isle-'+current['name'])
     return subprocess.CompletedProcess(argv,0,json.dumps({'services':{'web':{'image':current['images'][0]['ref']}}}))
    if argv[:2]==['docker','load']:return subprocess.CompletedProcess(argv,0)
    if argv[:3]==['docker','image','inspect']:

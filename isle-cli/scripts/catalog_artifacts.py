@@ -61,7 +61,9 @@ def manifest_document(release):
     validate_manifest(m)
     return m,directory
 
-def prepare(release, expected_name):
+def prepare(release, expected_name, instance=None):
+    instance=instance or expected_name
+    if not NAME.fullmatch(instance):raise ValueError('Invalid instance name')
     m,directory=manifest_document(release)
     if m['name']!=expected_name:raise ValueError('Catalog/release app mismatch')
     compose=fetch(m['compose'],directory/'compose.yml')
@@ -71,7 +73,7 @@ def prepare(release, expected_name):
             raise ValueError('Invalid release file path')
         fetch(file,directory.joinpath(*path.parts))
     # Compose is materialized from the verified directory, never the caller cwd.
-    result=subprocess.run(['docker','compose','-f',str(compose),'config','--format','json'],capture_output=True,text=True,check=True)
+    result=subprocess.run(['docker','compose','--project-name','isle-'+instance,'-f',str(compose),'config','--format','json'],capture_output=True,text=True,check=True)
     config=json.loads(result.stdout)
     services=config.get('services',{})
     if not services or any('build' in v for v in services.values()):raise ValueError('Published compose must use release images, not source builds')
@@ -97,7 +99,7 @@ def install(catalog,instance):
     if not NAME.fullmatch(instance):raise ValueError('Invalid instance name')
     entry=json.loads(Path(catalog).read_text())['entry']
     ident=os.environ['ISLE_OPERATION_ID'];stage(ident,'resolving-artifacts')
-    m,compose=prepare(entry['install_plan']['release'],entry['name'])
+    m,compose=prepare(entry['install_plan']['release'],entry['name'],instance)
     d=m['deploy']; service=d['service'];port=d['port']
     if not isinstance(service,str) or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}',service) or type(port)is not int or not 1<=port<=65535:raise ValueError('Invalid release service/port')
     domain=instance+'.isle'
