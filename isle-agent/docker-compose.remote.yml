@@ -31,6 +31,7 @@ services:
       - VIRTUAL_MAC=${VIRTUAL_MAC}
 
     volumes:
+      - /etc/isle-mesh/device-name:/etc/isle-mesh/device-name:ro
       # Initial/template nginx config (read-only source)
       - ./isle-vlan-agent/nginx.conf:/etc/nginx/nginx-initial.conf:ro
 
@@ -63,7 +64,7 @@ services:
       isle.version: "1.0.0"
 
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1/health"]
+      test: ["CMD", "/usr/local/bin/remote-health.sh"]
       interval: 30s
       timeout: 5s
       retries: 3

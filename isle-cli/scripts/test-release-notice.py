@@ -10,7 +10,7 @@ class Notice(unittest.TestCase):
      rows.append(f'Package: {name}\nVersion: {v}\nFilename: ./{name}_{v}_all.deb\nSHA256: '+ 'a'*64)
    (Path(d)/'Packages').write_text('\n\n'.join(rows))
    a=notice(d);self.assertTrue(all(p['version']=='0.1.10' for p in a['packages']))
-   self.assertEqual(a['id'],notice(d)['id']);self.assertIn('--no-remove',a['command']);self.assertNotIn(' upgrade',a['command'])
+   self.assertEqual(a['id'],notice(d)['id']);self.assertEqual(a['command'],'sudo isle update apply '+a['id']);self.assertNotIn(' upgrade',a['command'])
  def test_incomplete_set_not_published(self):
   with tempfile.TemporaryDirectory() as d:
    (Path(d)/'Packages').write_text('')

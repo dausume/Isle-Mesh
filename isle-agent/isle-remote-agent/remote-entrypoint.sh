@@ -20,52 +20,27 @@ echo "  VLAN ID:   ${VLAN_ID:-unknown}"
 echo "  Router IP: ${ROUTER_IP:-unknown}"
 echo ""
 
-# --- Step 0: Find the macvlan (isle-facing) interface ---
-# Docker's interface ORDER is not stable across attached networks —
-# eth0 can be the INTERNAL bridge (172.20.x), which is exactly how
-# DHCP silently ran on the wrong interface while the macvlan kept
-# docker-IPAM's static self-assignment (it collided with the core
-# agent's .2). Match VIRTUAL_MAC when given; else the non-172.20 one.
+# Canonical registered identity survives OS hostname changes and container upgrades.
+ISLE_HOSTNAME=$(cat /etc/isle-mesh/device-name)
+printf '%s' "$ISLE_HOSTNAME" | grep -Eq '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$' || { echo 'Invalid canonical device identity'; exit 1; }
 MACVLAN_IF=""
-if [ -n "${VIRTUAL_MAC:-}" ]; then
-    for d in /sys/class/net/*; do
-        n=$(basename "$d"); [ "$n" = "lo" ] && continue
-        [ "$(cat "$d/address" 2>/dev/null)" = "$VIRTUAL_MAC" ] && { MACVLAN_IF="$n"; break; }
-    done
-fi
-if [ -z "$MACVLAN_IF" ]; then
-    # the isle macvlan is the 10.x interface (the isle DHCP range);
-    # docker internal bridges live in 172.16/12 — never hardcode a
-    # single bridge subnet (it moves when pools auto-allocate).
-    for d in /sys/class/net/*; do
-        n=$(basename "$d"); [ "$n" = "lo" ] && continue
-        ip -4 addr show "$n" 2>/dev/null | grep -q "inet 10\." && { MACVLAN_IF="$n"; break; }
-    done
-fi
-MACVLAN_IF="${MACVLAN_IF:-eth0}"
-echo "  Macvlan interface: ${MACVLAN_IF}"
-echo ""
-
-# --- Step 1: Get DHCP lease via macvlan interface ---
-echo "[1/6] Obtaining DHCP lease..."
-
-# Drop docker-IPAM's static self-assignment FIRST: each docker host
-# picks it independently on the shared subnet, so keeping it risks an
-# ACTIVE IP CONFLICT (the router's DHCP is the only real arbiter).
-ip addr flush dev "$MACVLAN_IF" 2>/dev/null || true
-
-# udhcpc is built into Alpine's busybox. Send our hostname so the
-# router's lease table self-describes (dns-reconcile on the core
-# maps device → agent IP by it; without it the lease shows '*').
-if udhcpc -i "$MACVLAN_IF" -n -q -t 10 -T 3 -x hostname:"$(hostname)" 2>&1; then
-    VLAN_IP=$(ip -4 -o addr show dev "$MACVLAN_IF" 2>/dev/null | awk '{split($4,a,"/"); print a[1]; exit}') || true
-    echo "  DHCP lease obtained: ${VLAN_IP}"
-else
-    echo "  ERROR: DHCP failed on ${MACVLAN_IF} — no isle lease."
-    echo "  Refusing a static fallback (it collides across hosts)."
-    VLAN_IP="unknown"
-fi
-echo ""
+[ -n "${VIRTUAL_MAC:-}" ] || { echo 'Missing registered virtual MAC; refusing to guess interface'; exit 1; }
+for d in /sys/class/net/*; do
+    [ "$(cat "$d/address")" = "$VIRTUAL_MAC" ] && MACVLAN_IF=${d##*/}
+done
+[ -n "$MACVLAN_IF" ] || { echo 'Registered MAC interface not found'; exit 1; }
+# Foreground DHCP remains alive for renew/rebind; no quit-after-lease flag.
+rm -f /run/isle-lease
+udhcpc -f -n -i "$MACVLAN_IF" -t 10 -T 3 -s /usr/local/bin/lease-hook.sh -x hostname:"$ISLE_HOSTNAME" &
+DHCP_PID=$!
+echo "$DHCP_PID" > /run/isle-dhcp.pid
+tries=0
+until [ -s /run/isle-lease ]; do
+    kill -0 "$DHCP_PID" 2>/dev/null || { echo 'DHCP acquisition failed'; exit 1; }
+    tries=$((tries+1)); [ "$tries" -lt 40 ] || { kill "$DHCP_PID"; exit 1; }
+    sleep 1
+done
+read -r _ VLAN_IP _ < /run/isle-lease
 
 # --- Step 2: Start D-Bus (required by avahi) ---
 echo "[2/6] Starting D-Bus daemon..."
@@ -92,7 +67,7 @@ echo "[3/6] Settle period: observing existing mDNS traffic (${SETTLE_SECONDS}s).
 mkdir -p /etc/avahi
 cat > /etc/avahi/avahi-daemon.conf <<AVAHI_CONF
 [server]
-host-name=$(hostname)
+host-name=$ISLE_HOSTNAME
 domain-name=local
 use-ipv4=yes
 use-ipv6=no
@@ -145,7 +120,7 @@ sleep 1
 
 cat > /etc/avahi/avahi-daemon.conf <<AVAHI_CONF
 [server]
-host-name=$(hostname)
+host-name=$ISLE_HOSTNAME
 domain-name=local
 use-ipv4=yes
 use-ipv6=no
@@ -179,32 +154,30 @@ echo "[5/6] Setting up mDNS publishing..."
 # Publish domains from registry via avahi-publish-address in background
 # This reads the registry and publishes .local domains pointing to our VLAN IP
 publish_mdns_domains() {
-    local registry="/etc/nginx/registry.json"
-    local published_pids=""
-
-    # Wait for first publish cycle to let the network settle further
-    sleep 5
-
+    registry=/etc/nginx/registry.json
+    published_pids=""; previous=""
+    trap 'for p in $published_pids; do kill "$p" 2>/dev/null || true; done; exit 0' TERM INT
     while true; do
-        if [ -f "$registry" ] && [ "$VLAN_IP" != "unknown" ]; then
-            # Get current VLAN IP (may change on DHCP renewal)
-            local current_ip
-            current_ip=$(ip -4 -o addr show dev "$MACVLAN_IF" 2>/dev/null | awk '{split($4,a,"/"); print a[1]; exit}'); [ -n "$current_ip" ] || current_ip="$VLAN_IP"
-
-            # Extract .local domains from registry
-            local domains
-            domains=$(jq -r '.apps[].domain // empty' "$registry" 2>/dev/null | grep '\.local$' || true)
-
-            for domain in $domains; do
-                # Check if already being published
-                if ! echo "$published_pids" | grep -q "$domain"; then
-                    echo "[mdns-publish] Publishing ${domain} -> ${current_ip}"
-                    avahi-publish-address "$domain" "$current_ip" &
-                    published_pids="$published_pids $domain:$!"
-                fi
-            done
+        current_ip=""; domains=""
+        if [ -s /run/isle-lease ] && [ -f "$registry" ]; then
+            read -r lease_if lease_ip expires < /run/isle-lease
+            if [ "$expires" -gt "$(date +%s)" ]; then
+                current_ip=$(ip -4 -o addr show dev "$MACVLAN_IF" | awk '{split($4,a,"/"); print a[1]; exit}')
+                domains=$(jq -r '.apps[].domain // empty' "$registry" 2>/dev/null | grep '\.local$' | sort -u || true)
+            fi
         fi
-        sleep 30
+        desired="$current_ip $domains"
+        if [ "$desired" != "$previous" ]; then
+            for p in $published_pids; do kill "$p" 2>/dev/null || true; done
+            published_pids=""; previous="$desired"
+            if [ -n "$current_ip" ]; then
+                for domain in $domains; do
+                    avahi-publish-address "$domain" "$current_ip" &
+                    published_pids="$published_pids $!"
+                done
+            fi
+        fi
+        sleep 5
     done
 }
 
@@ -238,6 +211,8 @@ echo "  Registry watcher PID: $WATCHER_PID"
 # Cleanup handler
 cleanup() {
     echo "Shutting down remote agent..."
+    kill "$DHCP_PID" 2>/dev/null || true
+    kill "${NGINX_PID:-}" 2>/dev/null || true
     kill $WATCHER_PID 2>/dev/null || true
     kill $MDNS_PID 2>/dev/null || true
     avahi-daemon -k 2>/dev/null || true
@@ -249,4 +224,9 @@ trap cleanup SIGTERM SIGINT
 # Start nginx in foreground
 echo "  Starting nginx..."
 echo ""
-exec nginx -g "daemon off;"
+nginx -g "daemon off;" &
+NGINX_PID=$!
+# A dead DHCP client must restart acquisition rather than leave nginx green.
+while kill -0 "$NGINX_PID" 2>/dev/null && kill -0 "$DHCP_PID" 2>/dev/null; do sleep 2; done
+kill "$NGINX_PID" "$DHCP_PID" 2>/dev/null || true
+exit 1

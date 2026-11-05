@@ -177,6 +177,10 @@ case $COMMAND in
         ;;
 
     # Project tools
+    status)
+        exec python3 "$SCRIPT_DIR/app-status.py" "$@"
+        ;;
+
     deploy)
         # store install pipeline: arbitrary compose -> isle app
         bash "$SCRIPT_DIR/app-deploy.sh" "$@"

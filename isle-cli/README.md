@@ -272,3 +272,37 @@ not group/world writable. Enabling checks trusted HTTPS OIDC discovery and its
 issuer before saving; it does not deploy Keycloak. The frontend reloads only after
 successful readback. This toggle changes sign-in availability; it is deliberately
 separate from `POLARI_APP_PERMISSIONS` and backend enforcement policy.
+
+
+### Shared local operations
+
+`sudo isle store install <catalog-name> --yes` and the native Install button
+invoke the same store operation. The command prints `Operation: <id>`; inspect
+it with `isle operation status <id>` and retry with
+`sudo isle operation retry <id>`. Retry keeps the original catalog response and
+replays its plan through the existing shared deployment commands. Successful
+operations are not replayed by retry; use a new install for an intentional
+upgrade. Per-app locks prevent concurrent attempts. A killed process is reported
+as interrupted, never completed. Journals persist in `/var/lib/isle-mesh/operations`.
+
+`isle app status <name>` reports configuration, actual runtime and trusted local
+HTTPS evidence separately. A directory alone is staged, not deployed. HTTPS
+checks currently require success from the registered domain's root path;
+applications with a different health endpoint need catalog health metadata.
+This local probe is not evidence of cross-device reachability.
+
+`isle update plan` reviews the exact published package manifest and actual local
+dpkg status. `sudo isle update apply <release-id>` verifies HTTPS artifact hashes,
+package names and versions, refuses implicit downgrades, installs with
+`apt-get --no-remove`, and reconciles owned local host routes and reporting.
+`sudo isle reconcile` reruns that reconciliation without recreating membership or
+applications. These actions share the operation journal and native bridge.
+An update does not rebuild/recreate the agent image or migrate core runtime
+images; those remain distinct coordinated release actions, not implied by package
+success. No general system upgrade or rejoin is performed.
+
+Native operation routes: `device.updatePlan`, `device.updateApply(releaseId)`,
+`device.reconcile`, `operation.status(id)`, and `operation.retry(id)` use fixed
+argument arrays; there is no arbitrary command/path bridge. Administrator
+refusal is returned to the caller without a success claim. The existing
+`store.install(name)` boundary is preserved.

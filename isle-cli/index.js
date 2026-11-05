@@ -24,6 +24,9 @@ const scriptsDir = path.join(__dirname, 'scripts');
 //   deprecated: string → print a deprecation notice before running
 // ─────────────────────────────────────────────────────────────────────────────
 const commands = {
+  update: { script: 'update.sh', desc: 'Review/apply exact local release through shared journal' },
+  reconcile: { script: 'reconcile.sh', desc: 'Reconcile existing local membership routes and reports' },
+  operation: { script: 'operation.sh', desc: 'Durable shared operation status/retry <id>' },
   // Namespace modules (dispatch their own subcommands)
   app:      { script: 'app.sh',      desc: 'Mesh application management', docker: true },
   router:   { script: 'router.sh',   desc: 'Router and network management' },

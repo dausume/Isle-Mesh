@@ -17,7 +17,7 @@ def notice(repo):
     if set(selected)!=wanted:raise ValueError('Complete remote package set is not published')
     packages=[selected[k] for k in sorted(selected)];digest=hashlib.sha256(json.dumps(packages,sort_keys=True).encode()).hexdigest()
     return dict(id=digest,publishedAt=datetime.now(timezone.utc).isoformat(),packages=packages,
-                command='isle apt-repo enable && sudo apt-get update && sudo apt-get --no-remove install '+' '.join(p['name']+'='+p['version'] for p in packages),
+                command='sudo isle update apply '+digest,
                 note='Review the package transaction before confirming. Updates run locally and preserve app data, membership and installed capability packages. Package hooks may briefly restart the local agent; running app containers are not redeployed.')
 if __name__=='__main__':
     payload=json.dumps(notice(sys.argv[1]))

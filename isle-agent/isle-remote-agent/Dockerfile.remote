@@ -20,6 +20,10 @@ COPY isle-vlan-agent/generate-nginx-configs.sh /usr/local/bin/generate-nginx-con
 # Copy remote-specific entrypoint
 COPY isle-remote-agent/remote-entrypoint.sh /usr/local/bin/entrypoint.sh
 
+COPY isle-remote-agent/lease-hook.sh /usr/local/bin/lease-hook.sh
+COPY isle-remote-agent/remote-health.sh /usr/local/bin/remote-health.sh
+RUN chmod +x /usr/local/bin/lease-hook.sh /usr/local/bin/remote-health.sh
+
 # Make scripts executable
 RUN chmod +x /usr/local/bin/registry-watcher.sh \
     /usr/local/bin/generate-nginx-configs.sh \
