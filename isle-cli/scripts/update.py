@@ -58,7 +58,9 @@ def main(args):
     action=args[0] if args else 'plan'
     if action=='plan' and len(args)<=1:
         release=fetch()
-        print(json.dumps(dict(release=release,selectedPackages=selected_packages(release),installed={p:installed(p) for p in sorted(PACKAGES|{'polari-complete','polari-complete-offline'})},command='sudo isle update apply '+release['id'])))
+        mode=Path('/etc/isle-mesh/agent/agent.mode').read_text().strip()
+        from runtime_reconcile import targets
+        print(json.dumps(dict(release=release,selectedPackages=selected_packages(release),runtimeTargets=targets(release,mode),installed={p:installed(p) for p in sorted(PACKAGES|{'polari-complete','polari-complete-offline'})},command='sudo isle update apply '+release['id'])))
         return 0
     if action!='apply' or len(args)!=2 or not re.fullmatch('[a-f0-9]{64}',args[1]): raise ValueError('Usage: isle update plan | sudo isle update apply <release-id>')
     ident=os.environ.get('ISLE_OPERATION_ID','')
