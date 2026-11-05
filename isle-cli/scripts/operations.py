@@ -52,7 +52,7 @@ def latest(name):
 
 def request(args):
     if len(args)==3 and args[:2]==['update','apply'] and re.fullmatch('[a-f0-9]{64}',args[2]): return list(args)
-    if args==['reconcile','apply','device']: return list(args)
+    if args in (['reconcile','apply','device'], ['agent','restart','device']): return list(args)
     if len(args)<3 or args[:2] not in (['store','install'],['store','uninstall']):
         raise ValueError('Supported operations: store install/uninstall <name> [--yes] [--purge]')
     if not NAME.fullmatch(args[2]): raise ValueError('Invalid app name')

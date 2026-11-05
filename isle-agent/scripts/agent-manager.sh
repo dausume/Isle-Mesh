@@ -1040,10 +1040,8 @@ stop_agent() {
 
 # Restart the isle-agent container
 restart_agent() {
-    log_info "Restarting isle-agent..."
-    stop_agent
-    sleep 2
-    start_agent
+    # Keep direct legacy callers on the same journaled CLI operation.
+    bash "$CLI_DIR/scripts/agent.sh" restart
 }
 
 # Reload nginx configuration without restarting container
