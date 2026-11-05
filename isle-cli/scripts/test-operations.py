@@ -103,6 +103,22 @@ test "$(cat "$ISLE_OPERATION_DIR/catalog.json")" = pinned
   with patch.object(status,'APPS',self.root),patch.object(status,'REGISTRY',reg),patch.object(status,'latest',return_value=None),patch.object(status,'run',side_effect=fake):
    d=status.status('alpha');self.assertEqual(d['state'],'runtime-started');self.assertFalse(d['deployed'])
    self.assertNotIn('-k',calls[-1]);self.assertIn('https://alpha.isle/',calls[-1])
+ def test_declared_worker_readiness_not_root_route(self):
+  reg=self.root/'registry';reg.write_text(json.dumps({'apps':{n:{'domain':n+'.isle'} for n in ('alpha','bravo')}}))
+  for name,path in [('alpha','/capability'),('bravo','/healthz')]:
+   app=self.root/name;app.mkdir();(app/'docker-compose.yml').write_text('services: {}')
+   (app/'release.json').write_text(json.dumps({'health':{'path':path}}));calls=[]
+   def fake(argv):
+    calls.append(argv)
+    if '--services' in argv:return subprocess.CompletedProcess(argv,0,'web\n','')
+    if 'ps' in argv:return subprocess.CompletedProcess(argv,0,'[{"Service":"web","State":"running","Health":"healthy"}]','')
+    # API-only workers: / returns HTTP404, declared endpoint succeeds.
+    return subprocess.CompletedProcess(argv,0 if argv[-1]=='https://'+name+'.isle'+path else 22,'','')
+   with patch.object(status,'APPS',self.root),patch.object(status,'REGISTRY',reg),patch.object(status,'latest',return_value=None),patch.object(status,'run',side_effect=fake):
+    d=status.status(name);self.assertTrue(d['deployed']);self.assertEqual(d['healthPath'],path)
+    self.assertEqual(calls[-1][-1],'https://'+name+'.isle'+path);self.assertNotIn('-k',calls[-1])
+    (app/'release.json').write_text(json.dumps({'health':{'path':'relative'}}));calls.clear()
+    d=status.status(name);self.assertFalse(d['deployed']);self.assertFalse(any(a[0]=='curl' for a in calls))
  def test_update_manifest_validation(self):
   packages=[dict(name=n,version='0.1.1',file=n+'_0.1.1_all.deb',sha256='a'*64) for n in sorted(update.PACKAGES)]
   import hashlib
