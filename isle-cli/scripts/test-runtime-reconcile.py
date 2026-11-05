@@ -34,6 +34,13 @@ class Runtime(unittest.TestCase):
    if mutation=='duplicate':rows.append(row)
    if mutation=='health':row['healthUrl']='https://external.example/health'
    with self.subTest(mutation=mutation),self.assertRaises(ValueError):runtime.targets({'runtimes':{'core':rows}},'core')
+ def test_slow_startup_remains_retryable_until_declared_deadline(self):
+  error=subprocess.CalledProcessError(22,['curl'])
+  with patch.object(runtime,'run',side_effect=[error,error,subprocess.CompletedProcess([],0)]) as run,patch.object(runtime.time,'monotonic',side_effect=[0,25,100]),patch.object(runtime.time,'sleep'):
+   runtime.wait_route('https://api.polari.isle/api/health',180)
+   self.assertEqual(run.call_count,3)
+  with patch.object(runtime,'run',side_effect=error),patch.object(runtime.time,'monotonic',side_effect=[0,181]),patch.object(runtime.time,'sleep'):
+   with self.assertRaisesRegex(RuntimeError,'180 seconds'):runtime.wait_route('https://api.polari.isle/api/health',180)
  def test_unknown_role_is_rejected(self):
   with self.assertRaises(ValueError):runtime.targets({'runtimes':{'foreign':[]}},'core')
 if __name__=='__main__':unittest.main()

@@ -33,6 +33,8 @@ def targets(release,mode,source=False):
         if source:
             if not isinstance(image.get('archive',{}).get('source'),str):raise ValueError('Runtime image source required')
         else:descriptor(image.get('archive'))
+        timeout=item.get('readinessTimeoutSeconds',180)
+        if type(timeout)is not int or not 30<=timeout<=600:raise ValueError('Invalid runtime readiness timeout')
         if 'healthUrl' in item:
             u=urlsplit(item['healthUrl'])
             if u.scheme!='https' or not (u.hostname or '').endswith('.isle') or u.username or u.password or u.fragment:raise ValueError('Invalid runtime health URL')
@@ -97,7 +99,18 @@ def reconcile(release,mode):
             from urllib.parse import urlsplit
             u=urlsplit(item['healthUrl'])
             if u.scheme!='https' or not (u.hostname or '').endswith('.isle') or u.username or u.password:raise ValueError('Invalid runtime health URL')
-            run(['curl','--http1.1','--fail','--silent','--show-error','--retry','10','--retry-all-errors','--retry-delay','2','--connect-timeout','3','--max-time','8','--output','/dev/null',item['healthUrl']])
+            wait_route(item['healthUrl'],item.get('readinessTimeoutSeconds',180))
+
+def wait_route(url,timeout):
+    deadline=time.monotonic()+timeout
+    while True:
+        try:
+            run(['curl','--http1.1','--fail','--silent','--show-error','--connect-timeout','3','--max-time','8','--output','/dev/null',url],stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
+            return
+        except subprocess.CalledProcessError as error:
+            if time.monotonic()>=deadline:raise RuntimeError('Trusted runtime readiness did not converge within '+str(timeout)+' seconds: '+url) from error
+            time.sleep(2)
+
 
 def main():
     if not DESIRED.exists():return
