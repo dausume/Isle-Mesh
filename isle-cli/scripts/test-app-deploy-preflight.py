@@ -22,7 +22,7 @@ class AppPreflightTest(unittest.TestCase):
                 binary.write_text('#!/bin/sh\n' + body)
                 binary.chmod(0o755)
             result = subprocess.run(['bash', str(Path(__file__).with_name('app-deploy.sh')),
-                                     'board', '--compose', str(compose)],
+                                     'board', '--compose', str(compose), '--health-path', '/capability'],
                                     env={**os.environ, 'PATH': temp + ':' + os.environ['PATH'], 'CALLS': str(calls)},
                                     capture_output=True, text=True, timeout=5)
             self.assertNotEqual(result.returncode, 0)
@@ -31,6 +31,14 @@ class AppPreflightTest(unittest.TestCase):
             self.assertIn('certs.sh ensure board.isle', log)
             self.assertNotIn('docker compose', log)
             self.assertNotIn('mkdir', log)
+
+    def test_invalid_health_path_is_rejected_before_any_host_action(self):
+        for path in ('relative', '/bad path', '/path#fragment'):
+            result=subprocess.run(['bash',str(Path(__file__).with_name('app-deploy.sh')),
+                                   'fixture','--compose','/not-used','--health-path',path],
+                                  capture_output=True,text=True,timeout=5)
+            self.assertNotEqual(result.returncode,0)
+            self.assertIn('invalid health path',result.stdout)
 
 
 if __name__ == '__main__':
