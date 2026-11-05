@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import hashlib,importlib.util,io,json,os,subprocess,tarfile,tempfile,unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch,Mock
 import catalog_artifacts as artifacts
 from image_identity import verify_archive,admit_installed
 from catalog_publish import publish
@@ -62,6 +62,16 @@ class Artifacts(unittest.TestCase):
      self.assertEqual(manifest['name'],name);self.assertEqual(list(empty.iterdir()),[])
   finally:os.chdir(old)
   self.assertEqual(sum(c[:2]==['docker','load'] for c in calls),2)
+ def test_readiness_failure_is_saved_and_not_reported_success(self):
+  loader=Mock();module=Mock();module.status.return_value={'deployed':False,'state':'runtime-started','error':'Trusted HTTPS failed'}
+  with patch.object(artifacts,'stage'),patch.object(artifacts.importlib.util,'spec_from_file_location',return_value=Mock(loader=loader)),patch.object(artifacts.importlib.util,'module_from_spec',return_value=module),patch.object(artifacts.time,'monotonic',side_effect=[0,61]):
+   with self.assertRaisesRegex(ValueError,'Trusted HTTPS failed'):artifacts.wait_ready('alpha','a'*32,self.root)
+  self.assertFalse(json.loads((self.root/'readiness.json').read_text())['deployed'])
+ def test_invalid_ingress_fails_before_docker(self):
+  path,m=self.fixture('alpha');m['deploy']['port']=70000;path.write_text(json.dumps(m));_,release=publish(path,self.root/'repo')
+  with patch.object(artifacts,'CACHE',self.root/'cache'),patch.object(artifacts,'fetch',return_value=next((self.root/'repo/catalog/alpha/v1').glob('*.json'))),patch.object(artifacts.subprocess,'run') as run:
+   with self.assertRaisesRegex(ValueError,'service/port'):artifacts.prepare(release,'alpha')
+   run.assert_not_called()
  def test_descriptor_and_bad_checksum_fail_before_docker(self):
   for url in ['http://apt.isle/x','https://evil.example/x','https://user:pass@apt.isle/x']:
    with self.assertRaises(ValueError):artifacts.descriptor(dict(url=url,sha256='a'*64,size=1))

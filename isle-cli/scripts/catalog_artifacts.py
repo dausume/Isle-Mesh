@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Versioned catalog artifact resolution behind the standard store operation."""
-import hashlib,json,os,re,shutil,subprocess,sys,tempfile
+import hashlib,json,os,re,shutil,subprocess,sys,tempfile,time,importlib.util
 from pathlib import Path,PurePosixPath
 from urllib.parse import urlsplit
 from operations import atomic,stage,NAME
-from image_identity import verify_archive,admit_installed
+from image_identity import verify_archive,admit_installed,digest
 CACHE=Path('/var/lib/isle-mesh/artifacts')
 SCRIPTS=Path(__file__).resolve().parent
 MAX_SIZE=20*1024**3
@@ -38,6 +38,18 @@ def fetch(item,target):
         if temporary.exists():temporary.unlink()
     return target
 
+def validate_manifest(m):
+    d=m['deploy'];service=d['service'];port=d['port']
+    if not isinstance(service,str) or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}',service) or type(port)is not int or not 1<=port<=65535:raise ValueError('Invalid release service/port')
+    if d.get('engine') and not NAME.fullmatch(d['engine']):raise ValueError('Invalid engine kind')
+    path=m.get('health',{'path':'/'}).get('path')
+    if not isinstance(path,str) or not path.startswith('/') or len(path)>512 or any(ord(c)<33 for c in path):raise ValueError('Invalid release health path')
+    for image in m['images']:
+        ref=image['ref']
+        if not isinstance(ref,str) or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_./:@-]{0,255}',ref):raise ValueError('Invalid image reference')
+        descriptor(image['archive']);digest(image.get('configDigest'))
+        if 'manifestDigest' in image:digest(image['manifestDigest'])
+
 def manifest_document(release):
     descriptor(release)
     if release['size']>2*1024*1024:raise ValueError('Release manifest too large')
@@ -46,6 +58,7 @@ def manifest_document(release):
     if m.get('schemaVersion')!=1 or not NAME.fullmatch(m.get('name','')) or not re.fullmatch(r'[a-zA-Z0-9.+_-]{1,80}',m.get('version','')):raise ValueError('Unsupported release manifest')
     descriptor(m['compose'])
     if not isinstance(m.get('images'),list) or not m['images']:raise ValueError('Release has no verified images')
+    validate_manifest(m)
     return m,directory
 
 def prepare(release, expected_name):
@@ -62,6 +75,7 @@ def prepare(release, expected_name):
     config=json.loads(result.stdout)
     services=config.get('services',{})
     if not services or any('build' in v for v in services.values()):raise ValueError('Published compose must use release images, not source builds')
+    if m['deploy']['service'] not in services:raise ValueError('Release ingress service missing from Compose')
     declared={i['ref']:i for i in m['images']}
     if len(declared)!=len(m['images']) or any(v.get('image') not in declared for v in services.values()):raise ValueError('Every service image must have an artifact identity')
     admitted={}
@@ -86,7 +100,11 @@ def install(catalog,instance):
     m,compose=prepare(entry['install_plan']['release'],entry['name'])
     d=m['deploy']; service=d['service'];port=d['port']
     if not isinstance(service,str) or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}',service) or type(port)is not int or not 1<=port<=65535:raise ValueError('Invalid release service/port')
-    args=['bash',str(SCRIPTS/'app.sh'),'deploy',instance,'--compose',str(compose),'--service',service,'--port',str(port),'--domain',instance+'.isle']
+    domain=instance+'.isle'
+    registry=Path('/etc/isle-mesh/agent/registry.json')
+    if registry.is_file():domain=json.loads(registry.read_text()).get('apps',{}).get(instance,{}).get('domain') or domain
+    if not re.fullmatch(r'(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+isle',domain):raise ValueError('Invalid registered domain')
+    args=['bash',str(SCRIPTS/'app.sh'),'deploy',instance,'--compose',str(compose),'--service',service,'--port',str(port),'--domain',domain]
     if d.get('engine'):
         if not NAME.fullmatch(d['engine']):raise ValueError('Invalid engine kind')
         args+=['--engine',d['engine']]
@@ -98,7 +116,20 @@ def install(catalog,instance):
     installed=Path('/etc/isle-mesh/apps')/instance
     if (installed/'docker-compose.yml').is_file():
         atomic(installed/'release.json',dict(name=m['name'],version=m['version'],manifestSha256=entry['install_plan']['release']['sha256'],health=health))
-    return result
+    if result:return result
+    return wait_ready(instance,ident,Path(os.environ['ISLE_OPERATION_DIR']))
+
+def wait_ready(instance,ident,directory):
+    stage(ident,'verifying-readiness')
+    spec=importlib.util.spec_from_file_location('isle_app_status',SCRIPTS/'app-status.py')
+    readiness=importlib.util.module_from_spec(spec);spec.loader.exec_module(readiness)
+    deadline=time.monotonic()+60
+    while True:
+        report=readiness.status(instance)
+        atomic(directory/'readiness.json',report)
+        if report['deployed']:return 0
+        if time.monotonic()>=deadline:raise ValueError('Deployment incomplete: '+report.get('error',report['state']))
+        time.sleep(2)
 
 def present(ref):
     # Only root-published artifact admissions extend offline supply, by content ID.
