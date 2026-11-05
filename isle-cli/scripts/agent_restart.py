@@ -52,6 +52,8 @@ def restart():
         if time.monotonic() >= deadline:
             raise RuntimeError('Agent health did not converge within 180 seconds')
         time.sleep(2)
+    stage(ident, 'agent-host-ingress')
+    run(['bash', str(Path(__file__).with_name('hosts-reconcile.sh'))])
     stage(ident, 'agent-ready')
 
 if __name__ == '__main__':

@@ -29,7 +29,18 @@ class Restart(unittest.TestCase):
             self.mode.write_text(mode); self.calls.clear(); ar.restart()
             self.assertIn(['docker', 'restart', '--time', '20', name], self.calls)
             self.assertTrue(all(c[:2] in (['docker','inspect'], ['docker','restart'],
-                ['systemctl','restart'], ['systemctl','is-active']) for c in self.calls))
+                ['systemctl','restart'], ['systemctl','is-active']) or c == ['bash', str(Path(ar.__file__).with_name('hosts-reconcile.sh'))] for c in self.calls))
+            self.assertEqual(self.calls[-1], ['bash', str(Path(ar.__file__).with_name('hosts-reconcile.sh'))])
+    def test_host_ingress_failure_is_not_success(self):
+        real = self.command
+        def fail(argv, **kwargs):
+            if argv[0] == 'bash':
+                raise subprocess.CalledProcessError(1, argv)
+            return real(argv, **kwargs)
+        with patch.object(ar.subprocess, 'run', side_effect=fail), self.assertRaises(subprocess.CalledProcessError):
+            ar.restart()
+        self.assertNotIn(('a'*32, 'agent-ready'), [c.args for c in ar.stage.call_args_list])
+
     def test_dynamic_lease_allowed_but_network_change_rejected(self):
         after = copy.deepcopy(self.before)
         after['NetworkSettings']['Networks']['mesh']['IPAddress'] = 'new'

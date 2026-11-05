@@ -35,6 +35,21 @@ class MemberHosts(unittest.TestCase):
             self.assertNotIn('unexpected-curl',r.stderr)
             self.assertEqual(self.run_probe(BRIDGE_IP=ip).returncode,0)
             self.assertEqual(self.hosts.read_text(),contents)
+    def test_stale_macvlan_pin_replaced_and_periodic_recovery_wired(self):
+        # Simulate a stale host-local pin using an unreachable macvlan address.
+        self.hosts.write_text(self.original + '# BEGIN isle-mesh member hairpin pins (hosts-reconcile owns this block)\n10.10.0.147 alpha.isle bravo.isle\n# END isle-mesh member hairpin pins\n')
+        for address in ['172.20.0.2', '172.21.0.3']:
+            result=self.run_probe(BRIDGE_IP=address)
+            self.assertEqual(result.returncode,0,result.stderr)
+            self.assertIn(address+' alpha.isle bravo.isle',self.hosts.read_text())
+            self.assertNotIn('10.10.0.147',self.hosts.read_text())
+            self.assertTrue(self.hosts.read_text().startswith(self.original))
+        repo=Path(__file__).resolve().parents[2]
+        unit=(repo/'isle-resource-report.service').read_text()
+        self.assertIn('ExecStartPre=/bin/bash /usr/share/isle-mesh/isle-cli/scripts/hosts-reconcile.sh',unit)
+        timer=(repo/'isle-resource-report.timer').read_text()
+        self.assertIn('OnBootSec=',timer);self.assertIn('OnUnitInactiveSec=',timer)
+
     def test_service_subdomains_and_legacy_aliases(self):
         self.registry.write_text(json.dumps({'apps': {
             'alpha': {'domain': 'alpha.isle', 'services': [
