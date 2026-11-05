@@ -496,8 +496,23 @@ is_host_running() {
 }
 
 # Check if all agents are running
+host_agent_required() {
+    [[ "$(get_agent_mode)" != remote ]]
+}
+
 is_running() {
-    is_host_running && is_vlan_running
+    if host_agent_required; then is_host_running || return 1; fi
+    is_vlan_running
+}
+
+show_network_addresses() {
+    # One labelled row per network; never concatenate different NICs or assume eth0.
+    docker inspect "$1" --format '{{range $name, $net := .NetworkSettings.Networks}}{{printf "  Network: %s | MAC: %s | Docker IP: %s\n" $name $net.MacAddress $net.IPAddress}}{{end}}'
+    if [[ "$(get_agent_mode)" == remote ]]; then
+        local lease
+        lease=$(docker exec "$1" cat /run/isle-lease 2>/dev/null) || lease="not reported"
+        echo "  DHCP lease (interface / address / expiry): $lease"
+    fi
 }
 
 # Check if stale containers exist (stopped/exited/created)
@@ -1098,7 +1113,10 @@ show_status() {
 
     # Component 1: Host Agent (Systemd Service) - REQUIRED in core mode
     echo "Component 1: isle-host-agent (systemd service - mDNS, registry, auto-sync)"
-    if is_host_running; then
+    if ! host_agent_required; then
+        echo "  Policy: optional in remote mode; the remote container owns mDNS and registry watching"
+        if is_host_running; then echo "  Status: RUNNING (optional)"; else echo "  Status: INACTIVE (not required)"; fi
+    elif is_host_running; then
         log_success "  Status: RUNNING"
         local agent_mode
         agent_mode=$(grep ISLE_AGENT_MODE /etc/isle-mesh/agent/host-agent.conf 2>/dev/null | cut -d= -f2 || echo 'unknown')
@@ -1134,7 +1152,7 @@ show_status() {
     else
         log_error "  Status: NOT RUNNING (REQUIRED)"
         echo "  The host agent is required for proper agent operation"
-        echo "  Start with: isle agent start"
+        echo "  Inspect: isle update plan; recover with: sudo isle reconcile"
     fi
     echo ""
 
@@ -1145,12 +1163,7 @@ show_status() {
             log_success "  Status: RUNNING"
             docker ps --filter "name=${REMOTE_CONTAINER}" --format "  ID: {{.ID}}\n  Uptime: {{.Status}}"
 
-            local mac_addr
-            mac_addr=$(docker inspect "${REMOTE_CONTAINER}" --format '{{range .NetworkSettings.Networks}}{{.MacAddress}}{{end}}' | head -n1)
-            local ip_addr
-            ip_addr=$(docker exec "${REMOTE_CONTAINER}" ip -4 addr show eth0 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || echo "pending")
-            echo "  MAC: ${mac_addr}"
-            echo "  VLAN IP: ${ip_addr}"
+            show_network_addresses "${REMOTE_CONTAINER}"
 
             # Show isle info from discovery.json
             local remote_dir="${ISLE_AGENT_DIR}/remote"
@@ -1174,13 +1187,7 @@ show_status() {
             log_success "  Status: RUNNING"
             docker ps --filter "name=${VLAN_CONTAINER}" --format "  ID: {{.ID}}\n  Uptime: {{.Status}}"
 
-            # Get MAC and IP
-            local mac_addr
-            mac_addr=$(docker inspect "${VLAN_CONTAINER}" --format '{{range .NetworkSettings.Networks}}{{.MacAddress}}{{end}}' | head -n1)
-            local ip_addr
-            ip_addr=$(docker inspect "${VLAN_CONTAINER}" --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' | head -n1)
-            echo "  MAC: ${mac_addr}"
-            echo "  IP: ${ip_addr}"
+            show_network_addresses "${VLAN_CONTAINER}"
             echo "  HTTP: http://localhost/"
         else
             log_warn "  Status: STOPPED"
@@ -1238,14 +1245,14 @@ show_status() {
     else
         log_warn "Overall: Some required components are stopped"
         echo ""
-        if ! is_host_running; then
+        if host_agent_required && ! is_host_running; then
             echo "  - Host agent (isle-host-agent) is not running"
         fi
         if ! is_vlan_running; then
-            echo "  - VLAN agent (isle-vlan-agent) is not running"
+            echo "  - Proxy agent for ${mode} mode is not running"
         fi
         echo ""
-        echo "  Start with: isle agent start"
+        echo "  Inspect: isle update plan; recover with: sudo isle reconcile"
     fi
 
     echo ""
@@ -1312,6 +1319,23 @@ verify_setup() {
 
     local all_checks_passed=true
 
+    if ! host_agent_required; then
+        echo "Remote policy: host systemd agent is optional; remote container owns discovery and registry watching."
+        if ! is_vlan_running; then
+            log_error "Remote proxy is not running; inspect isle update plan and use sudo isle reconcile"
+            return 1
+        fi
+        local health
+        health=$(docker inspect "$REMOTE_CONTAINER" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}undefined{{end}}')
+        if [[ "$health" != healthy ]]; then
+            log_error "Remote proxy health: $health"
+            return 1
+        fi
+        docker exec "$REMOTE_CONTAINER" nginx -t || return 1
+        log_success "Required remote proxy is healthy; host service is not required"
+        return 0
+    fi
+
     # Check 1: Host Agent (Required)
     echo "=== Check 1: Host Agent (isle-host-agent - REQUIRED) ==="
     if is_host_running; then
@@ -1337,7 +1361,7 @@ verify_setup() {
     else
         log_error "Host agent is not running (REQUIRED)"
         echo "  The host agent manages mDNS, registry updates, and auto-sync"
-        echo "  Start with: isle agent start"
+        echo "  Inspect: isle update plan; recover with: sudo isle reconcile"
         all_checks_passed=false
     fi
     echo ""
