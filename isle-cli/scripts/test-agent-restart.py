@@ -23,12 +23,13 @@ class Restart(unittest.TestCase):
             p.start(); self.addCleanup(p.stop)
     def command(self, argv, **kwargs):
         self.calls.append(argv)
-        return subprocess.CompletedProcess(argv, 0, json.dumps([self.before]))
+        data = [{'Driver': 'bridge' if argv[-1] == 'bridge-net' else 'macvlan'}] if argv[:3] == ['docker', 'network', 'inspect'] else [self.before]
+        return subprocess.CompletedProcess(argv, 0, json.dumps(data))
     def test_core_and_remote_preserve_existing_container(self):
         for mode, name in [('remote', 'isle-remote-agent'), ('core', 'isle-vlan-agent')]:
             self.mode.write_text(mode); self.calls.clear(); ar.restart()
             self.assertIn(['docker', 'restart', '--time', '20', name], self.calls)
-            self.assertTrue(all(c[:2] in (['docker','inspect'], ['docker','restart'],
+            self.assertTrue(all(c[:2] in (['docker','inspect'], ['docker','restart'], ['docker','network'],
                 ['systemctl','restart'], ['systemctl','is-active']) or c == ['bash', str(Path(ar.__file__).with_name('hosts-reconcile.sh'))] for c in self.calls))
             self.assertEqual(self.calls[-1], ['bash', str(Path(ar.__file__).with_name('hosts-reconcile.sh'))])
     def test_host_ingress_failure_is_not_success(self):
@@ -48,6 +49,17 @@ class Restart(unittest.TestCase):
         after['NetworkSettings']['Networks']['mesh']['NetworkID'] = 'different'
         with patch.object(ar, 'inspect', side_effect=[self.before, after]), self.assertRaisesRegex(RuntimeError, 'membership changed'):
             ar.restart()
+    def test_bridge_mac_and_mount_order_can_change_but_isle_mac_cannot(self):
+        self.before['Mounts'].append({'Source':'/registry','Destination':'/registry'})
+        self.before['NetworkSettings']['Networks']['bridge'] = {'NetworkID':'bridge-net','MacAddress':'old'}
+        after=copy.deepcopy(self.before)
+        after['Mounts'].reverse()
+        after['NetworkSettings']['Networks']['bridge']['MacAddress']='new'
+        with patch.object(ar,'inspect',side_effect=[self.before,after]): ar.restart()
+        after['NetworkSettings']['Networks']['mesh']['MacAddress']='changed-isle-mac'
+        with patch.object(ar,'inspect',side_effect=[self.before,after]), self.assertRaisesRegex(RuntimeError,'membership changed'):
+            ar.restart()
+
     def test_missing_container_never_creates_or_joins(self):
         with patch.object(ar, 'inspect', side_effect=subprocess.CalledProcessError(1, 'inspect')), self.assertRaisesRegex(RuntimeError, 'missing'):
             ar.restart()

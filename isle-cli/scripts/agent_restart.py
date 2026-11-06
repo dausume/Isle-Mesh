@@ -12,10 +12,11 @@ def run(argv, **kwargs):
 def inspect(name):
     return json.loads(run(['docker', 'inspect', name], capture_output=True, text=True).stdout)[0]
 
-def identity(value):
-    # Lease addresses may change; network membership and MAC must not.
-    return (value['Id'], value['Image'], value['Config'].get('Env'), value.get('Mounts'),
-            {k: (v.get('NetworkID'), v.get('MacAddress'))
+def identity(value, fixed_mac_networks):
+    # Lease addresses and generated bridge MACs may change; preserve Isle-facing MACs.
+    return (value['Id'], value['Image'], value['Config'].get('Env'),
+            sorted(json.dumps(m, sort_keys=True) for m in value.get('Mounts', [])),
+            {k: (v.get('NetworkID'), v.get('MacAddress') if k in fixed_mac_networks else None)
              for k, v in value['NetworkSettings']['Networks'].items()})
 
 def restart():
@@ -34,6 +35,11 @@ def restart():
     # No successful restart can be declared without a defined health check.
     if not before['Config'].get('Healthcheck') or before['Config']['Healthcheck'].get('Test', ['NONE'])[0] == 'NONE':
         raise RuntimeError('Agent has no health check; update/reconcile its versioned runtime first')
+    fixed_mac_networks = set()
+    for network, endpoint in before['NetworkSettings']['Networks'].items():
+        driver = json.loads(run(['docker', 'network', 'inspect', endpoint['NetworkID']], capture_output=True, text=True).stdout)[0]['Driver']
+        if driver != 'bridge':
+            fixed_mac_networks.add(network)
     host_active = subprocess.run(['systemctl', 'is-active', '--quiet', 'isle-host-agent'], timeout=15).returncode == 0
     stage(ident, 'agent-restart')
     run(['docker', 'restart', '--time', '20', name])
@@ -44,7 +50,7 @@ def restart():
     deadline = time.monotonic() + 180
     while True:
         after = inspect(name)
-        if identity(before) != identity(after):
+        if identity(before, fixed_mac_networks) != identity(after, fixed_mac_networks):
             raise RuntimeError('Agent identity or network membership changed during restart')
         state = after['State']
         if state.get('Running') and state.get('Health', {}).get('Status') == 'healthy':
