@@ -16,7 +16,7 @@ class AppPreflightTest(unittest.TestCase):
             compose.write_text('services:\n  board:\n    image: fixture:1\n    expose: [9830]\n')
             for command, body in {
                 'docker': 'echo "docker $*" >> "$CALLS"\n[ "$1" = ps ] && echo isle-remote-agent\n',
-                'sudo': 'echo "sudo $*" >> "$CALLS"\nexit 1\n',
+                'sudo': 'echo "sudo $*" >> "$CALLS"\ncase "$*" in *member_preflight.py*) exit 0;; esac\nexit 1\n',
             }.items():
                 binary = root / command
                 binary.write_text('#!/bin/sh\n' + body)

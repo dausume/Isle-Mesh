@@ -16,7 +16,8 @@ sudo(){
     *'register --name demo-api '*) [[ "$CASE" != backend_registration ]] ;;
     *'register --name demo '*) [[ "$CASE" != frontend_registration ]] ;;
     *'docker compose '*) [[ "$CASE" != compose_failure ]] ;;
-    *'dns register '*) [[ "$CASE" != dns_failure ]] ;;
+    *'dns_publication.py '*) [[ "$CASE" != dns_failure ]] || { echo 'DNS publication pending; configuration retained, retry'; return 1; } ;;
+    *'engine_sync.py'*) [[ "$CASE" != engine_failure ]] || { echo 'Engine registry refused admission; configuration retained, retry'; return 1; } ;;
     *) return 0 ;;
   esac
 }
@@ -28,6 +29,18 @@ curl(){
     frontend_unhealthy) [[ "$*" != *'/api/health' ]] && { printf 503; return; } ;;
   esac
   printf 200
+}
+python3(){
+  if [[ "$1" == *provider_readiness.py ]]; then
+    printf 'readiness %s\n' "$*" >> "$CALLS"
+    case "$CASE" in
+      tls_failure) echo 'Declared health not ready; configuration retained, retry'; return 1 ;;
+      backend_unhealthy) [[ "$2" != *'/api/health' ]] || { echo 'Declared health not ready; configuration retained, retry'; return 1; } ;;
+      frontend_unhealthy) [[ "$2" == *'/api/health' ]] || { echo 'Declared health not ready; configuration retained, retry'; return 1; } ;;
+    esac
+    return 0
+  fi
+  command python3 "$@"
 }
 sleep(){ :; }
 require_member(){ :; }
@@ -74,14 +87,12 @@ class PolariDeployTest(unittest.TestCase):
         self.assertNotIn('register --name', calls)
 
     def test_unready_endpoints_never_report_success(self):
-        for case in ('tls_failure', 'dns_failure', 'backend_unhealthy', 'frontend_unhealthy'):
+        for case in ('tls_failure', 'dns_failure', 'backend_unhealthy', 'frontend_unhealthy', 'engine_failure'):
             with self.subTest(case=case):
                 result, calls = self.run_case(case)
                 self.assertNotEqual(result.returncode, 0, result.stdout)
-                self.assertIn('verification incomplete', result.stdout)
                 self.assertIn('configuration retained', result.stdout)
                 self.assertNotIn('deployed and verified', result.stdout)
-                self.assertEqual(calls.count('curl '), 12)
 
     def test_success_requires_both_trusted_endpoints(self):
         result, calls = self.run_case('healthy')
@@ -97,7 +108,7 @@ class PolariDeployTest(unittest.TestCase):
         result, calls = self.run_case('healthy', 'verify_instance demo')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn('sudo ', calls)
-        self.assertEqual(calls.count('curl '), 2)
+        self.assertEqual(calls.count('readiness '), 2)
 
     def test_ensure_stops_after_failed_step(self):
         action = r'''
