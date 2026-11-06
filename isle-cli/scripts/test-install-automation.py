@@ -55,8 +55,9 @@ class Automation(unittest.TestCase):
    network.member_plan(self.root)
  def test_generated_trust_dns_and_immutable_images_are_persistent(self):
   pins={'backend':'sha256:'+'a'*64,'frontend':'sha256:'+'b'*64}
-  compose,_,_=config.generate('compute','islemesh,board','both','/state/compute',images=pins,dns='10.23.0.1')
+  compose,_,_=config.generate('compute','islemesh,board','both','/state/compute',images=pins,dns='10.23.0.1',machine='member-one')
   b=compose['services']['backend'];self.assertEqual(b['image'],pins['backend'])
+  self.assertEqual(b['environment']['POLARI_MACHINE_NAME'],'member-one');self.assertEqual(b['environment']['POLARI_INSTANCE_NAME'],'compute')
   self.assertEqual(b['dns'],['10.23.0.1']);self.assertIn('/etc/ssl/certs:/etc/isle-trust:ro',b['volumes'])
   self.assertEqual(b['environment']['SSL_CERT_FILE'],'/etc/isle-trust/ca-certificates.crt')
   self.assertIn('backend-data:/data',b['volumes'])

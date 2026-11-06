@@ -91,7 +91,7 @@ def collect(device, images=()):
     record('resources.detail_json', json.dumps(collect_resources(run, vm_allocations, vm_status), separators=(',', ':')), 'host proc/sysfs, lsblk, running libvirt XML and Docker HostConfig')
     record('runtime.shell.installed', Path('/usr/bin/polari-app-shell').is_file(), 'local shell executable')
     for endpoint, url in [('whoami','https://whoami.isle/'),('polari','https://api.polari.isle/api/health'),('polari-frontend','https://polari.isle/')]:
-        code, output, _ = run(['curl','--silent','--show-error','--max-time','6','--output','/dev/null','--write-out','%{http_code}',url])
+        code, output, _ = run(['curl','--http1.1','--silent','--show-error','--max-time','6','--output','/dev/null','--write-out','%{http_code}',url])
         # A completed TLS exchange and HTTP response proves access, not an app's
         # authorization or all of its functions. DNS/TLS/timeouts are probe errors.
         record('access.'+endpoint+'.https', output == '200', 'trusted HTTPS:'+url, code != 0)
@@ -155,6 +155,7 @@ def main():
     parser.add_argument('--json',action='store_true',help='emit JSON (the default)')
     parser.add_argument('--device',default=current_device())
     parser.add_argument('--image',action='append',type=image_arg,default=[])
+    parser.add_argument('--periodic',action='store_true',help='log temporary publication unavailability without failing the reporting timer')
     parser.add_argument('--publish',help='explicit HTTPS Isle API base; does not change host configuration')
     args=parser.parse_args()
     if not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,62}',args.device):parser.error('device must be an explicit canonical hostname')
@@ -163,16 +164,21 @@ def main():
     body=json.dumps(report,indent=2)
     if args.publish:
         # No insecure fallback, no guessed localhost route and no embedded credentials.
-        result=subprocess.run(['curl','--fail','--silent','--show-error','--connect-timeout','5','--max-time','12',
+        result=subprocess.run(['curl','--http1.1','--fail','--silent','--show-error','--connect-timeout','5','--max-time','12',
             '--retry','2','--retry-delay','2','--retry-max-time','40','--retry-connrefused',
-            '-H','Content-Type: application/json','--data-binary','@-',args.publish+'/api/islemesh/ingest/device'],input=body,text=True,capture_output=True)
-        try: accepted=json.loads(result.stdout).get('ok') is True
+            '--write-out','\n%{http_code}', '-H','Content-Type: application/json','--data-binary','@-',args.publish+'/api/islemesh/ingest/device'],input=body,text=True,capture_output=True)
+        payload,separator,http=result.stdout.rpartition('\n')
+        if not separator or not http.isdigit():payload=result.stdout;http='0'
+        try: accepted=json.loads(payload).get('ok') is True
         except (ValueError,AttributeError): accepted=False
         if result.returncode or not accepted:
             # Report transport/startup failure without filling the journal
             # with the full resource snapshot every two minutes.
             detail=result.stderr.strip() or result.stdout[:500] or 'empty API response'
             print('Capability report not accepted: '+detail,file=sys.stderr)
+            if args.periodic and (result.returncode in (6,7,16,18,28,35,52,55,56) or result.returncode==22 and (http in ('408','429') or http.startswith('5'))):
+                print('Periodic publication skipped; next timer retries. No successful report claimed.',file=sys.stderr)
+                return 0
             if not args.json:
                 return 1
             print(body);return 1

@@ -123,7 +123,7 @@ Description=Feed isle state into prf-isle (push-to-polari)
 [Service]
 Type=oneshot
 User=$DEPLOY_USER
-ExecStart=$DIR/push-to-polari.sh
+ExecStart=/usr/share/isle-mesh/polari-isle/push-to-polari.sh
 UNIT
     sudo tee /etc/systemd/system/polari-isle-push.timer >/dev/null <<'UNIT'
 [Unit]

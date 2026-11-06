@@ -45,6 +45,9 @@ def apply():
     mode=Path('/etc/isle-mesh/agent/agent.mode').read_text().strip()
     if mode not in ('core','remote'):raise ValueError('Unknown membership mode')
     if os.geteuid()!=0:raise PermissionError('Host network reconciliation requires administrator authorization')
+    if mode=='remote':
+        from member_link import reconcile
+        reconcile()
     p=plan() if mode=='core' else member_plan();interface=p['interface'];gateway=p['gateway']
     if mode=='core':
         from router_forwarding import apply as forward

@@ -8,7 +8,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 
-def generate(name, modules, role, directory, backend_url='', frontend_origin='https://polari.isle', images=None, dns=None):
+def generate(name, modules, role, directory, backend_url='', frontend_origin='https://polari.isle', images=None, dns=None, machine=None):
     if not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,40}', name):
         raise ValueError('invalid deployment name')
     if modules and not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_.-]*(,[A-Za-z_][A-Za-z0-9_.-]*)*', modules):
@@ -35,7 +35,7 @@ def generate(name, modules, role, directory, backend_url='', frontend_origin='ht
     services = {}
     if role in ('both', 'backend'):
         services['backend'] = dict(image=images['backend'], container_name=f'prf-{name}-backend', restart='unless-stopped', networks=['isle-agent-net'],
-            environment={'WEBSOCKET_ENABLED':'true','WEBSOCKET_PORT':'3001','POLARI_MODULES':modules,'POLARI_LAZY_BOOT':'1','DATABASE_PATH':'/data/polari.db','SSL_CERT_FILE':'/etc/isle-trust/ca-certificates.crt','REQUESTS_CA_BUNDLE':'/etc/isle-trust/ca-certificates.crt','CORS_ENABLED':'true','CORS_ORIGINS':f'https://{name}.isle,{frontend_origin}'},
+            environment={'POLARI_INSTANCE_NAME':name, 'POLARI_MACHINE_NAME':machine or '', 'WEBSOCKET_ENABLED':'true','WEBSOCKET_PORT':'3001','POLARI_MODULES':modules,'POLARI_LAZY_BOOT':'1','DATABASE_PATH':'/data/polari.db','SSL_CERT_FILE':'/etc/isle-trust/ca-certificates.crt','REQUESTS_CA_BUNDLE':'/etc/isle-trust/ca-certificates.crt','CORS_ENABLED':'true','CORS_ORIGINS':f'https://{name}.isle,{frontend_origin}'},
             volumes=['backend-data:/data','/etc/ssl/certs:/etc/isle-trust:ro'],mem_limit='2g')
     if role in ('both', 'frontend'):
         services['frontend'] = dict(image=images['frontend'],container_name=f'prf-{name}-frontend',restart='unless-stopped',networks=['isle-agent-net'],volumes=[f'{directory}/runtime-config.json:/usr/share/nginx/html/assets/runtime-config.json:ro'],mem_limit='128m')
@@ -68,6 +68,7 @@ def main():
     from dns_publication import resolver
     dns=resolver()
     images=resolve(a.role)
-    compose,runtime,metadata=generate(a.name,a.modules,a.role,a.directory,a.backend_url,a.frontend_origin,images,dns)
+    from member_preflight import identity
+    compose,runtime,metadata=generate(a.name,a.modules,a.role,a.directory,a.backend_url,a.frontend_origin,images,dns,identity())
     write_configuration(a.directory,compose,runtime,metadata,os.environ.get('ISLE_OPERATION_ID',''))
 if __name__=='__main__':main()

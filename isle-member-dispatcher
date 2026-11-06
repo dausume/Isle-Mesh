@@ -1,0 +1,6 @@
+#!/bin/sh
+# NM invokes this as root. Defer work; never block DHCP or rejoin a member.
+case "${2:-}" in up|dhcp4-change) ;; *) exit 0;; esac
+[ "$(cat /etc/isle-mesh/agent/agent.mode 2>/dev/null)" = remote ] || exit 0
+[ "${1:-}" = "$(cat /etc/isle-mesh/agent/remote/interface.conf 2>/dev/null)" ] || exit 0
+systemctl --no-block start isle-resource-report.service

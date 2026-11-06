@@ -30,12 +30,13 @@ class DHCP(unittest.TestCase):
   name=self.root/'device-name';name.write_text('econ-core\n')
   source=(AGENT/'remote-entrypoint.sh').read_text().split('# --- Step 2:')[0]
   source=source.replace('/sys/class/net',str(net)).replace('/etc/isle-mesh/device-name',str(name)).replace('/run/isle-lease',str(self.state)).replace('/run/isle-dhcp.pid',str(self.pid))
+  source=source.replace('    sleep 1', '    sleep 0.01')
   source+='\nkill "$DHCP_PID"; wait "$DHCP_PID" 2>/dev/null || true\n'
   (self.root/'start.sh').write_text(source)
-  stub=self.root/'udhcpc';stub.write_text('#!/bin/sh\necho "$*" > "$CALLS"\nprintf "eth9 10.10.0.147 9999999999\\n" > "$STATE"\nexec sleep 10\n');stub.chmod(0o755)
+  stub=self.root/'udhcpc';stub.write_text('#!/bin/sh\necho "$*" > "$CALLS"\nsleep 0.55\nprintf "eth9 10.10.0.147 9999999999\\n" > "$STATE"\nexec sleep 10\n');stub.chmod(0o755)
   result=self.run_script('start.sh',VIRTUAL_MAC='02:00:00:00:00:09',ISLE_HOSTNAME='old-os-name',STATE=str(self.state))
   self.assertEqual(result.returncode,0,result.stderr)
-  args=(self.root/'calls').read_text().split();self.assertIn('hostname:econ-core',args);self.assertNotIn('-q',args);self.assertIn('-f',args);self.assertEqual(args[args.index('-i')+1],'eth9')
+  args=(self.root/'calls').read_text().split();self.assertIn('hostname:econ-core',args);self.assertNotIn('-q',args);self.assertNotIn('-n',args);self.assertIn('-f',args);self.assertEqual(args[args.index('-i')+1],'eth9')
   self.assertNotEqual(self.run_script('start.sh',VIRTUAL_MAC='02:00:00:00:00:99').returncode,0)
  def test_expiry_dead_client_and_nginx(self):
   self.run_script('lease-hook.sh','bound')

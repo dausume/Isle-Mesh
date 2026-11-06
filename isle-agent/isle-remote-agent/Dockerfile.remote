@@ -3,7 +3,7 @@
 FROM nginx:alpine
 
 # Install utilities: jq, avahi (mDNS), dbus (required by avahi), dhcp client
-RUN apk add --no-cache \
+RUN apk add --no-cache util-linux \
     bash \
     curl \
     jq \

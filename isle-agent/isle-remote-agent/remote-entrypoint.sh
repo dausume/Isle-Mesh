@@ -31,13 +31,12 @@ done
 [ -n "$MACVLAN_IF" ] || { echo 'Registered MAC interface not found'; exit 1; }
 # Foreground DHCP remains alive for renew/rebind; no quit-after-lease flag.
 rm -f /run/isle-lease
-udhcpc -f -n -i "$MACVLAN_IF" -t 10 -T 3 -s /usr/local/bin/lease-hook.sh -x hostname:"$ISLE_HOSTNAME" &
+udhcpc -f -i "$MACVLAN_IF" -t 10 -T 3 -s /usr/local/bin/lease-hook.sh -x hostname:"$ISLE_HOSTNAME" &
 DHCP_PID=$!
 echo "$DHCP_PID" > /run/isle-dhcp.pid
-tries=0
+trap 'kill "$DHCP_PID" 2>/dev/null || true; exit 0' TERM INT
 until [ -s /run/isle-lease ]; do
     kill -0 "$DHCP_PID" 2>/dev/null || { echo 'DHCP acquisition failed'; exit 1; }
-    tries=$((tries+1)); [ "$tries" -lt 40 ] || { kill "$DHCP_PID"; exit 1; }
     sleep 1
 done
 read -r _ VLAN_IP _ < /run/isle-lease

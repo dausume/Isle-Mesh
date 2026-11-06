@@ -796,7 +796,7 @@ setup_host_agent() {
     fi
 
     # Copy systemd service (always overwrite to pick up fixes)
-    sudo cp "${HOST_AGENT_DIR}/isle-host-agent.service" /etc/systemd/system/
+    sudo install -m 0644 "${HOST_AGENT_DIR}/isle-host-agent.service" /etc/systemd/system/isle-host-agent.service
     sudo systemctl daemon-reload
 
     # Clear any prior failed state before starting

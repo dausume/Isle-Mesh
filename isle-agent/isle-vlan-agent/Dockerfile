@@ -2,7 +2,7 @@
 FROM nginx:alpine
 
 # Install utilities including jq for JSON parsing
-RUN apk add --no-cache bash curl jq
+RUN apk add --no-cache bash curl jq util-linux openssl
 
 # Copy registry watcher script (watches registry.json for changes)
 COPY registry-watcher.sh /usr/local/bin/registry-watcher.sh

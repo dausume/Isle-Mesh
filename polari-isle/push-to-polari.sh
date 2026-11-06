@@ -3,13 +3,15 @@
 # (mac-5 seam, v1): device facts + agent registry + nginx fragments
 # POSTed to prf-isle over the agent (api.polari.isle). REAL data
 # only — this script never writes the mock_network flag.
-set -u
+set -euo pipefail
 API="https://api.polari.isle"
-CURL="curl -sk --resolve api.polari.isle:443:127.0.0.1"
-# the device's CANONICAL isle name (topology identity) — falls back to
-# the hostname; isle create/core-install may write the canonical file so
-# a machine's isle identity survives hostname quirks
-HOST=$(cat /etc/isle-mesh/canonical-name 2>/dev/null || hostname)
+CURL="curl --http1.1 --fail --silent --show-error --connect-timeout 5 --max-time 15"
+# Match every other shared membership reporter; never invent an OS-host alias.
+SCRIPT_ROOT="/usr/share/isle-mesh/isle-cli/scripts"
+if [ -f "$(dirname "$0")/../isle-cli/scripts/member_preflight.py" ]; then
+  SCRIPT_ROOT=$(cd "$(dirname "$0")/../isle-cli/scripts" && pwd)
+fi
+HOST=$(PYTHONPATH="$SCRIPT_ROOT" python3 -c "from member_preflight import identity; print(identity())") || exit 1
 
 # device facts + uplinks
 LINKS=$(ip -br link | awk '$1!~/^(lo|veth|br-|docker|virbr|isle-br)/ {print $1" "$2}')

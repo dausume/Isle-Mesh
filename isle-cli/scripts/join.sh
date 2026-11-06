@@ -570,6 +570,7 @@ check_device_name() {
 }
 
 finish_join() {
+    python3 -c 'import sys; sys.path.insert(0,sys.argv[1]); from member_link import reconcile; reconcile()' "$SCRIPT_DIR" || return 1
     setup_remote_dns
     local args=()
     [[ -z "$FINGERPRINT" ]] || args+=(--fingerprint "$FINGERPRINT")

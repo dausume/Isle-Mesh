@@ -37,19 +37,15 @@ fi
 # Create output directory if it doesn't exist
 mkdir -p "$OUTPUT_DIR"
 
-# Create a temp directory for new configs
-TEMP_DIR=$(mktemp -d)
-trap "rm -rf $TEMP_DIR" EXIT
-
-# Extract app names from the unified registry
-APPS=$(jq -r '.apps | to_entries[] | select(.value.services | type == "array" and length > 0) | .key' "$REGISTRY_FILE" 2>/dev/null || echo "")
-
-if [ -z "$APPS" ]; then
-    echo "No apps with services arrays found in registry"
-    # Clear all configs
-    rm -f "$OUTPUT_DIR"/*.conf
-    exit 0
-fi
+# Serialize generators. Never expose an empty/partial fragment set to reloads.
+exec 9>"$OUTPUT_DIR/.generation.lock"
+flock -x 9
+TEMP_DIR=$(mktemp -d "$OUTPUT_DIR/.generation.XXXXXX")
+trap 'rm -rf "$TEMP_DIR"' EXIT
+cp "$REGISTRY_FILE" "$TEMP_DIR/registry.json"
+REGISTRY_FILE="$TEMP_DIR/registry.json"
+jq -e 'type == "object" and (.apps | type == "object")' "$REGISTRY_FILE" >/dev/null
+APPS=$(jq -r '.apps | to_entries[] | select(.value.services | type == "array" and length > 0) | .key' "$REGISTRY_FILE")
 
 APP_COUNT=$(echo "$APPS" | wc -l)
 echo "Generating configs for $APP_COUNT app(s)..."
@@ -78,7 +74,7 @@ echo "$APPS" | while IFS= read -r APP_NAME; do
     cat > "$CONFIG_FILE" <<EOF
 # Auto-generated config for app: $APP_NAME
 # Domain: $APP_DOMAIN
-# Generated at: $(date -Iseconds)
+# Managed by the shared Isle registry generator
 EOF
 
     # Iterate over each service in the app
@@ -182,16 +178,22 @@ EOF
 
 done
 
-# Move all new configs to output directory
-# First, remove old configs
-rm -f "$OUTPUT_DIR"/*.conf
-
-# Copy new configs
-if [ -n "$(ls -A $TEMP_DIR 2>/dev/null)" ]; then
-    cp "$TEMP_DIR"/*.conf "$OUTPUT_DIR/" 2>/dev/null || true
-    echo "Generated $(ls -1 $TEMP_DIR/*.conf 2>/dev/null | wc -l) config file(s)"
-else
-    echo "No config files to generate"
+# Validate the complete candidate using nginx itself before publication.
+MAIN_CONFIG="${NGINX_MAIN_CONFIG:-/etc/nginx/nginx.conf}"
+[ -f "$MAIN_CONFIG" ] || { echo "Missing nginx main configuration" >&2; exit 1; }
+[ -n "$APPS" ] || : > "$TEMP_DIR/empty.conf"
+sed "s|include /etc/nginx/configs/\*.conf;|include $TEMP_DIR/*.conf;|" "$MAIN_CONFIG" > "$TEMP_DIR/main.candidate"
+grep -F "include $TEMP_DIR/*.conf;" "$TEMP_DIR/main.candidate" >/dev/null || { echo 'Main nginx config lacks the managed include' >&2; exit 1; }
+nginx -t -c "$TEMP_DIR/main.candidate" || exit 1
+cat "$TEMP_DIR"/*.conf > "$TEMP_DIR/complete.candidate"
+if ! cmp -s "$TEMP_DIR/complete.candidate" "$OUTPUT_DIR/isle-generated.conf"; then
+    chmod 644 "$TEMP_DIR/complete.candidate"
+    mv -f "$TEMP_DIR/complete.candidate" "$OUTPUT_DIR/isle-generated.conf"
 fi
-
-exit 0
+# Migration: remove legacy per-app files only AFTER the complete replacement exists.
+# Any concurrent reload during this one-time overlap either sees the old valid set
+# or rejects duplicate upstreams and keeps its previous running configuration.
+for fragment in "$OUTPUT_DIR"/*.conf; do
+    [ "$fragment" = "$OUTPUT_DIR/isle-generated.conf" ] || rm -f "$fragment"
+done
+echo 'Published complete validated proxy configuration'

@@ -63,10 +63,15 @@ def reconcile(release,mode):
         admit_installed(actual,verified)
         config=json.loads(overlay.read_text()) if overlay.exists() else {'services':{}}
         config['services'][service]={'image':actual}
+        if name in ('isle-vlan-agent','isle-remote-agent'):
+            # Upgrade the standard main config with the admitted CLI package;
+            # Compose merges mounts by target, preserving all registry/trust/data.
+            main=Path(__file__).resolve().parents[2]/'isle-agent/isle-vlan-agent/nginx.conf'
+            config['services'][service]['volumes']=[str(main)+':/etc/nginx/nginx.conf:ro']
         if name=='prf-isle-backend':
             from dns_publication import resolver
             config['services'][service].update({
-                'environment':{'SSL_CERT_FILE':'/etc/isle-trust/ca-certificates.crt',
+                'environment':{'POLARI_INSTANCE_NAME':'polari','POLARI_MACHINE_NAME':CANONICAL.read_text().strip(),'SSL_CERT_FILE':'/etc/isle-trust/ca-certificates.crt',
                                'REQUESTS_CA_BUNDLE':'/etc/isle-trust/ca-certificates.crt'},
                 'volumes':['/etc/ssl/certs:/etc/isle-trust:ro'], 'dns':[resolver()]})
         # Keep recovery information separate from immutable package files.
