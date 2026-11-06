@@ -12,8 +12,9 @@ def origin(url):
     if u.scheme!='https' or not (u.hostname or '').endswith('.isle') or u.username or u.password or u.path not in ('','/') or u.query or u.fragment:
         raise ValueError('Engine/provider requires a trusted Isle HTTPS origin')
     return url.rstrip('/')
-def request(url,payload=None):
+def request(url,payload=None,post=False):
     argv=['curl','--http1.1','--fail','--silent','--show-error','--max-time','15',url]
+    if post:argv+=['--request','POST']
     if payload is not None:argv+=['-H','Content-Type: application/json','--data-binary',json.dumps(payload)]
     p=subprocess.run(argv,capture_output=True,text=True,check=True)
     d=json.loads(p.stdout)
@@ -44,12 +45,11 @@ def sync():
         d=json.loads(path.read_text())
         if d.get('role') in ('both','backend'):local.append(origin(d['backend_url']))
     if not local:return
-    engines=request(CORE+'/api/islemesh/engines')['engines']
+    # The backend owns registry provenance, binding and retirement. Use the same
+    # generic refresh door as `pol engines sync`, never mirror per-row ingests.
     for endpoint in sorted(set(local)):
-        for row in engines:
-            if row.get('is_mock'):continue
-            result=request(endpoint+'/api/islemesh/ingest/engine',payload(row))
-            print(json.dumps({'provider':endpoint,'engine':row.get('name'),'bound':result.get('bound'),'note':result.get('note')}))
+        result=request(endpoint+'/api/islemesh/engines/sync',post=True)
+        print(json.dumps({'provider':endpoint,'registryRefresh':result}))
 if __name__=='__main__':
     try:sync()
     except (OSError,ValueError,KeyError,subprocess.SubprocessError) as exc:print('Engine reconciliation: '+str(exc),file=sys.stderr);sys.exit(1)
