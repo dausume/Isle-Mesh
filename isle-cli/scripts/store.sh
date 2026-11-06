@@ -73,7 +73,8 @@ for e in d["entries"]:
         ;;
     show)
         NAME="${2:?usage: isle store show <name>}"
-        api_get "/api/islemesh/catalog/$NAME" | python3 -c '
+        RESP=$(api_get "/api/islemesh/catalog/$NAME") || { echo "Catalog entry unavailable: $NAME (not defined or service unreachable)" >&2; exit 1; }
+        printf '%s' "$RESP" | python3 -c '
 import json, sys
 d = json.load(sys.stdin)
 if not d.get("ok"): print(d.get("error","not found")); sys.exit(1)
@@ -145,6 +146,7 @@ else:
             read -r -p "Proceed? [y/N] " a; [ "$a" = y ] || [ "$a" = Y ] || { echo aborted; exit 130; }
         fi
         if python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1]))["entry"]["install_plan"].get("release") else 1)' "$ISLE_OPERATION_DIR/catalog.json"; then
+            python3 "$SCRIPT_DIR/member_preflight.py" --hosting --migrate || exit 1
             exec python3 "$SCRIPT_DIR/catalog_artifacts.py" install "$ISLE_OPERATION_DIR/catalog.json" "${DUP_NAME:-$NAME}"
         fi
         record_stage executing

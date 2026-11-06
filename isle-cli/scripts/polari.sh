@@ -21,7 +21,7 @@ step(){ echo -e "${C}==>${N} $*"; }
 die(){ echo -e "${R}[FAIL]${N} $*"; exit 1; }
 
 API="https://api.polari.isle"
-CURL="curl -sSf --max-time 8"
+CURL="curl --http1.1 -sSf --max-time 8"
 REGISTRY="${ISLE_REGISTRY:-registry.isle:5000}"
 BASE=/etc/isle-mesh/polari
 
@@ -48,29 +48,9 @@ next_name(){
     printf '%s' "$catalog" | python3 "$SCRIPT_DIR/names.py" instance --app polari --device "$device"
 }
 
-ensure_images(){
-    if [[ "${ROLE:-both}" != frontend ]] && ! docker image inspect prf-backend:staging >/dev/null 2>&1; then
-        step "pulling prf images from the mesh registry"
-        [ "$(cat /etc/polari/install-mode 2>/dev/null)" != offline ] \
-            || die "offline: prf-backend:staging is not supplied for this app variant; stage its image first"
-        docker pull "$REGISTRY/prf-backend:staging" 2>/dev/null \
-            || die "no prf-backend:staging locally or in the configured Isle registry"
-        docker tag "$REGISTRY/prf-backend:staging" prf-backend:staging \
-            || die "could not tag the supplied backend image"
-    fi
-    if [[ "${ROLE:-both}" != backend ]] && ! docker image inspect prf-frontend:staging >/dev/null 2>&1; then
-        [ "$(cat /etc/polari/install-mode 2>/dev/null)" != offline ] \
-            || die "offline: prf-frontend:staging is not supplied for this app variant; stage its image first"
-        docker pull "$REGISTRY/prf-frontend:staging" 2>/dev/null \
-            || die "no prf-frontend:staging locally or in the configured Isle registry"
-        docker tag "$REGISTRY/prf-frontend:staging" prf-frontend:staging \
-            || die "could not tag the supplied frontend image"
-    fi
-    ok "prf images present"
-}
 
 write_configs(){
-    sudo python3 "$SCRIPT_DIR/polari-component-config.py" --name "$1" --modules "$2" \
+    sudo --preserve-env=ISLE_OPERATION_ID python3 "$SCRIPT_DIR/polari-component-config.py" --name "$1" --modules "$2" \
         --directory "$BASE/$1" --role "${ROLE:-both}" --backend-url "${BACKEND_URL:-}" --frontend-origin "${FRONTEND_ORIGIN:-https://polari.isle}"
 }
 
@@ -105,6 +85,10 @@ PYEOF
     rm -f "$RPT"
 }
 
+provider_stage(){
+    [ -z "${ISLE_OPERATION_ID:-}" ] || python3 "$SCRIPT_DIR/operations.py" stage "$ISLE_OPERATION_ID" "$1" || return 1
+}
+
 deploy(){
     local NAME="" MODULES="islemesh" ROLE=both BACKEND_URL="" FRONTEND_ORIGIN=https://polari.isle
     while [ $# -gt 0 ]; do case "$1" in
@@ -115,11 +99,20 @@ deploy(){
     esac; done
     [[ "$ROLE" == both || "$ROLE" == frontend || "$ROLE" == backend ]] || die "--role must be both, frontend or backend"
     [[ "$ROLE" != frontend || -n "$BACKEND_URL" ]] || die "frontend-only deployment requires --backend-url https://api.<name>.isle"
+    provider_stage provider-preflight || return 1
     require_member
+    sudo python3 "$SCRIPT_DIR/member_preflight.py" --hosting --migrate || die "membership preflight failed"
     [[ -n "$NAME" ]] || NAME=$(next_name) || die "cannot choose an unused device-based name"
     echo "$NAME" | grep -qE '^[a-z0-9][a-z0-9-]{0,40}$' || die "bad instance name: $NAME"
     # Never silently change an existing composition and strand its other role.
-    [[ ! -d "$BASE/$NAME" ]] || die "$NAME already exists; use its existing compose configuration or choose another deployment name"
+    if [[ -d "$BASE/$NAME" && -f "$BASE/$NAME/deployment.json" ]]; then
+        python3 - "$BASE/$NAME/deployment.json" "$ROLE" "$MODULES" <<'EXISTING' || die "Existing instance role/modules differ; use module operations or another name"
+import json,sys
+x=json.load(open(sys.argv[1]));assert x['role']==sys.argv[2] and x['modules']==sys.argv[3]
+EXISTING
+    elif [[ -d "$BASE/$NAME" && -z "${ISLE_OPERATION_ID:-}" ]]; then
+        die "Existing untracked instance directory; refusing replacement"
+    fi
     local -a DOMAINS=() SERVICES=()
     if [[ "$ROLE" != backend ]]; then DOMAINS+=("$NAME.isle"); SERVICES+=(frontend); fi
     if [[ "$ROLE" != frontend ]]; then DOMAINS+=("api.$NAME.isle"); SERVICES+=(backend); fi
@@ -127,14 +120,15 @@ deploy(){
     python3 - "$SCRIPT_DIR" "$NAME" "$MODULES" "$ROLE" "$BASE/$NAME" "$BACKEND_URL" "$FRONTEND_ORIGIN" <<'VALIDATE' || die "invalid component configuration"
 import importlib.util,sys
 spec=importlib.util.spec_from_file_location('config',sys.argv[1]+'/polari-component-config.py');m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
-m.generate(*sys.argv[2:])
+m.generate(*sys.argv[2:],images={'backend':'sha256:'+'0'*64,'frontend':'sha256:'+'0'*64})
 VALIDATE
     for dom in "${DOMAINS[@]}"; do
         sudo bash "$SCRIPT_DIR/certs.sh" ensure "$dom" || die "$dom certificate not ready"
     done
-    ensure_images
+    provider_stage provider-artifacts || return 1
     write_configs "$NAME" "$MODULES" || die "configuration generation failed"
-    (cd "$BASE/$NAME" && sudo docker compose -p "prf-$NAME" up -d) || die "compose up failed"
+    provider_stage provider-compose || return 1
+    (cd "$BASE/$NAME" && sudo docker compose -p "prf-$NAME" up -d --no-build --pull never) || die "compose up failed"
     local AM=/usr/share/isle-mesh/isle-agent/scripts/agent-manager.sh service app dom port IP
     for service in "${SERVICES[@]}"; do
         if [[ "$service" == frontend ]]; then app="$NAME"; dom="$NAME.isle"; port=4200
@@ -151,12 +145,17 @@ for component,key in [('frontend',name),('backend',name+'-api')]:
     app['modes']=modes+['polari-role:'+component,'polari-deployment:'+name]+(['modules:'+modules] if component=='backend' else [])
 json.dump(reg,open(path,'w'),indent=2)
 ROLES
+    provider_stage provider-dns || return 1
     IP=$(agent_ip)
     for dom in "${DOMAINS[@]}"; do
-        sudo /usr/local/bin/isle dns register "$dom" "$IP" || warn "$dom awaits core DNS reconciliation"
+        sudo python3 "$SCRIPT_DIR/dns_publication.py" "$dom" "$IP" || return 1
     done
     self_report
+    sudo bash "$SCRIPT_DIR/hosts-reconcile.sh" || return 1
+    provider_stage provider-readiness || return 1
     verify_instance "$NAME" || return 1
+    provider_stage provider-engines || return 1
+    sudo python3 "$SCRIPT_DIR/engine_sync.py" || return 1
     ok "Polari $ROLE deployment '$NAME' verified. Isle minimum: one frontend and one backend across any devices."
 }
 
@@ -168,19 +167,12 @@ verify_instance(){
         ROLE=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["role"])' "$BASE/$NAME/deployment.json")
         BACKEND_URL=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["backend_url"])' "$BASE/$NAME/deployment.json")
     fi
-    for i in $(seq 1 6); do
-        backend=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 6 "$BACKEND_URL/api/health" 2>/dev/null) || backend=000
-        frontend=200
-        if [[ "$ROLE" != backend ]]; then frontend=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 6 "https://$NAME.isle/" 2>/dev/null) || frontend=000; fi
-        if [[ "$backend" == 200 && "$frontend" == 200 ]]; then
-            ok "$NAME: $ROLE endpoints answer with normal DNS and trusted HTTPS"
-            [[ "$ROLE" != frontend ]] || warn "Verify browser access and CORS from https://$NAME.isle at $BACKEND_URL; a host curl is not a browser connectivity check"
-            return 0
-        fi
-        [[ "$i" == 6 ]] || sleep 5
-    done
-    warn "$NAME verification incomplete: backend=$backend frontend=$frontend; configuration retained"
-    return 1
+    python3 "$SCRIPT_DIR/provider_readiness.py" "$BACKEND_URL/api/health" || return 1
+    if [[ "$ROLE" != backend ]]; then
+        python3 "$SCRIPT_DIR/provider_readiness.py" "https://$NAME.isle/" --http-only || return 1
+    fi
+    ok "$NAME: declared endpoints ready over trusted HTTPS"
+
 }
 
 # THE DYNAMIC-URL PROOF (Dustin #1): change a LIVE instance's URL
@@ -296,7 +288,7 @@ except json.JSONDecodeError:
     if not count:raise ValueError('no backend module configuration')
 open(p,'w').write(text)
 MODULES
-    (cd "$DIR" && sudo docker compose -p "prf-$NAME" up -d) >/dev/null 2>&1 \
+    (cd "$DIR" && sudo docker compose -p "prf-$NAME" up -d --no-build --pull never) >/dev/null 2>&1 \
         || warn "recreate of prf-$NAME had warnings"
     # re-record the modules note in the registry entry
     sudo python3 - "$NAME" "$CSV" <<'PYMOD' 2>/dev/null || true
@@ -520,6 +512,13 @@ for a in d.get("assessments", []):
     print("[%s] %s" % (a["level"], a["message"]))'
 }
 
+if [[ "${1:-}" == instance && "${2:-}" == deploy && -z "${ISLE_OPERATION_ID:-}" ]]; then
+    if [[ " $* " != *" --name "* ]]; then
+        generated=$(next_name) || die "Cannot select a stable instance name; pass --name explicitly"
+        set -- "$@" --name "$generated"
+    fi
+    exec python3 "$SCRIPT_DIR/operations.py" run polari "$@"
+fi
 case "${1:-help}" in
     security) shift; exec python3 "$SCRIPT_DIR/polari-security.py" "$@" ;;
     instance)

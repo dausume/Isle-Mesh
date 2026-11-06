@@ -51,6 +51,12 @@ def latest(name):
     return max(rows,key=lambda d:d['createdAt']) if rows else None
 
 def request(args):
+    if args[:3]==['polari','instance','deploy']:
+        rest=args[3:];allowed={'--name','--role','--modules','--backend-url','--frontend-origin'}
+        if len(rest)%2 or any(rest[i] not in allowed for i in range(0,len(rest),2)) or len(set(rest[::2]))!=len(rest[::2]):
+            raise ValueError('Invalid Polari deploy parameters')
+        if '--name' not in rest:raise ValueError('Journaled deployment requires --name for stable retry')
+        return list(args)
     if len(args)==3 and args[:2]==['update','apply'] and re.fullmatch('[a-f0-9]{64}',args[2]): return list(args)
     if args in (['reconcile','apply','device'], ['agent','restart','device']): return list(args)
     if len(args)<3 or args[:2] not in (['store','install'],['store','uninstall']):

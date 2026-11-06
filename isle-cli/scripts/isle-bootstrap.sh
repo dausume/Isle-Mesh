@@ -25,21 +25,29 @@ ok(){ echo -e "${G}[ OK ]${N} $*"; }
 warn(){ echo -e "${Y}[WARN]${N} $*"; }
 die(){ echo -e "${R}[FAIL]${N} $*"; exit 1; }
 
+UPDATE_ONLY=0; RELEASE=""
 FP=""; CORE=""; WANT_HOST=0; INSTALL_MODE=$(cat /etc/polari/install-mode 2>/dev/null || echo online)
 while [ $# -gt 0 ]; do case "$1" in
+    --update) UPDATE_ONLY=1; shift ;;
+    --release) RELEASE="$2"; shift 2 ;;
     --fingerprint) FP="$2"; shift 2 ;;
     --core) CORE="$2"; shift 2 ;;
     --host) WANT_HOST=1; shift ;;
     --offline) INSTALL_MODE="offline"; shift ;;
     --online) INSTALL_MODE="online"; shift ;;
-    *) shift ;;
+    *) die "unknown bootstrap option: $1" ;;
 esac; done
-[ -n "$FP" ] || die "usage: sudo bash isle-bootstrap.sh --fingerprint <CA sha256> [--core <ip>] [--host]
+[ -n "$FP" ] || [ "$UPDATE_ONLY" = 1 ] || die "usage: sudo bash isle-bootstrap.sh --fingerprint <CA sha256> [--core <ip>] [--host]
 (the fingerprint comes from the core's 'isle core-install' output — verify it out-of-band)"
 [ "$(id -u)" = 0 ] || die "run with sudo (installs packages + trust)"
 command -v openssl >/dev/null || die "openssl required"
 command -v curl >/dev/null || command -v wget >/dev/null \
     || die "curl or wget required"
+
+if [ "$UPDATE_ONLY" = 1 ]; then
+    [ -f /etc/isle-mesh/agent/agent.mode ] || die "--update requires existing membership"
+    [[ "$RELEASE" =~ ^[a-f0-9]{64}$ ]] || die "--update requires --release <reviewed immutable release-id>"
+fi
 
 norm(){ echo "$1" | tr -d ': ' | tr '[:lower:]' '[:upper:]'; }
 
@@ -47,7 +55,7 @@ norm(){ echo "$1" | tr -d ': ' | tr '[:lower:]' '[:upper:]'; }
 # fingerprint-verified); curl preferred, wget on fresh boxes
 fetch_k(){ # $1 url, $2 out
     if command -v curl >/dev/null; then
-        curl -sk --max-time 8 -o "$2" "$1"
+        curl --http1.1 --fail -sk --max-time 8 -o "$2" "$1"
     else
         wget -q --timeout=8 --no-check-certificate -O "$2" "$1"
     fi
@@ -55,7 +63,7 @@ fetch_k(){ # $1 url, $2 out
 # fetch AUTHENTICATED by the isle root CA
 fetch_ca(){ # $1 url, $2 out
     if command -v curl >/dev/null; then
-        curl -sf --max-time 8 --cacert /etc/isle-mesh/ca/isle-root.crt -o "$2" "$1"
+        curl --http1.1 -sf --max-time 8 --cacert /etc/isle-mesh/ca/isle-root.crt -o "$2" "$1"
     else
         wget -q --timeout=8 --ca-certificate=/etc/isle-mesh/ca/isle-root.crt -O "$2" "$1"
     fi
@@ -74,13 +82,20 @@ for d in trust.isle apt.isle; do
     fi
 done
 
+# Existing members can retain authenticated trust; no reset or onboard.
+
 # ---- 1. the isle root CA, fingerprint-verified ----
 echo
 echo "==> 1/4 isle CA (fingerprint-verified)"
 TMP=$(mktemp)
+if [ -z "$FP" ] && [ "$UPDATE_ONLY" = 1 ]; then
+    fetch_ca https://apt.isle/isle-root.crt "$TMP" || die "Existing trust cannot authenticate core; use independently verified --fingerprint, never auto-trust a reset root"
+    FP=$(openssl x509 -in "$TMP" -noout -fingerprint -sha256 | cut -d= -f2)
+else
 fetch_k https://trust.isle/ca/isle-root.crt "$TMP" \
     || fetch_k https://apt.isle/isle-root.crt "$TMP" \
     || die "cannot fetch the isle CA (is this device on the isle's network? try --core <ip>)"
+fi
 GOT=$(openssl x509 -in "$TMP" -noout -fingerprint -sha256 2>/dev/null | cut -d= -f2)
 [ -n "$GOT" ] || die "fetched file is not a certificate"
 if [ "$(norm "$GOT")" != "$(norm "$FP")" ]; then
@@ -88,22 +103,51 @@ if [ "$(norm "$GOT")" != "$(norm "$FP")" ]; then
     echo "   got:      $GOT"
     die "CA FINGERPRINT MISMATCH — refusing to trust. Verify the fingerprint with the isle's operator."
 fi
+openssl x509 -in "$TMP" -noout -checkend 0 >/dev/null && openssl x509 -in "$TMP" -noout -text | grep -q "CA:TRUE" || die "Invalid or expired CA"
 ok "fingerprint matches — trusting this isle"
 mkdir -p /etc/isle-mesh/ca /usr/local/share/ca-certificates
 # install -m: a plain cp of the mktemp file keeps mode 600 —
 # root-only, which broke every later unprivileged CA read (econ-core)
 install -m 644 "$TMP" /etc/isle-mesh/ca/isle-root.crt
 install -m 644 "$TMP" /usr/local/share/ca-certificates/isle-root.crt
-update-ca-certificates >/dev/null 2>&1 && ok "system store: trusted" || warn "update-ca-certificates failed"
+update-ca-certificates --fresh >/dev/null 2>&1 && ok "system store: trusted" || die "update-ca-certificates failed"
 rm -f "$TMP"
 
 # ---- 2. apt-on-mesh ----
 echo
 echo "==> 2/4 apt-on-mesh"
 KEYRING=/usr/share/keyrings/isle-archive-keyring.gpg
-fetch_ca https://apt.isle/isle-archive-keyring.gpg "$KEYRING" \
-    || die "cannot fetch the archive key from https://apt.isle (core published? isle apt-repo publish)"
+KEY_TMP=$(mktemp)
+fetch_ca https://apt.isle/isle-archive-keyring.gpg "$KEY_TMP" \
+    || { rm -f "$KEY_TMP"; die "cannot fetch the archive key from authenticated apt.isle"; }
+gpg --batch --show-keys "$KEY_TMP" >/dev/null 2>&1 || { rm -f "$KEY_TMP"; die "invalid archive key"; }
+install -m 644 "$KEY_TMP" "$KEYRING" || die "cannot install archive key"
+rm -f "$KEY_TMP"
 ok "archive key trusted over the authenticated Isle channel"
+
+if [ "$UPDATE_ONLY" = 1 ]; then
+    # Authenticate the metadata, bind it to the reviewed ID, then let signed APT
+    # bootstrap only the CLI. The new shared update operation handles the rest.
+    META=$(mktemp)
+    fetch_ca https://api.polari.isle/api/islemesh/updates "$META" || die "Cannot read authenticated release"
+    VERSION=$(python3 - "$META" "$RELEASE" <<'BOOTPY'
+import hashlib,json,sys
+r=json.load(open(sys.argv[1]))['release']
+extras={k:r[k] for k in ('bundles','runtimes') if k in r}
+identity={'packages':r['packages'],**extras} if extras else r['packages']
+assert r['id']==sys.argv[2]==hashlib.sha256(json.dumps(identity,sort_keys=True).encode()).hexdigest(),'release mismatch'
+p=next(x for x in r['packages'] if x['name']=='isle-mesh-cli')
+import re
+assert re.fullmatch(r'[0-9A-Za-z.+:~_-]{1,100}',p['version'])
+print(p['version'])
+BOOTPY
+) || die "Release validation failed"
+    rm -f "$META"
+    printf '%s\n' 'deb [signed-by=/usr/share/keyrings/isle-archive-keyring.gpg] https://apt.isle ./' > /etc/apt/sources.list.d/00-isle-mesh.list
+    apt-get update || die "Signed package index refresh failed"
+    apt-get --no-remove install -y "isle-mesh-cli=$VERSION" || die "CLI bootstrap failed"
+    exec isle update apply "$RELEASE"
+fi
 
 # ---- 3. the CLI + the store (runtime rides Depends) ----
 echo

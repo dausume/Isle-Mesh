@@ -93,6 +93,8 @@ fi
 
 echo "deploying '$NAME' -> https://$DOMAIN (service $SERVICE:$PORT, ${#SERVICES[@]} service(s))"
 
+sudo python3 "$SCRIPT_DIR/member_preflight.py" --hosting --migrate || die "membership/hosting preflight failed"
+
 # Resolve the service identity before launching containers. Members use the
 # authenticated enrollment; only the CA host can issue a leaf locally.
 if [[ "$DOMAIN" == *.isle ]]; then
@@ -110,6 +112,7 @@ if isle_offline; then
     done <<< "$refs"
     OFFLINE_ARGS=(--no-build --pull never)
 fi
+
 
 # ---- 1. compose up with the auto-isle overlay
 sudo mkdir -p "$APPS_DIR/$NAME"
@@ -150,13 +153,10 @@ source "$SCRIPT_DIR/agent-address.sh"
 AGENT_IP=$(isle_agent_address) || AGENT_IP=""
 DNS_OK=0
 if [ -n "${AGENT_IP:-}" ]; then
-    if sudo /usr/local/bin/isle dns register "$DOMAIN" "$AGENT_IP" >/dev/null 2>&1; then
-        ok ".isle DNS: $DOMAIN -> $AGENT_IP"; DNS_OK=1
-    else
-        warn "router DNS not registrable here — awaiting the core DNS relay for $DOMAIN; cross-device access is not verified"
-    fi
+    sudo python3 "$SCRIPT_DIR/dns_publication.py" "$DOMAIN" "$AGENT_IP" || die "core DNS publication pending; retry shared operation"
+    DNS_OK=1
 else
-    warn "no verified Isle-facing agent address — DNS skipped"
+    die "No verified Isle-facing agent address; registration retained for retry"
 fi
 
 # ---- 5. engine declaration (what this app provides to polari)
@@ -226,3 +226,6 @@ done
 [ "$READY" = 1 ] || die "installed files retained, but https://$DOMAIN is not healthy yet; retry this same instance after checking its route and service logs"
 python3 "$SCRIPT_DIR/capabilities.py" status --publish https://api.polari.isle || warn "app is reachable, but resource publication needs retry"
 ok "Deployment verified: $NAME on $(python3 "$SCRIPT_DIR/names.py" current-device), trusted HTTPS https://$DOMAIN"
+
+# Generic registration is part of deployment success, not a manual ingest.
+sudo python3 "$SCRIPT_DIR/engine_sync.py" || die "engine registry reconciliation failed; retry the shared operation"

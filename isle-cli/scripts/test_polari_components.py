@@ -6,7 +6,7 @@ ROOT=Path(__file__).parent
 spec=importlib.util.spec_from_file_location('config',ROOT/'polari-component-config.py');c=importlib.util.module_from_spec(spec);spec.loader.exec_module(c)
 
 class Components(unittest.TestCase):
-    def make(self,role,**kw):return c.generate('compute','islemesh,electronics',role,'/tmp/test-instance',**kw)
+    def make(self,role,**kw):return c.generate('compute','islemesh,electronics',role,'/tmp/test-instance',images={'backend':'sha256:'+'a'*64,'frontend':'sha256:'+'b'*64},dns='10.10.0.1',**kw)
     def test_backend_only_no_frontend_image_or_volume(self):
         compose,runtime,_=self.make('backend')
         self.assertEqual(set(compose['services']),{'backend'})

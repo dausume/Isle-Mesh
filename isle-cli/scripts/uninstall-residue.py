@@ -62,10 +62,11 @@ def processes():
 def nss_certs(user_homes):
     found=[]
     for home in user_homes:
-        db=home/'.pki/nssdb'
-        if not (db/'cert9.db').exists(): continue
-        result=subprocess.run(['certutil','-d','sql:'+str(db),'-L','-n','Isle Root CA'],capture_output=True)
-        if result.returncode==0: found.append(db)
+        from firefox_trust import profiles
+        for db in [home/'.pki/nssdb',*profiles(home)]:
+            if not (db/'cert9.db').exists():continue
+            result=subprocess.run(['certutil','-d','sql:'+str(db),'-L','-n','Isle Root CA'],capture_output=True)
+            if result.returncode==0:found.append(db)
     return found
 
 
@@ -90,6 +91,8 @@ def main():
             result=subprocess.run(['certutil','-d','sql:'+str(db),'-L','-n','Isle Root CA','-a'],capture_output=True,check=True)
             (backup/(str(db).strip('/').replace('/','_')+'.crt')).write_bytes(result.stdout)
             subprocess.run(['certutil','-d','sql:'+str(db),'-D','-n','Isle Root CA'],check=True)
+        from firefox_trust import policy
+        policy(remove=True)
         for path in paths(user_homes):
             dest=backup/str(path).strip('/').replace('/','_')
             if dest.exists() or dest.is_symlink():raise RuntimeError('Backup destination already exists: '+str(dest))

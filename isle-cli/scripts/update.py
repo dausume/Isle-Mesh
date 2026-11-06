@@ -57,6 +57,8 @@ def selected_packages(release):
 def main(args):
     action=args[0] if args else 'plan'
     if action=='plan' and len(args)<=1:
+        from member_preflight import check
+        check(hosting=any(Path("/etc/isle-mesh/polari").glob("*/deployment.json")))
         release=fetch()
         mode=Path('/etc/isle-mesh/agent/agent.mode').read_text().strip()
         from runtime_reconcile import targets
@@ -66,6 +68,9 @@ def main(args):
     ident=os.environ.get('ISLE_OPERATION_ID','')
     directory=OP_ROOT/ident
     if os.geteuid()!=0 or not re.fullmatch('[a-f0-9]{32}',ident): raise PermissionError('Use shared isle update apply operation')
+    from member_preflight import repair
+    stage(ident,'membership-preflight')
+    repair()
     stage(ident,'validating-release')
     saved=directory/'release.json'
     release=validate(json.loads(saved.read_text())) if saved.exists() else fetch()
@@ -98,5 +103,5 @@ def main(args):
     return subprocess.run(['bash',str(Path(__file__).with_name('reconcile.sh')),'apply','device']).returncode
 if __name__=='__main__':
     try:sys.exit(main(sys.argv[1:]))
-    except (OSError,ValueError,KeyError,TypeError,RuntimeError,subprocess.TimeoutExpired) as e:
+    except (OSError,ValueError,KeyError,TypeError,RuntimeError,subprocess.SubprocessError) as e:
         print('update: '+str(e),file=sys.stderr);sys.exit(1)

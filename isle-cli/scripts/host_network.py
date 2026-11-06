@@ -30,21 +30,34 @@ def plan():
         if any(r.get('gateway')!=gateway or r.get('dev')!=interface for r in existing):raise ValueError('Conflicting existing route for '+subnet)
     return dict(gateway=gateway,interface=interface,source=str(ipaddress.IPv4Address(route['prefsrc'])),subnets=sorted(set(subnets)))
 
+def member_plan(state=Path('/etc/isle-mesh')):
+    remote=state/'agent/remote'
+    interface=(remote/'interface.conf').read_text().strip()
+    import re
+    if not re.fullmatch(r'[a-zA-Z0-9_.:-]{1,15}',interface):raise ValueError('Invalid saved member interface')
+    discovery=json.loads((remote/'discovery.json').read_text())
+    gateway=str(ipaddress.IPv4Address(discovery['router_ip']))
+    route=json.loads(run(['ip','-j','-4','route','get',gateway]))[0]
+    if route['dev']!=interface:raise ValueError('Saved Isle router is not reachable on the joined interface; refusing to alter another interface')
+    return dict(interface=interface,gateway=gateway)
+
 def apply():
     mode=Path('/etc/isle-mesh/agent/agent.mode').read_text().strip()
-    if mode!='core':return
+    if mode not in ('core','remote'):raise ValueError('Unknown membership mode')
     if os.geteuid()!=0:raise PermissionError('Host network reconciliation requires administrator authorization')
-    p=plan();interface=p['interface'];gateway=p['gateway']
-    from router_forwarding import apply as forward
-    forward(p)
+    p=plan() if mode=='core' else member_plan();interface=p['interface'];gateway=p['gateway']
+    if mode=='core':
+        from router_forwarding import apply as forward
+        forward(p)
     # Query before mutations so missing resolver support cannot half-apply silently.
     domains=run(['resolvectl','domain',interface]).partition(':')[2].strip().split()
     servers=run(['resolvectl','dns',interface]).partition(':')[2].strip().split()
     domains=list(dict.fromkeys(domains+['~isle']));servers=list(dict.fromkeys(servers+[gateway]))
-    for subnet in p['subnets']:run(['ip','-4','route','replace',subnet,'via',gateway,'dev',interface,'proto','static'])
+    for subnet in p.get('subnets',[]):run(['ip','-4','route','replace',subnet,'via',gateway,'dev',interface,'proto','static'])
     run(['resolvectl','dns',interface,*servers]);run(['resolvectl','domain',interface,*domains])
     STATE.parent.mkdir(parents=True,exist_ok=True);atomic(STATE,p)
-    print('Core host Isle routes and scoped DNS reconciled via '+gateway+' on '+interface)
+    print(mode+' host Isle routes and scoped DNS reconciled via '+gateway+' on '+interface)
 if __name__=='__main__':
-    try:apply()
+    try:
+        if "--member-only" not in sys.argv or Path("/etc/isle-mesh/agent/agent.mode").read_text().strip()=="remote":apply()
     except (OSError,ValueError,KeyError,subprocess.SubprocessError) as e:print('host network: '+str(e),file=sys.stderr);sys.exit(1)

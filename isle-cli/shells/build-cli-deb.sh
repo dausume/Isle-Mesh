@@ -165,7 +165,7 @@ Version: $VERSION
 Section: admin
 Priority: optional
 Architecture: all
-Depends: nodejs, python3, python3-yaml, python3-jinja2, ca-certificates, jq, openssl, curl, iw, hostapd, socat, dnsutils, libnss3-tools
+Depends: nodejs, python3, python3-yaml, python3-jinja2, ca-certificates, jq, openssl, curl, iw, hostapd, socat, dnsutils, libnss3-tools, gnupg
 Replaces: isle-manager-app (<< 0.2)
 Installed-Size: $INSTALLED_KB
 Maintainer: Isle-Mesh <isle@localhost>

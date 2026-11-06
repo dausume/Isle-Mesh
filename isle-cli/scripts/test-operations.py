@@ -5,11 +5,14 @@ from unittest.mock import patch
 import operations as op
 spec=importlib.util.spec_from_file_location('app_status',Path(__file__).with_name('app-status.py')); status=importlib.util.module_from_spec(spec);spec.loader.exec_module(status)
 import update
+import member_preflight
 import runtime_reconcile
 class Operations(unittest.TestCase):
  def setUp(self):
   self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup);self.root=Path(self.temp.name)
+  p=patch.object(member_preflight,'repair',return_value={'device':'fixture','mode':'core'});p.start();self.addCleanup(p.stop)
   self.stack=[]
+  p=patch.object(member_preflight,"check",return_value={"device":"fixture","mode":"core"});p.start();self.addCleanup(p.stop)
   for obj,key,value in [(op,'ROOT',self.root/'ops'),(op,'SCRIPTS',self.root),(update,'stage',lambda *args:0),(runtime_reconcile,'DESIRED',self.root/'desired.json')]:
    p=patch.object(obj,key,value);p.start();self.addCleanup(p.stop)
   p=patch('os.geteuid',return_value=0);p.start();self.addCleanup(p.stop)

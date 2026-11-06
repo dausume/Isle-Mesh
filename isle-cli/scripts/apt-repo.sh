@@ -160,7 +160,11 @@ PYPACKAGES
     # §5b one-flow: a fresh remote fetches these first)
     [ -f "$SCRIPT_DIR/isle-bootstrap.sh" ] && sudo cp "$SCRIPT_DIR/isle-bootstrap.sh" "$REPO/"
     [ -f "$SCRIPT_DIR/apt-install.sh" ] && sudo cp "$SCRIPT_DIR/apt-install.sh" "$REPO/"
-    [ -f "$CA" ] && sudo cp "$CA" "$REPO/isle-root.crt"
+    if [ -f "$CA" ]; then
+        sudo cp "$CA" "$REPO/isle-root.crt"
+        sudo GNUPGHOME="$GNUPG" gpg --batch --yes --armor --detach-sign -o "$REPO/isle-bootstrap.sh.asc" "$REPO/isle-bootstrap.sh" || die "bootstrap signature failed"
+        sudo GNUPGHOME="$GNUPG" gpg --batch --yes --armor --detach-sign -o "$REPO/isle-root.crt.asc" "$REPO/isle-root.crt" || die "public CA rotation signature failed"
+    fi
     # ---- the HUMAN landing page (finding #9c, 2026-08-23):
     # https://apt.isle/ was a bare-nginx 403 — an average user sent
     # here (the store's join door, printed instructions) had no way
@@ -197,9 +201,18 @@ sudo bash isle-bootstrap.sh --fingerprint '&lt;from the core&gt;'</pre>
    This core's CA (<a href="isle-root.crt">isle-root.crt</a>)
    fingerprint:</p>
 <p class="fpr"><code>$FPR</code></p>
-<h2>Already a member — apt route</h2>
-<pre>isle apt-repo enable
-sudo apt update &amp;&amp; sudo apt install isle-app-store</pre>
+<h2>Already a member — standard versioned update</h2>
+<pre>isle update plan
+sudo isle update apply &lt;reviewed-release-id&gt;</pre>
+<p>Older CLI without update support: authenticate the bootstrap using the archive key
+already installed on this member. Never download a replacement key over an untrusted channel.</p>
+<pre>curl --fail --http1.1 -o isle-bootstrap.sh https://apt.isle/isle-bootstrap.sh
+curl --fail --http1.1 -o isle-bootstrap.sh.asc https://apt.isle/isle-bootstrap.sh.asc
+gpgv --keyring /usr/share/keyrings/isle-archive-keyring.gpg isle-bootstrap.sh.asc isle-bootstrap.sh &amp;&amp;
+sudo bash isle-bootstrap.sh --update --release &lt;reviewed-release-id&gt;</pre>
+<p>If current TLS trust cannot authenticate the core after a reset, obtain the public
+root fingerprint independently from the Isle operator and use supported fingerprint
+recovery. Never accept an unauthenticated fetched root.</p>
 <h2>Packages served</h2>
 <table>$DEB_ROWS</table>
 <p>Index files: <a href="Packages">Packages</a> ·

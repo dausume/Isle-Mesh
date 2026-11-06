@@ -63,6 +63,12 @@ def reconcile(release,mode):
         admit_installed(actual,verified)
         config=json.loads(overlay.read_text()) if overlay.exists() else {'services':{}}
         config['services'][service]={'image':actual}
+        if name=='prf-isle-backend':
+            from dns_publication import resolver
+            config['services'][service].update({
+                'environment':{'SSL_CERT_FILE':'/etc/isle-trust/ca-certificates.crt',
+                               'REQUESTS_CA_BUNDLE':'/etc/isle-trust/ca-certificates.crt'},
+                'volumes':['/etc/ssl/certs:/etc/isle-trust:ro'], 'dns':[resolver()]})
         # Keep recovery information separate from immutable package files.
         before=OVERLAYS/(project+'-'+service+'-before.json')
         if not before.exists():atomic(before,{'image':previous['Image'],'files':[str(p) for p in files]},0o600)

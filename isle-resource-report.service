@@ -7,7 +7,9 @@ ConditionPathExists=/etc/isle-mesh/agent/agent.mode
 Type=oneshot
 ExecCondition=/bin/sh -c 'case "$(cat /etc/isle-mesh/agent/agent.mode)" in core|remote) exit 0;; *) exit 1;; esac'
 # Refresh host-local ingress after boot or bridge address changes.
+ExecStartPre=/usr/bin/python3 /usr/share/isle-mesh/isle-cli/scripts/host_network.py --member-only
 ExecStartPre=/bin/bash /usr/share/isle-mesh/isle-cli/scripts/hosts-reconcile.sh
+ExecStartPre=/usr/bin/python3 /usr/share/isle-mesh/isle-cli/scripts/engine_sync.py
 ExecStart=/usr/bin/python3 /usr/share/isle-mesh/isle-cli/scripts/capabilities.py status --publish https://api.polari.isle
 Nice=15
 CPUQuota=20%
