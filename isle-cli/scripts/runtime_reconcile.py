@@ -71,7 +71,7 @@ def reconcile(release,mode):
         if name=='prf-isle-backend':
             from dns_publication import resolver
             config['services'][service].update({
-                'environment':{'POLARI_INSTANCE_NAME':'polari','POLARI_MACHINE_NAME':CANONICAL.read_text().strip(),'SSL_CERT_FILE':'/etc/isle-trust/ca-certificates.crt',
+                'environment':{'ISLE_CORE_API':'https://api.polari.isle','POLARI_INSTANCE_NAME':'polari','POLARI_MACHINE_NAME':CANONICAL.read_text().strip(),'SSL_CERT_FILE':'/etc/isle-trust/ca-certificates.crt',
                                'REQUESTS_CA_BUNDLE':'/etc/isle-trust/ca-certificates.crt'},
                 'volumes':['/etc/ssl/certs:/etc/isle-trust:ro'], 'dns':[resolver()]})
         # Keep recovery information separate from immutable package files.
