@@ -150,7 +150,7 @@ ROLES
     for dom in "${DOMAINS[@]}"; do
         sudo python3 "$SCRIPT_DIR/dns_publication.py" "$dom" "$IP" || return 1
     done
-    self_report
+    # dns_publication already submitted and verified the shared registry report.
     sudo bash "$SCRIPT_DIR/hosts-reconcile.sh" || return 1
     provider_stage provider-readiness || return 1
     verify_instance "$NAME" || return 1

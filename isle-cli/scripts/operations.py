@@ -76,7 +76,7 @@ def execute(args=None, ident=None):
             print(json.dumps(d)); return 0
     else:
         args=request(args); ident=uuid.uuid4().hex; p=path_for(ident);p.mkdir(mode=0o755);os.chmod(p,0o755)
-        d=dict(id=ident,name=args[2] if args[0]=='store' else 'device-update',request=args,state='pending',createdAt=now(),attempt=0,history=[])
+        d=dict(id=ident,name=args[2] if args[0]=='store' else args[args.index('--name')+1] if args[:3]==['polari','instance','deploy'] else 'device-update',request=args,state='pending',createdAt=now(),attempt=0,history=[])
     # Serialize all operations for one app, including retries/new requests.
     app_lock=ROOT/('app-'+(args[2] if args[0]=='store' else 'device-update')+'.lock')
     with app_lock.open('a+') as al, (p/'lock').open('a+') as lock:

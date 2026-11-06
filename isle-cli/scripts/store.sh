@@ -73,19 +73,7 @@ for e in d["entries"]:
         ;;
     show)
         NAME="${2:?usage: isle store show <name>}"
-        RESP=$(api_get "/api/islemesh/catalog/$NAME") || { echo "Catalog entry unavailable: $NAME (not defined or service unreachable)" >&2; exit 1; }
-        printf '%s' "$RESP" | python3 -c '
-import json, sys
-d = json.load(sys.stdin)
-if not d.get("ok"): print(d.get("error","not found")); sys.exit(1)
-e = d["entry"]; p = e["install_plan"]
-print("%s — %s" % (e["title"], e["kind"]))
-print(e["description"]); print()
-print("source: %s" % e["source_ref"])
-if e["provides_engine"]: print("provides engine: %s" % e["provides_engine"])
-print("\ninstall plan (%s):" % p["note"])
-for s in p["steps"]: print("  $ %s" % s)
-'
+        exec python3 "$SCRIPT_DIR/catalog_show.py" "$NAME"
         ;;
     install)
         set -o pipefail
