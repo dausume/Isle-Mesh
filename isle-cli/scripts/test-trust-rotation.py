@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Real detached-signature admission; fake transport, no host trust changes."""
-import os,subprocess,tempfile,unittest
+import os,subprocess,tempfile,unittest,time,shutil
 from pathlib import Path
 class Rotation(unittest.TestCase):
  def test_signed_public_root_and_negative_controls(self):
@@ -30,6 +30,14 @@ signed_rotation "$RESULT"
    env=dict(os.environ,HELPER=str(helper),SIGNATURE=str(sig),CERTIFICATE=str(cert),RESULT=str(root/'result'),CURRENT_CERT=str(root/'current.crt'))
    def probe():return subprocess.run(['bash','-c',driver],env=env,capture_output=True,text=True)
    self.assertEqual(probe().returncode,0)
+   current=root/'current.crt'
+   shutil.copyfile(cert,current)
+   self.assertEqual(probe().returncode,0)
+   # A correctly signed but older root cannot roll back the installed root.
+   time.sleep(1.1)
+   run(['openssl','req','-x509','-newkey','rsa:2048','-nodes','-keyout',str(root/'current.key'),'-out',str(current),'-days','1','-subj','/CN=New Current Root','-addext','basicConstraints=critical,CA:TRUE'])
+   self.assertNotEqual(probe().returncode,0)
+   current.unlink()
    # An unauthenticated certificate replacement is rejected even if valid PEM.
    run(['openssl','req','-x509','-newkey','rsa:2048','-nodes','-keyout',str(root/'other.key'),'-out',str(cert),'-days','1','-subj','/CN=Untrusted Replacement','-addext','basicConstraints=critical,CA:TRUE'])
    self.assertNotEqual(probe().returncode,0)

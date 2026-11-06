@@ -61,6 +61,15 @@ class Automation(unittest.TestCase):
   self.assertEqual(b['environment']['SSL_CERT_FILE'],'/etc/isle-trust/ca-certificates.crt')
   self.assertIn('backend-data:/data',b['volumes'])
   with self.assertRaisesRegex(ValueError,'immutable'):config.generate('compute','islemesh','backend','/state',images={'backend':'prf-backend:staging'})
+ def test_partial_provider_directory_can_only_resume_original_operation(self):
+  path=self.root/'provider';path.mkdir();ident='a'*32
+  with self.assertRaisesRegex(ValueError,'another operation'):config.write_configuration(path,{}, {},{},ident)
+  (path/'.operation-id').write_text(ident)
+  config.write_configuration(path,{}, {},{'name':'provider'},ident)
+  self.assertTrue((path/'deployment.json').exists())
+  inode=(path/'runtime-config.json').stat().st_ino
+  config.write_configuration(path,{}, {'new':True},{'name':'provider'},'b'*32)
+  self.assertEqual((path/'runtime-config.json').stat().st_ino,inode)
  def test_delayed_declared_health_and_failure(self):
   replies=[subprocess.CompletedProcess([],7,'',''),subprocess.CompletedProcess([],0,'{"ok":true,"phase":"starting"}',''),subprocess.CompletedProcess([],0,'{"ok":true,"phase":"online"}','')]
   with patch.object(readiness.subprocess,'run',side_effect=replies),patch.object(readiness.time,'sleep'):

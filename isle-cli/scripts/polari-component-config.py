@@ -2,6 +2,7 @@
 """Generate role-scoped Compose and runtime configuration; no host mutation on import."""
 import argparse
 import json
+import os
 import re
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -47,6 +48,19 @@ def generate(name, modules, role, directory, backend_url='', frontend_origin='ht
     return compose,runtime,metadata
 
 
+def write_configuration(path, compose, runtime, metadata, operation):
+    path=Path(path)
+    if not re.fullmatch(r'[a-f0-9]{32}',operation):raise ValueError('Provider configuration requires a shared operation')
+    marker=path/'.operation-id'
+    if path.exists() and not (path/'deployment.json').exists():
+        if not marker.exists() or marker.read_text().strip()!=operation:
+            raise ValueError('Untracked provider directory belongs to another operation')
+    path.mkdir(parents=True,exist_ok=True)
+    marker.write_text(operation+'\n');marker.chmod(0o600)
+    # Keep runtime-config inode stable for an existing container bind mount.
+    for filename,data in [('docker-compose.yml',compose),('runtime-config.json',runtime),('deployment.json',metadata)]:
+        (path/filename).write_text(json.dumps(data,indent=2)+'\n')
+
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--name',required=True);parser.add_argument('--modules',default='islemesh');parser.add_argument('--role',default='both');parser.add_argument('--directory',required=True);parser.add_argument('--backend-url',default='');parser.add_argument('--frontend-origin',default='https://polari.isle')
     a=parser.parse_args()
@@ -55,8 +69,5 @@ def main():
     dns=resolver()
     images=resolve(a.role)
     compose,runtime,metadata=generate(a.name,a.modules,a.role,a.directory,a.backend_url,a.frontend_origin,images,dns)
-    path=Path(a.directory);path.mkdir(parents=True,exist_ok=True)
-    # JSON is valid Compose YAML and avoids shell interpolation of user inputs.
-    for filename,data in [('docker-compose.yml',compose),('runtime-config.json',runtime),('deployment.json',metadata)]:
-        (path/filename).write_text(json.dumps(data,indent=2)+'\n')
+    write_configuration(a.directory,compose,runtime,metadata,os.environ.get('ISLE_OPERATION_ID',''))
 if __name__=='__main__':main()

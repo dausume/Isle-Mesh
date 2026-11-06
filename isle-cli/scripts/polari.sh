@@ -110,8 +110,8 @@ deploy(){
 import json,sys
 x=json.load(open(sys.argv[1]));assert x['role']==sys.argv[2] and x['modules']==sys.argv[3]
 EXISTING
-    elif [[ -d "$BASE/$NAME" && -z "${ISLE_OPERATION_ID:-}" ]]; then
-        die "Existing untracked instance directory; refusing replacement"
+    elif [[ -d "$BASE/$NAME" ]]; then
+        [[ -n "${ISLE_OPERATION_ID:-}" && -f "$BASE/$NAME/.operation-id" && "$(cat "$BASE/$NAME/.operation-id")" == "$ISLE_OPERATION_ID" ]] || die "Existing untracked instance directory; refusing replacement (retry its original operation if this was interrupted)"
     fi
     local -a DOMAINS=() SERVICES=()
     if [[ "$ROLE" != backend ]]; then DOMAINS+=("$NAME.isle"); SERVICES+=(frontend); fi
