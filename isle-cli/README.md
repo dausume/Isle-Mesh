@@ -306,3 +306,27 @@ Native operation routes: `device.updatePlan`, `device.updateApply(releaseId)`,
 argument arrays; there is no arbitrary command/path bridge. Administrator
 refusal is returned to the caller without a success claim. The existing
 `store.install(name)` boundary is preserved.
+
+### Storage placement inspection
+
+`isle storage list` returns a timestamped JSON inventory, including unmounted
+partitions and filesystem UUIDs. It does not mount, format or alter any disk.
+Use filesystem UUIDs rather than changing device names such as `/dev/sdc1`.
+
+Before a planned copy, on the destination device run:
+
+```sh
+isle storage check --path /mnt/storage/isle-repository --uuid <filesystem-uuid> --required-bytes <copy-budget>
+```
+
+This read-only operation uses the same local preflight helper available to
+placement code. It refuses a different or absent filesystem, fallback to the
+root filesystem, symlink paths, read-only mounts and insufficient capacity.
+Success reports `localMountVerified`, not approval to migrate. It does not prove
+write permissions, persistent boot ordering or safety after a later unplug.
+It creates no directories. Errors return JSON `ok:false` and a nonzero exit.
+
+These inspection commands need no administrator privileges or mutation journal.
+Repository migration and native planning execution are not implemented by these
+commands; keep the existing serving source until a coordinated migration has
+verified its replacement. No storage inspection button is exposed yet.

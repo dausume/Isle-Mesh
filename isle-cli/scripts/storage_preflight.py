@@ -25,7 +25,7 @@ def inspect(path, filesystem_uuid, required_bytes=0, *, run=subprocess.run, stat
     ancestor=root
     while not ancestor.exists():ancestor=ancestor.parent
     if not ancestor.is_dir():raise ValueError('Storage path is not a directory')
-    result=run(['findmnt','--json','--target',str(ancestor),'--output','TARGET,UUID,FSTYPE,OPTIONS'],capture_output=True,text=True,check=True)
+    result=run(['findmnt','--json','--target',str(ancestor),'--output','TARGET,UUID,FSTYPE,OPTIONS'],capture_output=True,text=True,check=True,timeout=15)
     rows=json.loads(result.stdout).get('filesystems',[])
     if len(rows)!=1:raise ValueError('Cannot identify exactly one mounted filesystem')
     mount=rows[0];target=Path(mount['target'])
