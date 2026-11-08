@@ -22,7 +22,7 @@ class ShellBoundary(unittest.TestCase):
   self.source=Path(__file__).with_name('reconcile.sh')
   shutil.copyfile(self.source,self.root/'reconcile.sh')
   apt=self.bin/'apt-get';apt.write_text('#!/bin/sh\nprintf "apt\\n" >> "$BOUNDARY_TRACE"\n');apt.chmod(0o755)
-  for name in ('member_preflight','host_network','runtime_reconcile','provider_reconcile','engine_sync','capabilities'):
+  for name in ('member_preflight','legacy_units','host_network','runtime_reconcile','provider_reconcile','engine_sync','capabilities'):
    (self.root/(name+'.py')).write_text('import json,os,sys\nfrom pathlib import Path\nassert os.environ["ISLE_OPERATION_ID"]=="'+self.ident+'"\nwith Path(os.environ["BOUNDARY_TRACE"]).open("a") as f:f.write(json.dumps(["'+name+'",*sys.argv[1:]])+"\\n")\nsys.exit(int(os.environ.get("BOUNDARY_RUNTIME_EXIT","0")) if "'+name+'"=="runtime_reconcile" else 0)\n')
   (self.root/'trust.sh').write_text('printf "trust %s\\n" "$1" >> "$BOUNDARY_TRACE"\n')
   (self.root/'hosts-reconcile.sh').write_text('printf "hosts\\n" >> "$BOUNDARY_TRACE"\n')
@@ -43,7 +43,7 @@ class ShellBoundary(unittest.TestCase):
   self.assertEqual((self.root/'reconcile.sh').read_bytes(),self.source.read_bytes())
   self.assertEqual(update.main(['apply',self.release['id']]),0)
   lines=self.trace.read_text().splitlines()
-  self.assertEqual(lines,['apt','["member_preflight", "--repair"]','["runtime_reconcile"]','["provider_reconcile"]','hosts','["engine_sync"]','["capabilities", "status", "--publish", "https://api.polari.isle"]'])
+  self.assertEqual(lines,['apt','["member_preflight", "--repair"]','["legacy_units"]','["runtime_reconcile"]','["provider_reconcile"]','hosts','["engine_sync"]','["capabilities", "status", "--publish", "https://api.polari.isle"]'])
   self.trace.unlink()
   bad=subprocess.run(['bash',str(self.root/'reconcile.sh')],capture_output=True,text=True)
   self.assertNotEqual(bad.returncode,0);self.assertIn('Invalid reconcile context',bad.stdout)
@@ -51,6 +51,6 @@ class ShellBoundary(unittest.TestCase):
  def test_real_shell_propagates_helper_failure_without_later_mutations(self):
   with patch.dict(os.environ,BOUNDARY_RUNTIME_EXIT='7'):
    self.assertEqual(update.main(['apply',self.release['id']]),7)
-  self.assertEqual(self.trace.read_text().splitlines(),['apt','["member_preflight", "--repair"]','["runtime_reconcile"]'])
+  self.assertEqual(self.trace.read_text().splitlines(),['apt','["member_preflight", "--repair"]','["legacy_units"]','["runtime_reconcile"]'])
 
 if __name__=='__main__':unittest.main()
