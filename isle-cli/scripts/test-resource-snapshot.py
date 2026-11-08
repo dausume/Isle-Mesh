@@ -18,4 +18,16 @@ class Resources(unittest.TestCase):
         s=storage_inventory({'blockdevices':[dict(name='sda',type='disk',rota=True,tran='sata',size=200*1048576,children=[child]),dict(name='nvme0n1',type='disk',rota=False,tran='nvme',size=200*1048576,children=[child]),dict(name='loop0',type='loop',mountpoints=['/snap'])]})
         self.assertEqual(len(s['volumes']),1);self.assertEqual(s['volumes'][0]['tier'],'mixed');self.assertEqual(s['volumes'][0]['availableMiB'],40)
         self.assertEqual(len(s['drives']),2);self.assertNotIn('readMBps',s['drives'][0])
+        self.assertIsNone(s['volumes'][0]['filesystemUuid'])
+        self.assertIsNone(s['volumes'][0]['blockReadOnly'])
+    @patch('resource_snapshot.shutil.disk_usage',return_value=SimpleNamespace(total=100,free=40,used=60))
+    def test_usb_volume_identity_survives_device_renumbering(self,_):
+        def report(name):
+            return storage_inventory({'blockdevices':[dict(name=name,type='disk',tran='usb',rota=False,
+                children=[dict(name=name+'1',type='part',mountpoints=['/mnt/storage'],uuid='volume-uuid',fstype='ext4',ro=False)])]})['volumes'][0]
+        old,new=report('sdc'),report('sdd')
+        self.assertNotEqual(old['name'],new['name'])
+        self.assertEqual(old['filesystemUuid'],new['filesystemUuid'])
+        self.assertEqual(new['filesystem'],'ext4');self.assertIs(new['blockReadOnly'],False)
+        self.assertIn('checked locally',new['placementStatus'])
 if __name__=='__main__':unittest.main()

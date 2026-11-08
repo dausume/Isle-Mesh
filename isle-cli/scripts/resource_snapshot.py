@@ -69,7 +69,10 @@ def storage_inventory(tree):
                 if backing not in v['backing']: v['backing'].append(backing)
                 if tier!=v['tier']:v['tier']='mixed'
             else:
-                v={'name':name,'mounts':mounts,'backing':[backing] if backing else [],'tier':tier,'transport':transport}
+                v={'name':name,'mounts':mounts,'backing':[backing] if backing else [],'tier':tier,'transport':transport,
+                   'filesystemUuid':node.get('uuid') or None,'filesystem':node.get('fstype') or None,
+                   'blockReadOnly':node.get('ro') if type(node.get('ro')) is bool else None,
+                   'placementStatus':'Reported volume only; mount identity, writable state and boot ordering must be checked locally before placement.'}
                 try:
                     use=shutil.disk_usage(mounts[0]);v.update(totalMiB=use.total//1048576,availableMiB=use.free//1048576,usedMiB=use.used//1048576)
                 except OSError:v['capacityStatus']='not readable'
@@ -95,7 +98,7 @@ def collect(run, vms, vm_status):
                                    'busyPercent':activity(first[i],second[i]) if online and i in first and i in second else None})
         detail['cpuStatus']='observed';detail['sampleSeconds']=.15
     except (OSError,ValueError,TypeError,KeyError,AttributeError):detail['cpuStatus']='not readable'
-    code,out,_=run(['lsblk','-J','-b','-o','NAME,MAJ:MIN,TYPE,ROTA,TRAN,SIZE,MOUNTPOINTS'])
+    code,out,_=run(['lsblk','-J','-b','-o','NAME,MAJ:MIN,TYPE,ROTA,TRAN,SIZE,MOUNTPOINTS,UUID,FSTYPE,RO'])
     try:
         detail['storage']=storage_inventory(json.loads(out)) if code==0 else {}
         detail['storageStatus']='observed' if code==0 else 'not readable'
