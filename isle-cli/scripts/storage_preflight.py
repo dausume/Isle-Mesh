@@ -1,6 +1,8 @@
 """Read-only local storage checks for app placement/migration operations.
 A central report is advisory. Call this again on the target before writing.
 This does not mount disks, grant approval, or establish boot dependencies.
+A future writer must retain/revalidate mount identity at execution; a report
+is not a filesystem handle and cannot protect against a later unplug or rename.
 """
 import json
 import os
@@ -38,5 +40,5 @@ def inspect(path, filesystem_uuid, required_bytes=0, *, run=subprocess.run, stat
     if available<required_bytes:raise ValueError('Insufficient available storage for the planned copy')
     return dict(path=str(root),mount=str(target),filesystemUuid=filesystem_uuid,filesystem=mount.get('fstype'),
                 availableBytes=available,requiredBytes=required_bytes,localMountVerified=True,
-                bootDependencyVerified=False,
+                bootDependencyVerified=False,writePermissionVerified=False,
                 note='Read-only preflight; approval, persistent mount dependency and operation execution are separate.')
