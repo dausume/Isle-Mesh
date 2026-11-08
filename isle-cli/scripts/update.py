@@ -62,7 +62,9 @@ def main(args):
         release=fetch()
         mode=Path('/etc/isle-mesh/agent/agent.mode').read_text().strip()
         from runtime_reconcile import targets
-        print(json.dumps(dict(release=release,selectedPackages=selected_packages(release),runtimeTargets=targets(release,mode),installed={p:installed(p) for p in sorted(PACKAGES|{'polari-complete','polari-complete-offline'})},command='sudo isle update apply '+release['id'])))
+        from provider_reconcile import planned_targets
+        providers=planned_targets(release)
+        print(json.dumps(dict(release=release,selectedPackages=selected_packages(release),runtimeTargets=targets(release,mode),providerTargets=providers,dataProtection={'automaticDatabaseSnapshot':False,'message':'Existing volumes are preserved; create a consistent backup before updating important data.'},installed={p:installed(p) for p in sorted(PACKAGES|{'polari-complete','polari-complete-offline'})},command='sudo isle update apply '+release['id'])))
         return 0
     if action!='apply' or len(args)!=2 or not re.fullmatch('[a-f0-9]{64}',args[1]): raise ValueError('Usage: isle update plan | sudo isle update apply <release-id>')
     ident=os.environ.get('ISLE_OPERATION_ID','')
