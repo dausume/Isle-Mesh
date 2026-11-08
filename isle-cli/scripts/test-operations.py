@@ -31,6 +31,18 @@ test "$(cat "$ISLE_OPERATION_DIR/catalog.json")" = pinned
    self.assertEqual(op.execute(ident=d['id']),0)
    after=op.read(d['id']);self.assertEqual(after['request'],d['request']);self.assertEqual(after['attempt'],2)
    self.assertEqual(op.execute(ident=d['id']),0);self.assertEqual(op.read(d['id'])['attempt'],2)
+ def test_retry_clears_previous_result_before_real_child_starts(self):
+  self.assertEqual(op.execute(['store','install','alpha']),7)
+  d=op.latest('alpha');d['stage']='failed-stage';op.atomic(op.path_for(d['id'])/'status.json',d)
+  (self.root/'store.sh').write_text('''python3 - "$ISLE_OPERATION_DIR/status.json" <<'PY'
+import json,sys
+d=json.load(open(sys.argv[1]))
+assert d['state']=='running' and d['attempt']==2
+assert 'exitCode' not in d and 'stage' not in d
+assert d['history'][-2]['exitCode']==7
+PY
+''')
+  self.assertEqual(op.execute(ident=d['id']),0)
  def test_real_store_two_apps_pins_catalog_and_records_stages(self):
   # Real store.sh, fake external commands only. No cwd compose or host mutation.
   source=Path(__file__).with_name('store.sh').read_text().replace('/var/lib/isle-mesh/operations',str(op.ROOT)).replace('$EUID == 0','1 == 1')

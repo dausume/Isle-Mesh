@@ -13,7 +13,11 @@ def origin(url):
         raise ValueError('Engine/provider requires a trusted Isle HTTPS origin')
     return url.rstrip('/')
 def request(url,payload=None,post=False):
-    argv=['curl','--http1.1','--fail','--silent','--show-error','--max-time','15',url]
+    # Registry publication can durably write many rows on constrained hosts.
+    # A timed-out POST may still finish on the server: never blindly replay it
+    # here. Surface failure to the shared operation journal for explicit retry.
+    limit='60' if post or payload is not None else '15'
+    argv=['curl','--http1.1','--fail','--silent','--show-error','--connect-timeout','10','--max-time',limit,url]
     if post:argv+=['--request','POST']
     if payload is not None:argv+=['-H','Content-Type: application/json','--data-binary',json.dumps(payload)]
     p=subprocess.run(argv,capture_output=True,text=True,check=True)

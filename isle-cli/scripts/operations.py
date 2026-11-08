@@ -87,6 +87,8 @@ def execute(args=None, ident=None):
         if ident and (p/'status.json').exists():
             d=json.loads((p/'status.json').read_text())
             if d['state']=='succeeded': print(json.dumps(d));return 0
+        # A previous failure remains in history, not as this attempt's result.
+        d.pop('exitCode',None);d.pop('stage',None)
         d.update(state='running',retryable=False,attempt=d['attempt']+1,updatedAt=now())
         d['history'].append(dict(attempt=d['attempt'],state='running',at=now()))
         atomic(p/'status.json',d)
