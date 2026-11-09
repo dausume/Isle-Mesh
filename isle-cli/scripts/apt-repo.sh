@@ -337,8 +337,9 @@ status() {
 }
 
 case "${1:-help}" in
+    snapshot) shift; exec python3 "$SCRIPT_DIR/repository_snapshot.py" "$@" ;;
     publish) shift; publish "$@" ;;
     enable)  enable_client ;;
     status)  status ;;
-    *) echo "usage: isle apt-repo [publish [--from <dir>] [--dependencies-from <dir>]|enable|status]" ;;
+    *) echo "usage: isle apt-repo [publish [--from <dir>] [--dependencies-from <dir>]|snapshot|enable|status]" ;;
 esac

@@ -330,3 +330,31 @@ These inspection commands need no administrator privileges or mutation journal.
 Repository migration and native planning execution are not implemented by these
 commands; keep the existing serving source until a coordinated migration has
 verified its replacement. No storage inspection button is exposed yet.
+
+For the public APT/artifact repository, `sudo isle apt-repo snapshot` prints a
+deterministic content manifest while holding the same publication lock as APT,
+runtime-image and catalog publication. The fixed source is the public `repo/`
+directory, not its sibling signing-key directory. Store the output outside that
+source and check command success before using it. Creating the lock may require
+administrator rights; no repository contents are changed.
+
+`isle storage snapshot --path <absolute-directory>` provides the same inventory
+for other app data, but the caller must first quiesce that app's writers. These
+public-content inventories reject symlinks, hardlinks, special files, nested
+filesystems, hidden entries and incomplete `.part`/`.partial` files. They stream
+file hashes with bounded memory and detect observed changes during hashing.
+They are not live-database backup tools or point-in-time filesystem snapshots.
+
+After a separately coordinated copy, the shared verification command is:
+
+```sh
+isle storage verify --path <destination> --manifest <snapshot.json> --sha256 <trusted-manifest-sha256>
+```
+
+The digest must come through the authenticated plan or operator channel, not
+from an untrusted copy alongside the files. Verification checks the manifest
+digest and exact tree contents, including extra or missing files. This proves
+content equality only. It neither verifies repository signatures nor changes
+DNS, starts an app, authorizes removal, or records migration completion. Both
+snapshot and destination verification remain preparatory shared operations;
+copy, mount lifecycle, app deployment and verified cutover are separate work.

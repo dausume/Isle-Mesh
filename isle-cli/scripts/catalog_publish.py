@@ -5,6 +5,7 @@ from pathlib import Path
 from catalog_artifacts import sha,NAME
 from image_identity import verify_archive
 from health_probe import validate_path
+from repository_lock import publication_lock
 REPO=Path('/etc/isle-mesh/apt/repo')
 
 def publish_asset(d,source_dir,destination,repo):
@@ -20,6 +21,10 @@ def publish_asset(d,source_dir,destination,repo):
     d.pop('source');d.update(url='https://apt.isle/'+str(target.relative_to(repo)),sha256=h,size=size)
 
 def publish(source, repo=REPO):
+    with publication_lock(repo):
+        return _publish(source, repo)
+
+def _publish(source, repo):
     source=Path(source).resolve();m=json.loads(source.read_text());m=copy.deepcopy(m)
     if m.get('schemaVersion')!=1 or not NAME.fullmatch(m.get('name','')) or not re.fullmatch(r'[a-zA-Z0-9.+_-]{1,80}',m.get('version','')):raise ValueError('Invalid release identity')
     validate_path(m.get('health',{'path':'/'}).get('path'))

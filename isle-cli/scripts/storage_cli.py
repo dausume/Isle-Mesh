@@ -8,6 +8,7 @@ import sys
 
 from resource_snapshot import storage_inventory
 from storage_preflight import inspect
+from storage_snapshot import inventory, encoded, verify
 
 
 def main(argv=None):
@@ -18,10 +19,21 @@ def main(argv=None):
     check.add_argument('--path', required=True)
     check.add_argument('--uuid', required=True)
     check.add_argument('--required-bytes', type=int, default=0)
+    snapshot = commands.add_parser('snapshot', help='Print a content manifest; caller must quiesce its writers')
+    snapshot.add_argument('--path', required=True)
+    verification = commands.add_parser('verify', help='Compare destination bytes with an authenticated content snapshot')
+    verification.add_argument('--path', required=True)
+    verification.add_argument('--manifest', required=True)
+    verification.add_argument('--sha256', required=True)
     args = parser.parse_args(argv)
     evaluated = datetime.now(timezone.utc).isoformat()
     try:
-        if args.command == 'list':
+        if args.command == 'snapshot':
+            sys.stdout.buffer.write(encoded(inventory(args.path)))
+            return 0
+        elif args.command == 'verify':
+            data = verify(args.path, args.manifest, args.sha256)
+        elif args.command == 'list':
             result = subprocess.run(
                 ['lsblk', '--json', '--bytes', '--output',
                  'NAME,TYPE,SIZE,ROTA,TRAN,MOUNTPOINTS,MAJ:MIN,UUID,FSTYPE,RO'],

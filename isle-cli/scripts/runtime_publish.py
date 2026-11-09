@@ -6,9 +6,14 @@ from catalog_publish import REPO,publish_asset
 from image_identity import verify_archive
 from operations import atomic
 from runtime_reconcile import targets
+from repository_lock import publication_lock
 
 def main(path):
     if os.geteuid()!=0 or Path('/etc/isle-mesh/agent/agent.mode').read_text().strip()!='core':raise PermissionError('Publish runtime artifacts on the core with sudo isle update publish-runtime <manifest>')
+    with publication_lock(REPO):
+        publish_runtime(path)
+
+def publish_runtime(path):
     path=Path(path).resolve();m=json.loads(path.read_text());destination=REPO/'runtime';destination.mkdir(parents=True,exist_ok=True)
     for mode in ('core','remote'):
         for item in targets(m,mode,source=True):
