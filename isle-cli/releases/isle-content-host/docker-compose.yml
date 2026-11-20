@@ -1,0 +1,23 @@
+# isle-content-host: serves a proven storage dataset read-only (contract section 7).
+# The image ref below is a placeholder; build-release.sh tags the pulled image isle-content-host/nginx:<version>,
+# saves that tag and writes it here, and refuses to publish otherwise.
+# PIN-AT-BUILD (this marker line is dropped from built output)
+services:
+  content:
+    image: isle-content-host/nginx:PIN-AT-BUILD
+    restart: "no"
+    volumes:
+      - type: bind
+        source: ${ISLE_DATASET_PATH}
+        target: /data
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./nginx.conf
+        target: /etc/nginx/nginx.conf
+        read_only: true
+        bind:
+          create_host_path: false
+    expose:
+      - "80"

@@ -52,4 +52,10 @@ class Probe(unittest.TestCase):
     def test_source_and_time_on_every_fact(self):
         for fact in self.facts((0,'200','')).values():
             self.assertIn('observed_at',fact);self.assertIn('source',fact)
+    def test_agent_address_from_override_and_omitted_when_unknown(self):
+        with patch.dict(probe.os.environ,{'ISLE_AGENT_ADDRESS':'10.20.30.40'}),patch.object(probe,'run',return_value=(0,'','')),patch.object(probe.shutil,'which',return_value='/bin/tool'):
+            self.assertEqual(probe.collect('fixture')['facts']['agent_address'],'10.20.30.40')
+        env={k:v for k,v in probe.os.environ.items() if k!='ISLE_AGENT_ADDRESS'}
+        with patch.dict(probe.os.environ,env,clear=True),patch.object(probe,'run',return_value=(1,'','no agent')),patch.object(probe.shutil,'which',return_value='/bin/tool'):
+            self.assertNotIn('agent_address',probe.collect('fixture')['facts'])
 if __name__=='__main__':unittest.main()

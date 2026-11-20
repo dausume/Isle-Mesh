@@ -87,6 +87,7 @@ PY
 
 isle_prepare_offline_app_image() {
     local ref="$1" origin
+    python3 "$(dirname "${BASH_SOURCE[0]}")/catalog_artifacts.py" present "$ref" && return 0
     if origin=$(isle_registry_digest_origin "$ref"); then
         isle_pinned_image_present "$ref" && return 0
         # No redirects or fallback hosts: validate the Isle root and requested

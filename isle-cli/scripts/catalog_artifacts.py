@@ -1,0 +1,195 @@
+#!/usr/bin/env python3
+"""Versioned catalog artifact resolution behind the standard store operation."""
+import hashlib,json,os,re,shutil,subprocess,sys,tempfile,time,importlib.util
+from pathlib import Path,PurePosixPath
+from urllib.parse import urlsplit
+from operations import atomic,stage,NAME
+from health_probe import validate_path
+from image_identity import verify_archive,admit_installed,digest
+CACHE=Path('/var/lib/isle-mesh/artifacts')
+SCRIPTS=Path(__file__).resolve().parent
+MAX_SIZE=20*1024**3
+
+def sha(path):
+    h=hashlib.sha256()
+    with path.open('rb') as f:
+        for b in iter(lambda:f.read(1024*1024),b''):h.update(b)
+    return h.hexdigest()
+
+def descriptor(item):
+    if not isinstance(item,dict):raise ValueError('Missing release artifact descriptor')
+    u=urlsplit(item['url'])
+    if u.scheme!='https' or not u.hostname or not u.hostname.endswith('.isle') or u.username or u.password or u.fragment:
+        raise ValueError('Artifacts require authenticated HTTPS on the Isle')
+    if not re.fullmatch('[a-f0-9]{64}',item['sha256']):raise ValueError('Artifact SHA256 required')
+    if type(item['size']) is not int or not 0<item['size']<=MAX_SIZE:raise ValueError('Invalid artifact size')
+    return item
+
+def fetch(item,target):
+    descriptor(item)
+    if target.is_file() and target.stat().st_size==item['size'] and sha(target)==item['sha256']:return target
+    target.parent.mkdir(parents=True,exist_ok=True)
+    if shutil.disk_usage(target.parent).free<item['size']+512*1024**2:raise ValueError('Insufficient disk for artifact and reserve')
+    temporary=target.with_name(target.name+'.part')
+    try:
+        subprocess.run(['curl','--http1.1','--fail','--silent','--show-error','--connect-timeout','10','--max-time','600','--max-filesize',str(item['size']),'--output',str(temporary),item['url']],check=True)
+        if temporary.stat().st_size!=item['size'] or sha(temporary)!=item['sha256']:raise ValueError('Artifact size/checksum mismatch')
+        temporary.replace(target)
+    finally:
+        if temporary.exists():temporary.unlink()
+    return target
+
+DOMAIN=re.compile(r'(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+isle\Z')
+LABEL=re.compile(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z')
+
+def declared_domain(instance,domain,parent,apps):
+    """Pure rule for a store app that declares its own name: <label>.<parent>.isle or <instance>.isle, under an installed parent."""
+    if not isinstance(domain,str) or not isinstance(parent,str) or not NAME.fullmatch(parent) or not NAME.fullmatch(instance):raise ValueError('Invalid deploy.domain/deploy.parent')
+    suffix='.'+parent+'.isle'
+    if domain!=instance+'.isle' and not (domain.endswith(suffix) and LABEL.fullmatch(domain[:-len(suffix)])):
+        raise ValueError('Domain '+domain+' must be <one label>.'+parent+'.isle or '+instance+'.isle')
+    registered=apps.get(parent)
+    if not isinstance(registered,dict) or registered.get('domain')!=parent+'.isle':raise ValueError('Parent app '+parent+' is not installed here at '+parent+'.isle')
+    for name,app in apps.items():
+        if name!=instance and isinstance(app,dict) and app.get('domain')==domain:raise ValueError('Domain '+domain+' is already held by app '+name)
+    return domain
+
+def validate_manifest(m):
+    d=m['deploy'];service=d['service'];port=d['port']
+    if not isinstance(service,str) or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}',service) or type(port)is not int or not 1<=port<=65535:raise ValueError('Invalid release service/port')
+    if d.get('engine') and not NAME.fullmatch(d['engine']):raise ValueError('Invalid engine kind')
+    if ('domain' in d)!=('parent' in d):raise ValueError('deploy.domain and deploy.parent must be declared together')
+    if 'domain' in d:
+        if not isinstance(d['domain'],str) or not isinstance(d['parent'],str) or not NAME.fullmatch(d['parent']) or not DOMAIN.fullmatch(d['domain']):raise ValueError('Invalid deploy.domain/deploy.parent')
+    path=m.get('health',{'path':'/'}).get('path')
+    validate_path(path)
+    for image in m['images']:
+        ref=image['ref']
+        if not isinstance(ref,str) or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_./:@-]{0,255}',ref):raise ValueError('Invalid image reference')
+        descriptor(image['archive']);digest(image.get('configDigest'))
+        if 'manifestDigest' in image:digest(image['manifestDigest'])
+
+def manifest_document(release):
+    descriptor(release)
+    if release['size']>2*1024*1024:raise ValueError('Release manifest too large')
+    directory=CACHE/release['sha256'];directory.mkdir(parents=True,exist_ok=True,mode=0o755)
+    path=fetch(release,directory/'manifest.json');m=json.loads(path.read_text())
+    if m.get('schemaVersion')!=1 or not NAME.fullmatch(m.get('name','')) or not re.fullmatch(r'[a-zA-Z0-9.+_-]{1,80}',m.get('version','')):raise ValueError('Unsupported release manifest')
+    descriptor(m['compose'])
+    if not isinstance(m.get('images'),list) or not m['images']:raise ValueError('Release has no verified images')
+    validate_manifest(m)
+    return m,directory
+
+def prepare(release, expected_name, instance=None):
+    instance=instance or expected_name
+    if not NAME.fullmatch(instance):raise ValueError('Invalid instance name')
+    m,directory=manifest_document(release)
+    if m['name']!=expected_name:raise ValueError('Catalog/release app mismatch')
+    compose=fetch(m['compose'],directory/'compose.yml')
+    for file in m.get('files',[]):
+        path=PurePosixPath(file['path'])
+        if path.is_absolute() or '..' in path.parts or not path.parts or path.parts[0] in ('manifest.json','compose.yml','resolved.json','admitted.json','images'):
+            raise ValueError('Invalid release file path')
+        fetch(file,directory.joinpath(*path.parts))
+    # Compose is materialized from the verified directory, never the caller cwd.
+    result=subprocess.run(['docker','compose','--project-name','isle-'+instance,'-f',str(compose),'config','--format','json'],capture_output=True,text=True,check=True)
+    config=json.loads(result.stdout)
+    services=config.get('services',{})
+    if not services or any('build' in v for v in services.values()):raise ValueError('Published compose must use release images, not source builds')
+    if m['deploy']['service'] not in services:raise ValueError('Release ingress service missing from Compose')
+    declared={i['ref']:i for i in m['images']}
+    if len(declared)!=len(m['images']) or any(v.get('image') not in declared for v in services.values()):raise ValueError('Every service image must have an artifact identity')
+    admitted={}
+    for ref,image in declared.items():
+        if not isinstance(ref,str) or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_./:@-]{0,255}',ref):raise ValueError('Invalid image reference')
+        descriptor(image['archive'])
+        archive=fetch(image['archive'],directory/'images'/(image['archive']['sha256']+'.tar'))
+        verified=verify_archive(archive,image)
+        subprocess.run(['docker','load','--input',str(archive)],check=True,stdout=sys.stderr)
+        actual=subprocess.run(['docker','image','inspect','--format','{{.Id}}',ref],capture_output=True,text=True,check=True).stdout.strip()
+        admitted[ref]=admit_installed(actual,verified)
+    for service in services.values():service['image']=admitted[service['image']]
+    atomic(directory/'resolved.json',config,0o600)
+    atomic(directory/'admitted.json',dict(manifestSha256=release['sha256'],images=admitted))
+    return m,directory/'resolved.json'
+
+BIND=re.compile(r'[A-Z][A-Z0-9_]{0,63}=/[A-Za-z0-9_.+@:/-]*\Z')
+
+def install(catalog,instance,staged=False,binds=(),dataset=None,served=None):
+    if os.geteuid()!=0:raise PermissionError('Use sudo isle store install')
+    if not NAME.fullmatch(instance):raise ValueError('Invalid instance name')
+    entry=json.loads(Path(catalog).read_text())['entry']
+    ident=os.environ['ISLE_OPERATION_ID'];stage(ident,'resolving-artifacts')
+    m,compose=prepare(entry['install_plan']['release'],entry['name'],instance)
+    d=m['deploy']; service=d['service'];port=d['port']
+    if not isinstance(service,str) or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}',service) or type(port)is not int or not 1<=port<=65535:raise ValueError('Invalid release service/port')
+    domain=instance+'.isle'
+    registry=Path('/etc/isle-mesh/agent/registry.json')
+    apps=json.loads(registry.read_text()).get('apps',{}) if registry.is_file() else {}
+    if 'domain' in d and not served:
+        if instance!=m['name']:raise ValueError('Release declares its own domain; it cannot be installed as renamed instance '+instance)
+        domain=declared_domain(instance,d['domain'],d['parent'],apps)
+    else:domain=apps.get(instance,{}).get('domain') or domain
+    if served:domain=served  # storage migrate: the placement domain (e.g. apt.isle) is the name this host serves, not <instance>.isle
+    if not re.fullmatch(r'(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+isle',domain):raise ValueError('Invalid registered domain')
+    args=['bash',str(SCRIPTS/'app.sh'),'deploy',instance,'--compose',str(compose),'--service',service,'--port',str(port),'--domain',domain]
+    if d.get('engine'):
+        if not NAME.fullmatch(d['engine']):raise ValueError('Invalid engine kind')
+        args+=['--engine',d['engine']]
+    health=m.get('health',{'path':'/'})
+    path=health.get('path')
+    validate_path(path)
+    args+=['--health-path',path]
+    if staged:args+=['--staged']
+    for bind in binds:
+        if not BIND.fullmatch(bind) or '..' in bind.split('/'):raise ValueError('Invalid --bind value')
+        args+=['--bind',bind]
+    if dataset:
+        if not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,63}',dataset):raise ValueError('Invalid --dataset value')
+        args+=['--dataset',dataset]
+    stage(ident,'deploying-verified-release')
+    result=subprocess.run(args).returncode
+    installed=Path('/etc/isle-mesh/apps')/instance
+    if (installed/'docker-compose.yml').is_file():
+        atomic(installed/'release.json',dict(name=m['name'],version=m['version'],manifestSha256=entry['install_plan']['release']['sha256'],health=health))
+    if result:return result
+    return wait_ready(instance,ident,Path(os.environ['ISLE_OPERATION_DIR']))
+
+def wait_ready(instance,ident,directory):
+    stage(ident,'verifying-readiness')
+    spec=importlib.util.spec_from_file_location('isle_app_status',SCRIPTS/'app-status.py')
+    readiness=importlib.util.module_from_spec(spec);spec.loader.exec_module(readiness)
+    deadline=time.monotonic()+60
+    while True:
+        report=readiness.status(instance)
+        atomic(directory/'readiness.json',report)
+        if report['deployed']:return 0
+        if time.monotonic()>=deadline:raise ValueError('Deployment incomplete: '+report.get('error',report['state']))
+        time.sleep(2)
+
+def present(ref):
+    # Only root-published artifact admissions extend offline supply, by content ID.
+    if not re.fullmatch('sha256:[a-f0-9]{64}',ref):return False
+    for record in CACHE.glob('*/admitted.json'):
+        stat=record.stat()
+        if stat.st_uid!=0 or stat.st_mode & 0o022:continue
+        try:
+            if ref in json.loads(record.read_text())['images'].values():
+                p=subprocess.run(['docker','image','inspect','--format','{{.Id}}',ref],capture_output=True,text=True)
+                if p.returncode==0 and p.stdout.strip()==ref:return True
+        except (ValueError,KeyError):continue
+    return False
+
+if __name__=='__main__':
+    try:
+        if sys.argv[1]=='install' and len(sys.argv)>=4:
+            staged=False;binds=[];rest=iter(sys.argv[4:])
+            for flag in rest:
+                if flag=='--staged':staged=True
+                elif flag=='--bind':binds.append(next(rest,''))
+                else:raise ValueError('Internal catalog artifact action invalid')
+            sys.exit(install(sys.argv[2],sys.argv[3],staged,binds))
+        if sys.argv[1]=='present' and len(sys.argv)==3:sys.exit(0 if present(sys.argv[2]) else 1)
+        raise ValueError('Internal catalog artifact action invalid')
+    except (OSError,ValueError,KeyError,TypeError,subprocess.SubprocessError) as exc:
+        print('catalog artifact: '+str(exc),file=sys.stderr);sys.exit(1)

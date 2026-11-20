@@ -55,6 +55,9 @@ show_help() {
     echo -e "${CYAN}isle dns verify${NC}        Test DNS resolution from router"
     echo "                       Verify .isle domains are resolving correctly"
     echo ""
+    echo -e "${CYAN}isle dns managed-names push${NC}  (core, sudo) Push the storage-managed names to the router"
+    echo "                       Names the router's mDNS scan must never map (placement.json domains)"
+    echo ""
     echo -e "${CYAN}isle dns get-ip${NC}        Get router IP address for DNS configuration"
     echo "                       Shows the IP to use as DNS server on other devices"
     echo ""
@@ -107,6 +110,11 @@ case $COMMAND in
         ;;
     mappings|list-isle)
         bash "$SCRIPT_DIR/dns-register.sh" list "$@"
+        ;;
+    managed-names)
+        # Storage ownership fence (contract section 5): `sudo isle dns managed-names push` on the core copies the
+        # managed-name list (every placement.json domain) to the router. authorize calls the same script itself.
+        bash "$SCRIPT_DIR/dns-register.sh" managed-names "$@"
         ;;
     use-router|split-dns)
         bash "$SCRIPT_DIR/remote-dns.sh" "$@"

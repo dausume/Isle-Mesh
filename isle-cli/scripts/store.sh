@@ -18,12 +18,26 @@
 set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 API="${POLARI_ISLE_API:-https://api.polari.isle}"
-CURL="curl -sSf --max-time 8"
+CURL="curl --http1.1 -sSf --max-time 8"
 G="\033[0;32m"; Y="\033[1;33m"; C="\033[0;36m"; R="\033[0;31m"; N="\033[0m"
 
 api_get() { $CURL "$API$1" 2>/dev/null && return 0; $CURL --resolve api.polari.isle:443:127.0.0.1 "$API$1" 2>/dev/null; }
 
+# One operation boundary for terminal and native store actions. Inner invocation
+# receives a root-owned journal directory; a caller cannot select an arbitrary file.
+if [[ "${1:-}" == install || "${1:-}" == uninstall ]]; then
+    if [[ -z "${ISLE_OPERATION_ID:-}" ]]; then
+        exec python3 "$SCRIPT_DIR/operations.py" run store "$@"
+    fi
+    [[ $EUID == 0 && "$ISLE_OPERATION_ID" =~ ^[a-f0-9]{32}$ && "${ISLE_OPERATION_DIR:-}" == "/var/lib/isle-mesh/operations/$ISLE_OPERATION_ID" ]] || { echo 'Invalid operation context'; exit 1; }
+fi
+
+record_stage() { python3 "$SCRIPT_DIR/operations.py" stage "$ISLE_OPERATION_ID" "$1" || exit 1; }
 case "${1:-list}" in
+    require-protocol)
+        [[ "${2:-}" == 1 ]] || { echo 'Unsupported store protocol'; exit 1; }; exit 0 ;;
+    publish)
+        exec python3 "$SCRIPT_DIR/catalog_publish.py" "${2:?usage: isle store publish <release.json>}" ;;
     list)
         api_get /api/islemesh/catalog | python3 -c '
 import json, sys
@@ -32,16 +46,17 @@ if not d.get("ok"): print("catalog unavailable"); sys.exit(1)
 print("Isle app store — %d apps\n" % d["count"])
 import subprocess
 for e in d["entries"]:
-    eng = "  [engine: %s]" % e["provides_engine"] if e["provides_engine"] else ""
+    # Optional fields are read with .get: an entry published without one must not end the list.
+    eng = "  [engine: %s]" % e["provides_engine"] if e.get("provides_engine") else ""
     marks = []
     # running instances across the isle (the tracking half of
     # chosen duplicates — scaling is a genuine need)
     inst = e.get("instances", [])
     if inst:
-        devs = sorted({i["device"] or "?" for i in inst})
+        devs = sorted({i.get("device") or "?" for i in inst})
         marks.append("runs x%d on %s" % (len(inst), ", ".join(devs)))
     # native launcher installed on THIS device (+ version)
-    if e["kind"] == "polari-app":
+    if e.get("kind") == "polari-app":
         try:
             ver = subprocess.run(
                 ["dpkg-query", "-W", "-f", "${Version}",
@@ -53,29 +68,25 @@ for e in d["entries"]:
             pass
     mark = "  [%s]" % "; ".join(marks) if marks else ""
     print("  \033[0;36m%-12s\033[0m %-13s %s%s%s" % (
-        e["name"], "("+e["kind"]+")", e["title"], eng, mark))
-    print("               %s" % e["description"])
+        e["name"], "("+e.get("kind", "?")+")", e.get("title") or e["name"], eng, mark))
+    if e.get("description"): print("               %s" % e["description"])
 ' || echo "no catalog (is prf-isle up?)"
         ;;
     show)
         NAME="${2:?usage: isle store show <name>}"
-        api_get "/api/islemesh/catalog/$NAME" | python3 -c '
-import json, sys
-d = json.load(sys.stdin)
-if not d.get("ok"): print(d.get("error","not found")); sys.exit(1)
-e = d["entry"]; p = e["install_plan"]
-print("%s — %s" % (e["title"], e["kind"]))
-print(e["description"]); print()
-print("source: %s" % e["source_ref"])
-if e["provides_engine"]: print("provides engine: %s" % e["provides_engine"])
-print("\ninstall plan (%s):" % p["note"])
-for s in p["steps"]: print("  $ %s" % s)
-'
+        exec python3 "$SCRIPT_DIR/catalog_show.py" "$NAME"
         ;;
     install)
         set -o pipefail
         NAME="${2:?usage: isle store install <name>}"
-        RESP=$(api_get "/api/islemesh/catalog/$NAME")
+        if [[ -f "$ISLE_OPERATION_DIR/catalog.json" ]]; then
+            RESP=$(cat "$ISLE_OPERATION_DIR/catalog.json")
+        else
+            RESP=$(api_get "/api/islemesh/catalog/$NAME") || exit 1
+            printf '%s' "$RESP" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("ok") and d["entry"]["install_plan"].get("ok") is True and isinstance(d["entry"]["install_plan"]["steps"],list)' || exit 1
+            (umask 077; printf '%s' "$RESP" > "$ISLE_OPERATION_DIR/catalog.json.tmp")
+            mv "$ISLE_OPERATION_DIR/catalog.json.tmp" "$ISLE_OPERATION_DIR/catalog.json"
+        fi
         echo "$RESP" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("ok") else 1)' || { echo "no such entry: $NAME"; exit 1; }
         # MEMBERSHIP GATE (Dustin: the whole point) — the store only
         # installs on a device that is a member of a valid isle: a
@@ -91,6 +102,7 @@ for s in p["steps"]: print("  $ %s" % s)
             echo "           sudo isle onboard --host            # best-effort today; real join = isle join"
             exit 1
         fi
+        record_stage validated
         KIND=$(echo "$RESP" | python3 -c 'import json,sys; print(json.load(sys.stdin)["entry"].get("kind",""))' 2>/dev/null)
         # ---- instance awareness: duplicates are a CHOICE ----------
         DUP_NAME=""
@@ -120,9 +132,16 @@ else:
         echo -e "${Y}Install '$NAME' — will run on THIS host:${N}"
         echo "$RESP" | python3 -c 'import json,sys; [print("  $ "+s) for s in json.load(sys.stdin)["entry"]["install_plan"]["steps"]]'
         if [ "${3:-}" != "--yes" ]; then
-            read -r -p "Proceed? [y/N] " a; [ "$a" = y ] || [ "$a" = Y ] || { echo aborted; exit 1; }
+            read -r -p "Proceed? [y/N] " a; [ "$a" = y ] || [ "$a" = Y ] || { echo aborted; exit 130; }
         fi
+        if python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1]))["entry"]["install_plan"].get("release") else 1)' "$ISLE_OPERATION_DIR/catalog.json"; then
+            python3 "$SCRIPT_DIR/member_preflight.py" --hosting --migrate || exit 1
+            exec python3 "$SCRIPT_DIR/catalog_artifacts.py" install "$ISLE_OPERATION_DIR/catalog.json" "${DUP_NAME:-$NAME}"
+        fi
+        record_stage executing
         echo "$RESP" | python3 -c 'import json,sys; [print(s) for s in json.load(sys.stdin)["entry"]["install_plan"]["steps"]]' | while IFS= read -r step; do
+            step_number=$((${step_number:-0}+1))
+            record_stage "step-$step_number-running"
             if [ -n "$DUP_NAME" ]; then
                 # a duplicate deploys under its OWN name + domain
                 step=$(echo "$step" | sed "s/isle app deploy $NAME /isle app deploy $DUP_NAME /")
@@ -133,7 +152,8 @@ else:
             fi
             echo -e "${C}==> $step${N}"
             # steps are isle/apt commands; run through the shell
-            eval "$step" || { echo "step failed: $step"; exit 1; }
+            eval "$step" || { record_stage "step-$step_number-failed"; echo "step failed: $step"; exit 1; }
+            record_stage "step-$step_number-complete"
         done || { echo "installation incomplete: ${DUP_NAME:-$NAME}" >&2; exit 1; }
         echo -e "${G}installed ${DUP_NAME:-$NAME}${N}"
         ;;

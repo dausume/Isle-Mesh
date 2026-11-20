@@ -264,6 +264,17 @@ list_vlan_domains() {
     echo ""
 }
 
+# Managed-names fence: the list lives on the router (pushed by the core); fetch it per call
+. "$(dirname "${BASH_SOURCE[0]}")/../lib/managed-names.sh"
+router_managed_skip() {
+    local tmp rc=1
+    tmp="$(mktemp)"
+    router_exec "cat /etc/isle-managed-names 2>/dev/null" > "$tmp" || true
+    isle_managed_skip "$1" "$tmp" && rc=0
+    rm -f "$tmp"
+    return $rc
+}
+
 # Add domain to router DNS
 add_domain_to_router() {
     local local_domain="$1"
@@ -271,6 +282,8 @@ add_domain_to_router() {
 
     # Convert .local to .isle
     local vlan_domain="${local_domain/.local/.isle}"
+
+    router_managed_skip "$vlan_domain" && return 0
 
     log_info "Adding $vlan_domain → $ip_address"
 
@@ -286,6 +299,8 @@ add_domain_to_router() {
 # Remove domain from router DNS
 remove_domain_from_router() {
     local vlan_domain="$1"
+
+    router_managed_skip "$vlan_domain" && return 0
 
     log_info "Removing $vlan_domain..."
 

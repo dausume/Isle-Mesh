@@ -1,0 +1,2 @@
+This source tree still carries all-zero placeholder image digests (docker-compose.yml, release.json).
+build-release.sh resolves the real pins into an output directory and never copies this file.

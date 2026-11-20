@@ -40,6 +40,7 @@ log() {
 safe_replace_registry() {
   local candidate="$1"
   if [ -s "$candidate" ] && jq -e . "$candidate" >/dev/null 2>&1; then
+    if [ -f "$REGISTRY_FILE" ] && cmp -s "$candidate" "$REGISTRY_FILE"; then rm -f "$candidate"; return 0; fi
     cp "$candidate" "$REGISTRY_FILE"   # inode-preserving (bind mount)
     rm -f "$candidate"
     return 0
@@ -136,11 +137,15 @@ update_registry() {
   log "Updating registry for $domain..."
 
   # Resolve domain to IP (if broadcasting)
-  local resolved_ip=$(avahi-resolve -n "$domain" 2>/dev/null | awk '{print $2}' || echo "$target_ip")
+  local resolved_ip
+  resolved_ip=$(avahi-resolve -n "$domain" 2>/dev/null | awk 'NR==1{print $2}') || true
+  resolved_ip=${resolved_ip:-$target_ip}
 
   # Ensure registry is initialized
   init_registry
 
+  # Ignore heartbeats: timestamps change only with actual service facts.
+  if jq -e --arg name "$domain" --arg addr "$resolved_ip" '.services[$name] | .addresses == [$addr] and .port == 443 and .protocol == "https"' "$REGISTRY_FILE" >/dev/null 2>&1; then return 0; fi
   # Create temporary file for atomic update
   local temp_file=$(mktemp)
   trap "rm -f $temp_file" EXIT

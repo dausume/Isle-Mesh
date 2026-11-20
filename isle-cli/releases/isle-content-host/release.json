@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "name": "isle-content-host",
+  "version": "2026.11.1",
+  "category": "infrastructure",
+  "images": [
+    {
+      "ref": "isle-content-host/nginx:PIN-AT-BUILD",
+      "archive": {"source": "images/nginx-alpine.tar"},
+      "configDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "manifestDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ],
+  "compose": {"source": "docker-compose.yml"},
+  "files": [
+    {"path": "nginx.conf", "source": "nginx.conf"}
+  ],
+  "deploy": {"service": "content", "port": 80},
+  "health": {"path": "/.well-known/isle-storage/current"},
+  "storage": {"bindParameter": "ISLE_DATASET_PATH", "mount": "/data", "readOnly": true}
+}

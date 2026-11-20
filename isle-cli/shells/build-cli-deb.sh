@@ -44,11 +44,17 @@ done
 
 mkdir -p "$STAGE/usr/share/polkit-1/actions"
 install -m 0644 "$REPO/isle-cli/polkit/org.islemesh.keycloak.policy" "$STAGE/usr/share/polkit-1/actions/"
+install -m 0644 "$REPO/isle-cli/polkit/org.islemesh.release.policy" "$STAGE/usr/share/polkit-1/actions/"
+# pkexec wrapper must be executable in the package (tar preserves repo modes; make it explicit)
+chmod 0755 "$STAGE/$SHARE/isle-cli/scripts/release-pkexec"
 
+mkdir -p "$STAGE/usr/lib/NetworkManager/dispatcher.d"
+install -m 0755 "$REPO/isle-member-dispatcher" "$STAGE/usr/lib/NetworkManager/dispatcher.d/90-isle-member"
 mkdir -p "$STAGE/usr/lib/systemd/system"
 install -m 0644 "$REPO/isle-mesh-boot.service" "$STAGE/usr/lib/systemd/system/isle-mesh-boot.service"
 install -m 0644 "$REPO/isle-cert-authority.service" "$STAGE/usr/lib/systemd/system/"
 install -m 0644 "$REPO/isle-resource-report.service" "$REPO/isle-resource-report.timer" "$STAGE/usr/lib/systemd/system/"
+install -m 0644 "$REPO/isle-release-follow.service" "$REPO/isle-release-follow.timer" "$STAGE/usr/lib/systemd/system/"
 
 # ---- shell tools + icons (synced from polari-app-shell — see
 # isle-cli/shells/tools/README) staged at shells/ so
@@ -72,6 +78,13 @@ cat > "$STAGE/DEBIAN/postinst" <<'EOF'
 mkdir -p /usr/local/bin
 ln -sf /usr/share/isle-mesh/isle-cli/index.js /usr/local/bin/isle
 chmod +x /usr/share/isle-mesh/isle-cli/index.js 2>/dev/null || true
+# The apt pin: only isle-* and polari-* packages are taken from the isle source. Written here and not
+# shipped as a package file, so it stays as long as the source line can: a plain remove keeps both,
+# purge removes both. Harmless on a device without the source line.
+if [ -d /etc/apt/preferences.d ]; then
+    install -m 0644 /usr/share/isle-mesh/isle-cli/apt/isle-mesh.pref /etc/apt/preferences.d/isle-mesh.pref \
+        || echo "isle-mesh-cli: could not write the apt pin; run: sudo isle apt-repo pin apply" >&2
+fi
 # Enable recovery only for a device already configured as a core.
 # Do not start networking from a package maintainer script.
 if [ "$(cat /etc/isle-mesh/agent/agent.mode 2>/dev/null)" = core ]; then
@@ -89,6 +102,11 @@ fi
 case "$(cat /etc/isle-mesh/agent/agent.mode 2>/dev/null)" in
     core|remote) systemctl daemon-reload; systemctl enable --now isle-resource-report.timer ;;
 esac
+# Automatic release follower: members only. enable --now on an already-active timer is a no-op and
+# nothing here touches a running isle-release-follow.service (it may be the process running this upgrade).
+if [ "$(cat /etc/isle-mesh/agent/agent.mode 2>/dev/null)" = remote ]; then
+    systemctl daemon-reload; systemctl enable --now isle-release-follow.timer
+fi
 if systemctl is-enabled --quiet isle-cert-authority.service; then
     systemctl try-restart isle-cert-authority.service
 fi
@@ -109,6 +127,8 @@ if [ "$1" = remove ]; then
     systemctl disable --now isle-cert-authority.service >/dev/null 2>&1 || true
     systemctl disable --now isle-resource-report.timer >/dev/null 2>&1 || true
     systemctl stop isle-resource-report.service >/dev/null 2>&1 || true
+    systemctl disable --now isle-release-follow.timer >/dev/null 2>&1 || true
+    systemctl stop isle-release-follow.service >/dev/null 2>&1 || true
     SCRIPTS=/usr/share/isle-mesh/isle-cli/scripts
     # CORE CASCADE (unin-7): removing the core ends the isle for every
     # member — send the last-gasp ISLE-ENDING broadcast FIRST so member
@@ -143,14 +163,15 @@ if [ "$1" = purge ]; then
             docker run --rm -v "$v":/v:ro -v "$BK":/b alpine                 tar czf "/b/$v.tgz" -C /v . >/dev/null 2>&1                 && docker volume rm "$v" >/dev/null 2>&1                 && echo "isle-mesh-cli purge: volume $v backed up + removed"
         done
     fi
-    for unit in polari-isle-push isle-trust-update isle-host-agent isle-mesh-boot isle-watch isle-resource-report isle-cert-authority; do
+    for unit in polari-isle-push isle-trust-update isle-host-agent isle-mesh-boot isle-watch isle-resource-report isle-release-follow isle-cert-authority; do
         systemctl stop "$unit.timer" "$unit.service" >/dev/null 2>&1 || true
         systemctl disable "$unit.timer" "$unit.service" >/dev/null 2>&1 || true
         rm -f "/etc/systemd/system/$unit.service" "/etc/systemd/system/$unit.timer"
     done
     systemctl daemon-reload >/dev/null 2>&1 || true
     rm -rf /etc/isle-mesh /usr/share/isle-mesh /var/lib/isle-mesh /var/log/isle-mesh
-    rm -f /etc/apt/sources.list.d/isle-mesh.list /etc/dnsmasq.d/split-dns.conf
+    rm -f /etc/apt/sources.list.d/isle-mesh.list /etc/apt/sources.list.d/00-isle-mesh.list \
+          /etc/apt/preferences.d/isle-mesh.pref /etc/dnsmasq.d/split-dns.conf
     sed -i '/\.isle$/d;/\.isle /d' /etc/hosts 2>/dev/null || true
     echo "isle-mesh-cli purge: config/state erased; backups at $BK"
 fi
@@ -165,7 +186,7 @@ Version: $VERSION
 Section: admin
 Priority: optional
 Architecture: all
-Depends: nodejs, python3, python3-yaml, python3-jinja2, ca-certificates, jq, openssl, curl, iw, hostapd, socat, dnsutils, libnss3-tools
+Depends: nodejs, python3, python3-yaml, python3-jinja2, ca-certificates, jq, openssl, curl, iw, hostapd, socat, dnsutils, libnss3-tools, gnupg
 Replaces: isle-manager-app (<< 0.2)
 Installed-Size: $INSTALLED_KB
 Maintainer: Isle-Mesh <isle@localhost>

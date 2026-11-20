@@ -178,8 +178,12 @@ case $COMMAND in
         ;;
 
     restart)
-        check_agent_available
-        exec "${AGENT_MANAGER}" restart "$@"
+        if [[ -z "${ISLE_OPERATION_ID:-}" ]]; then
+            [[ $# == 0 ]] || { echo 'Usage: sudo isle agent restart'; exit 1; }
+            exec python3 "$SCRIPT_DIR/operations.py" run agent restart device
+        fi
+        [[ $# == 1 && "$1" == device && "$ISLE_OPERATION_ID" =~ ^[a-f0-9]{32}$ ]] || { echo 'Invalid agent restart context'; exit 1; }
+        exec python3 "$SCRIPT_DIR/agent_restart.py"
         ;;
 
     status)

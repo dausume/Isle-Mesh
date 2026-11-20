@@ -23,68 +23,27 @@ log "  Config dir: $CONFIG_DIR"
 log "  Watch interval: ${WATCH_INTERVAL}s"
 echo ""
 
-# Track last modification time
-LAST_MTIME=""
-
-# Initial config generation if registry exists
-if [ -f "$REGISTRY_FILE" ]; then
-    log "Initial registry found, generating configs..."
-    if "$CONFIG_GENERATOR" "$REGISTRY_FILE" "$CONFIG_DIR"; then
-        log "✓ Initial config generation successful"
-
-        # Test and reload nginx
-        if nginx -t 2>&1 | grep -q "successful"; then
-            nginx -s reload 2>&1 && log "✓ Nginx reloaded"
-        fi
-    else
-        log "✗ Initial config generation failed"
-    fi
-fi
-
-# Watch loop
+# Observe only proxy-relevant facts and public certificates, not relay timestamps.
+fingerprint() {
+    jq -cS '.apps | with_entries(.value |= {domain,services})' "$REGISTRY_FILE" || return 1
+    for certificate in /etc/nginx/ssl/certs/*.crt; do
+        [ ! -f "$certificate" ] || sha256sum "$certificate"
+    done
+}
+LAST_FINGERPRINT=""
 while true; do
-    if [ -f "$REGISTRY_FILE" ]; then
-        # Get current modification time
-        CURRENT_MTIME=$(stat -c %Y "$REGISTRY_FILE" 2>/dev/null || echo "0")
-
-        # Check if file was modified
-        if [ -n "$CURRENT_MTIME" ] && [ "$CURRENT_MTIME" != "$LAST_MTIME" ]; then
-            log "Registry changed detected"
-
-            # Generate new configs
-            if "$CONFIG_GENERATOR" "$REGISTRY_FILE" "$CONFIG_DIR"; then
-                log "✓ Config generation successful"
-                LAST_MTIME="$CURRENT_MTIME"
-
-                # Test nginx config before reloading
-                if nginx -t 2>&1 | grep -q "successful"; then
-                    log "✓ Nginx config valid"
-
-                    # Reload nginx
-                    if nginx -s reload 2>&1; then
-                        log "✓ Nginx reloaded successfully"
-                    else
-                        log "✗ Nginx reload failed"
-                    fi
-                else
-                    log "✗ Nginx config test failed - skipping reload"
-                    nginx -t 2>&1 | while IFS= read -r line; do
-                        log "  $line"
-                    done
-                fi
+    if CURRENT_FACTS=$(fingerprint 2>/dev/null); then
+        CURRENT_FINGERPRINT=$(printf '%s' "$CURRENT_FACTS" | sha256sum)
+        if [ "$CURRENT_FINGERPRINT" != "$LAST_FINGERPRINT" ]; then
+            if "$CONFIG_GENERATOR" "$REGISTRY_FILE" "$CONFIG_DIR" && nginx -t && nginx -s reload; then
+                LAST_FINGERPRINT="$CURRENT_FINGERPRINT"
+                log 'Complete proxy configuration validated and reloaded'
             else
-                log "✗ Config generation failed"
+                log 'Candidate rejected or reload failed; previous running configuration retained, retry pending'
             fi
-
-            echo ""
         fi
     else
-        # Registry doesn't exist yet
-        if [ -n "$LAST_MTIME" ]; then
-            log "⚠ Registry file disappeared"
-            LAST_MTIME=""
-        fi
+        log 'Registry is missing/invalid; retaining previous proxy configuration'
     fi
-
     sleep "$WATCH_INTERVAL"
 done

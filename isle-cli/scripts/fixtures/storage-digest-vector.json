@@ -1,0 +1,39 @@
+{
+  "expectedDigest": "7fa3e25e000d69e0ccc25887a0e31af14f430ca8dc331c67c408e4e38c5f335a",
+  "hostingRelease": {
+    "manifestSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+    "name": "isle-content-host",
+    "version": "2026.11.1"
+  },
+  "item": {
+    "app": "isle-content-host",
+    "device": "pol-core",
+    "id": "apt-repo-to-pol-core",
+    "kind": "storage",
+    "originDevice": "isle-core",
+    "state": "planned",
+    "storage": {
+      "dataset": "apt-public-repo",
+      "domain": "apt.isle",
+      "schemaVersion": 1,
+      "source": {
+        "device": "isle-core",
+        "entries": 1234,
+        "path": "/etc/isle-mesh/apt/repo",
+        "snapshotSha256": "abababababababababababababababababababababababababababababababab",
+        "snapshotTakenAt": "2026-11-09T12:00:00+00:00",
+        "totalBytes": 17179869184
+      },
+      "sourceRemoval": "dependent",
+      "target": {
+        "capacityBytes": 21474836480,
+        "device": "pol-core",
+        "filesystemUuid": "3bd28d7c-ba1e-4e6e-9a9f-23f684f4adf8",
+        "mountpoint": "/mnt/pol-ssd",
+        "relativePath": "isle/datasets/apt-public-repo"
+      }
+    }
+  },
+  "planId": "ce23b61c3a444592a0e9274751f76854",
+  "revision": 2
+}

@@ -24,6 +24,9 @@ STATE=Path('/etc/isle-mesh')
 CORE_NAMES={'polari.isle','api.polari.isle','auth.polari.isle','apt.isle',
             'trust.isle','registry.isle','certs.isle','router.isle','health.isle'}
 
+# Storage placement (contract section 5): states in which the placement record grants the domain to its device.
+PLACEMENT_ISSUE_STATES=('authorized','migrated','cutover','hosting')
+
 class Authority:
     def __init__(self,state=STATE):
         self.state=Path(state);self.directory=self.state/'ca/enrollment'
@@ -39,6 +42,17 @@ class Authority:
             os.replace(tmp,path)
         finally:
             if os.path.exists(tmp):os.unlink(tmp)
+    def placed(self,domain):
+        """The placement-claims.json row {device,dataset,state} for a domain, or None. Written only by
+        storage_placement on the core (mirrored on every transition); claims.json stays a plain device string.
+        An unreadable file grants nothing (placement only ever ADDS an issuance path; core names stay refused)."""
+        path=self.state/'storage/placement-claims.json'
+        if not path.exists():return None
+        try:
+            row=json.loads(path.read_text()).get(domain)
+        except (OSError,ValueError,AttributeError):
+            return None
+        return row if isinstance(row,dict) else None
     def authorize(self,device,output):
         if not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,62}',device):raise ValueError('invalid member name')
         with (self.directory/'authority.lock').open('a') as lock:
@@ -63,11 +77,18 @@ class Authority:
                 raise PermissionError('member credential not accepted')
             claims=self.read(self.claims);owner=claims.get(domain)
             if owner and owner!=device:raise PermissionError('service name belongs to another member')
+            # A placement entry names exactly one device for a domain; recovery-needed issues nothing.
+            placed=self.placed(domain)
+            if placed is not None and placed.get('state') not in PLACEMENT_ISSUE_STATES:
+                raise PermissionError('service name is frozen by its storage placement')
+            granted=placed is not None and placed.get('device')==device
+            if placed is not None and not granted:
+                raise PermissionError('service name is placed on another device')
             # Core leaves and core registry names cannot be claimed by members.
             registry=self.read(self.state/'agent/registry.json')
             reserved=CORE_NAMES|set(registry.get('domains',{}))|set(registry.get('subdomains',{}))
             reserved.update(a.get('domain','') for a in registry.get('apps',{}).values())
-            if domain in reserved or (self.state/'agent/ssl/certs'/(domain+'.crt')).exists():
+            if not granted and (domain in reserved or (self.state/'agent/ssl/certs'/(domain+'.crt')).exists()):
                 raise PermissionError('service name belongs to the core')
             if len([v for v in claims.values() if v==device])>=128 and not owner:
                 raise ValueError('member service limit reached')
@@ -76,7 +97,9 @@ class Authority:
                 request.write_text(csr)
                 self.enrollment.sign(domain,request,chain)
                 # Commit ownership before returning any certificate; retries reuse it.
-                claims[domain]=device;self.write(self.claims,claims)
+                # A placement grant is recorded by placement-claims.json alone: claims.json would make the
+                # core's own `certs.sh issue` for the same name (renewal of its cert) refuse.
+                if not granted:claims[domain]=device;self.write(self.claims,claims)
                 return chain.read_text()
 
 class Handler(BaseHTTPRequestHandler):

@@ -1,0 +1,11 @@
+[Unit]
+Description=Check for a release run the core published for this device
+
+[Timer]
+OnBootSec=3min
+OnUnitInactiveSec=2min
+RandomizedDelaySec=20s
+Unit=isle-release-follow.service
+
+[Install]
+WantedBy=timers.target

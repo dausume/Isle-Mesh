@@ -37,7 +37,17 @@ for line in os.environ.get("LEASES", "").splitlines():
 def sanitize(h):
     return re.sub(r"[^a-z0-9-]", "-", h.lower())[:63]
 
-seen = set()
+# Storage placement (contract section 5): a domain with an entry is managed by the placement record, never by the
+# first-sorted-instance rule below. It is handled by the managed pass after this one.
+managed = set()
+try:
+    with open(os.environ.get("PLACEMENT_FILE", "/etc/isle-mesh/storage/placement.json")) as f:
+        managed = {e["domain"] for e in json.load(f).get("datasets", {}).values()
+                   if isinstance(e, dict) and isinstance(e.get("domain"), str)}
+except (OSError, ValueError, AttributeError):
+    pass
+
+seen = set(managed)
 for e in d.get("entries", []):
     for i in e.get("instances", []):
         dev, dom = i.get("device", ""), i.get("domain", "")
@@ -54,6 +64,55 @@ for e in d.get("entries", []):
             print("%s %s" % (dom, ip))
 PYEOF
 )
+
+# Managed domains (placement record is the one authority): the expected address comes from the entry, the
+# comparison is against the ROUTER (dig @router), never getent. Nothing is written while an intent is pending or
+# the entry is recovery-needed. Drift in cutover|hosting is repaired only by the journaled reconcile-address
+# operation; this script never calls dns-register for a managed name.
+PLACEMENT_FILE=${PLACEMENT_FILE:-/etc/isle-mesh/storage/placement.json}
+if [ -s "$PLACEMENT_FILE" ]; then
+    RESOLVER=$(cd "$(dirname "$0")" && python3 -c 'import dns_publication; print(dns_publication.resolver())' 2>/dev/null) || RESOLVER=10.10.0.1
+    CORE_ADDR=$(bash -c 'source "$(dirname "$0")/agent-address.sh"; isle_agent_address' "$0" 2>/dev/null) || CORE_ADDR=""
+    MANAGED=$(PLACEMENT_FILE="$PLACEMENT_FILE" LEASES="$LEASES" CORE_ADDR="$CORE_ADDR" python3 - <<'PYMANAGED'
+import json, os, re
+agents = {}
+for line in os.environ.get("LEASES", "").splitlines():
+    p = line.split()
+    if len(p) >= 4 and p[1].lower().startswith("02:00:00:00"):
+        agents[p[3].lower()] = p[2]
+def sanitize(h):
+    return re.sub(r"[^a-z0-9-]", "-", h.lower())[:63]
+try:
+    entries = json.load(open(os.environ["PLACEMENT_FILE"])).get("datasets", {}).values()
+except (OSError, ValueError, AttributeError):
+    raise SystemExit(0)
+for e in entries:
+    if not isinstance(e, dict) or not e.get("domain") or e.get("pending") or e.get("state") == "recovery-needed":
+        continue
+    state = e.get("state")
+    if state in ("authorized", "migrated"):
+        want = os.environ.get("CORE_ADDR", "")
+    elif state in ("cutover", "hosting"):
+        want = agents.get(sanitize(str(e.get("device", ""))), "")
+    else:
+        continue
+    if want:
+        print("%s %s %s %s %s" % (e["domain"], state, e.get("generation"), e.get("dataset"), want))
+PYMANAGED
+)
+    while read -r MDOM MSTATE MGEN MSET MWANT; do
+        [ -n "$MDOM" ] || continue
+        ROUTER=$(dig +short +time=2 +tries=1 "@$RESOLVER" "$MDOM" A 2>/dev/null | head -1)
+        [ "$ROUTER" != "$MWANT" ] || continue
+        case "$MSTATE" in
+            cutover|hosting)
+                sudo -n /usr/local/bin/isle storage reconcile-address --dataset "$MSET" --generation "$MGEN" >/dev/null 2>&1 \
+                    && echo "dns-reconcile: $MDOM drift repaired by reconcile-address ($ROUTER -> $MWANT)" \
+                    || echo "dns-reconcile: FAILED reconcile-address for $MDOM" ;;
+            *) echo "dns-reconcile: $MDOM answers ${ROUTER:-nothing}, the placement ($MSTATE) expects $MWANT; not repaired automatically" ;;
+        esac
+    done <<< "$MANAGED"
+fi
 
 [ -n "$PAIRS" ] || exit 0
 while read -r DOM IP; do

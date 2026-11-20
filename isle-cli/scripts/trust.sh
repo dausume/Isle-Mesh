@@ -45,9 +45,33 @@ fail(){ echo -e "${R}[FAIL]${N} $*"; }
 fp_of(){ openssl x509 -in "$1" -noout -fingerprint -sha256 | cut -d= -f2; }
 
 curl_trust(){ # $1 out; authenticated by CURRENT root, core-local fallbacks
-    curl -s --max-time 6 --cacert "$CA" -o "$1" "$TRUST_URL_DEFAULT" 2>/dev/null \
-    || curl -s --max-time 6 --cacert "$CA" --resolve apt.isle:443:127.0.0.1 -o "$1" "$TRUST_URL_DEFAULT" 2>/dev/null \
-    || curl -s --max-time 6 --cacert "$CA" --resolve apt.isle:443:10.10.0.2 -o "$1" "$TRUST_URL_DEFAULT" 2>/dev/null
+    curl --http1.1 --fail -s --max-time 6 --cacert "$CA" -o "$1" "$TRUST_URL_DEFAULT" 2>/dev/null \
+    || curl --http1.1 --fail -s --max-time 6 --cacert "$CA" --resolve apt.isle:443:127.0.0.1 -o "$1" "$TRUST_URL_DEFAULT" 2>/dev/null \
+    || curl --http1.1 --fail -s --max-time 6 --cacert "$CA" --resolve apt.isle:443:10.10.0.2 -o "$1" "$TRUST_URL_DEFAULT" 2>/dev/null
+}
+
+signed_rotation(){
+    # The transport is untrusted here; ONLY the previously installed archive
+    # key authenticates this public certificate. Never fetch a replacement key.
+    local out="$1" sig key=/usr/share/keyrings/isle-archive-keyring.gpg
+    [ -s "$key" ] || return 1
+    sig=$(mktemp)
+    if curl --http1.1 --fail --silent --insecure --max-time 10 -o "$out" "$TRUST_URL_DEFAULT" \
+       && curl --http1.1 --fail --silent --insecure --max-time 10 -o "$sig" "$TRUST_URL_DEFAULT.asc" \
+       && gpgv --keyring "$key" "$sig" "$out" >/dev/null 2>&1 \
+       && openssl x509 -in "$out" -noout -checkend 0 >/dev/null 2>&1 \
+       && openssl x509 -in "$out" -noout -text | grep -q 'CA:TRUE'; then
+        # Reject replay of an older signed root. Equal validity starts are
+        # accepted only for the same certificate; ambiguous rotations fail closed.
+        if [ -s "$CA" ] && ! cmp -s "$CA" "$out"; then
+            local old_start new_start
+            old_start=$(date -d "$(openssl x509 -in "$CA" -noout -startdate | cut -d= -f2-)" +%s) || { rm -f "$sig"; return 1; }
+            new_start=$(date -d "$(openssl x509 -in "$out" -noout -startdate | cut -d= -f2-)" +%s) || { rm -f "$sig"; return 1; }
+            [ "$new_start" -gt "$old_start" ] || { rm -f "$sig"; return 1; }
+        fi
+        rm -f "$sig"; return 0
+    fi
+    rm -f "$sig"; return 1
 }
 
 status() {
@@ -64,8 +88,9 @@ status() {
             && ok "Chrome/NSS ($TRUST_USER): current isle CA trusted" \
             || warn "Chrome/NSS ($TRUST_USER): current isle CA NOT trusted — isle trust install"
     else warn "certutil missing (apt install libnss3-tools)"; fi
-    ls "$TRUST_HOME"/.mozilla/firefox/*/cert9.db >/dev/null 2>&1 \
-        && warn "Firefox present: separate store (Settings > Certificates, or policies.json)"
+    if [ -f /etc/firefox/policies/isle-root.crt ] && cmp -s "$CA" /etc/firefox/policies/isle-root.crt; then
+        ok "Firefox: current public root policy present (restart browser to load it)"
+    else warn "Firefox: current root policy missing — isle trust install"; fi
     local probe; probe=$(mktemp)
     if curl_trust "$probe" && [ -s "$probe" ]; then
         ok "live probe: apt.isle answered over a channel this root authenticates"
@@ -73,13 +98,20 @@ status() {
     rm -f "$probe"
 }
 
+valid_root(){
+    openssl x509 -in "$1" -noout -checkend 0 >/dev/null 2>&1 \
+      && openssl x509 -in "$1" -noout -text | grep -q 'CA:TRUE'
+}
+
 do_import() {
+    valid_root "$CA" || { fail "Invalid, expired or non-CA trust material; refusing import"; return 1; }
     sudo cp "$CA" /usr/local/share/ca-certificates/isle-root.crt \
-        && sudo update-ca-certificates >/dev/null 2>&1 \
+        && sudo update-ca-certificates --fresh >/dev/null 2>&1 \
         && ok "system store: imported" || { fail "system store import failed"; return 1; }
     if ! command -v certutil >/dev/null 2>&1; then
         sudo bash "$(dirname "${BASH_SOURCE[0]}")/apt-install.sh" libnss3-tools >/dev/null 2>&1 || true
     fi
+    sudo python3 "$(dirname "${BASH_SOURCE[0]}")/firefox_trust.py" policy || return 1
     import_browser
 }
 
@@ -93,6 +125,7 @@ import_browser() {
         as_trust_user certutil -d "$NSSDB" -A -t "C,," -n "$NICK" -i "$CA" \
             && ok "Chrome/NSS ($TRUST_USER): imported (restart an already-open browser)" \
             || { fail "Chrome/NSS import failed"; return 1; }
+        as_trust_user python3 "$(dirname "${BASH_SOURCE[0]}")/firefox_trust.py" profiles || return 1
     else
         fail "Browser trust tools missing; install libnss3-tools, then retry certificate setup"
         return 1
@@ -130,26 +163,27 @@ fetch_root() { # first-join: no existing trust — fingerprint IS the consent
         echo "Compare against the operator's value (isle trust cert on the core)."
         read -r -p "Fingerprint verified? [y/N] " a; [ "$a" = y ] || [ "$a" = Y ] || { echo "aborted"; exit 1; }
     fi
-    sudo mkdir -p /etc/isle-mesh/ca && sudo cp "$tmp" "$CA" && sudo chmod 644 "$CA"; rm -f "$tmp"
+    valid_root "$tmp" || { rm -f "$tmp"; fail "Not a valid CA root"; return 1; }
+    sudo mkdir -p /etc/isle-mesh/ca && sudo install -m 644 "$tmp" "$CA" || { rm -f "$tmp"; return 1; }; rm -f "$tmp"
     do_import || return 1; echo; status
 }
 
 update_trust() { # signed-channel rule: only over TLS the CURRENT root vouches
     [ -f "$CA" ] || { fail "no current root — first join uses: isle trust fetch"; exit 1; }
     local tmp; tmp=$(mktemp)
-    if ! curl_trust "$tmp" || ! openssl x509 -in "$tmp" -noout 2>/dev/null; then
+    if ! { curl_trust "$tmp" || signed_rotation "$tmp"; } || ! valid_root "$tmp"; then
         rm -f "$tmp"
         [ "${1:-}" = "--auto" ] && exit 0   # quiet when core unreachable
-        fail "could not fetch a root over a channel the current root authenticates"
+        fail "could not authenticate a root using current TLS trust or the installed archive signing key"
         echo "If the isle re-keyed, re-consent explicitly: isle trust fetch --fingerprint <new fp>"
         exit 1
     fi
     if cmp -s "$tmp" "$CA"; then
         [ "${1:-}" = "--auto" ] || ok "up to date ($(fp_of "$CA"))"
     else
-        warn "root ROTATED (authenticated by the current root) — applying"
+        warn "root ROTATED (authenticated by existing Isle trust) — applying"
         echo "  old: $(fp_of "$CA")"; echo "  new: $(fp_of "$tmp")"
-        sudo cp "$tmp" "$CA" && do_import
+        sudo install -m 644 "$tmp" "$CA" && do_import || { rm -f "$tmp"; return 1; }
         [ -d /etc/isle-mesh/trust-page/ca ] && sudo cp "$CA" /etc/isle-mesh/trust-page/ca/isle-root.crt
     fi
     rm -f "$tmp"

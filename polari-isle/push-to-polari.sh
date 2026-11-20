@@ -3,13 +3,15 @@
 # (mac-5 seam, v1): device facts + agent registry + nginx fragments
 # POSTed to prf-isle over the agent (api.polari.isle). REAL data
 # only — this script never writes the mock_network flag.
-set -u
+set -euo pipefail
 API="https://api.polari.isle"
-CURL="curl -sk --resolve api.polari.isle:443:127.0.0.1"
-# the device's CANONICAL isle name (topology identity) — falls back to
-# the hostname; isle create/core-install may write the canonical file so
-# a machine's isle identity survives hostname quirks
-HOST=$(cat /etc/isle-mesh/canonical-name 2>/dev/null || hostname)
+CURL="curl --http1.1 --fail --silent --show-error --connect-timeout 5 --max-time 15"
+# Match every other shared membership reporter; never invent an OS-host alias.
+SCRIPT_ROOT="/usr/share/isle-mesh/isle-cli/scripts"
+if [ -f "$(dirname "$0")/../isle-cli/scripts/member_preflight.py" ]; then
+  SCRIPT_ROOT=$(cd "$(dirname "$0")/../isle-cli/scripts" && pwd)
+fi
+HOST=$(PYTHONPATH="$SCRIPT_ROOT" python3 -c "from member_preflight import identity; print(identity())") || exit 1
 
 # device facts + uplinks
 LINKS=$(ip -br link | awk '$1!~/^(lo|veth|br-|docker|virbr|isle-br)/ {print $1" "$2}')
@@ -43,11 +45,31 @@ PYEOF
 
 # registry
 if [ -r /etc/isle-mesh/agent/registry.json ]; then
-  python3 - "$HOST" << "PYEOF" | $CURL -X POST -H "Content-Type: application/json" --data-binary @- "$API/api/islemesh/ingest/registry" > /dev/null
+  # Storage contract section 5: a domain whose placement entry is cutover|hosting is served by another device;
+# the core omits it from the registry COPY it pushes (the local registry.json is untouched).
+python3 - "$HOST" /etc/isle-mesh/storage/placement.json << "PYEOF" | $CURL -X POST -H "Content-Type: application/json" --data-binary @- "$API/api/islemesh/ingest/registry" > /dev/null || echo "registry push skipped" >&2
 import json, sys
-print(json.dumps({"device": sys.argv[1],
-  "registry": json.load(open("/etc/isle-mesh/agent/registry.json"))}))
+registry = json.load(open("/etc/isle-mesh/agent/registry.json"))
+try:
+    entries = json.load(open(sys.argv[2])).get("datasets", {}).values()
+    moved = {e["domain"] for e in entries if isinstance(e, dict) and e.get("state") in ("cutover", "hosting")
+             and isinstance(e.get("domain"), str)}
+except FileNotFoundError:
+    moved = set()
+except (OSError, ValueError, AttributeError):
+    sys.exit("placement record unreadable: not pushing a registry that could claim a moved domain")
+if moved and isinstance(registry.get("apps"), dict):
+    registry = dict(registry, apps={k: v for k, v in registry["apps"].items()
+                                    if not (isinstance(v, dict) and v.get("domain") in moved)})
+print(json.dumps({"device": sys.argv[1], "registry": registry}))
 PYEOF
+fi
+
+# storage placement view (contract B1): written into the backend container's data dir by the core, no network credential
+# (docker exec, like `isle store publish`); then the relay pulls stored receipts/witnesses and runs mark-migrated.
+if [ -r /etc/isle-mesh/storage/placement.json ]; then
+  sudo -n /usr/local/bin/isle storage view-export --post >/dev/null 2>&1 || echo "placement view push skipped" >&2
+  sudo -n /usr/local/bin/isle storage relay >/dev/null 2>&1 || echo "storage relay skipped" >&2
 fi
 
 # fragments

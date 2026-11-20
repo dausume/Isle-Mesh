@@ -73,7 +73,7 @@ configure_nm(){
     err 'Existing profile is not DHCP; review it before onboarding.'; return 1;
   }
   nmcli connection modify uuid "$uuid" ipv4.never-default yes ipv6.never-default yes \
-    connection.autoconnect yes || { err 'Could not configure Ethernet profile.'; return 1; }
+    connection.autoconnect yes connection.autoconnect-retries 0 ipv4.dhcp-timeout 2147483647 || { err 'Could not configure Ethernet profile.'; return 1; }
   log "Using Ethernet profile $uuid on $nic"
   nmcli --wait 30 connection up uuid "$uuid" ifname "$nic" >/dev/null || {
     err 'Ethernet activation failed; no lease confirmed.'; return 1;

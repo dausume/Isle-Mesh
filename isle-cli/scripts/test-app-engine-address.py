@@ -13,7 +13,7 @@ SCRIPT = Path(__file__).with_name('app-deploy.sh')
 class EngineDeclarationTest(unittest.TestCase):
     def run_declaration(self, engine, domain='board-engines.isle'):
         text = SCRIPT.read_text()
-        block = text.split('# ---- 5. engine declaration', 1)[1].split('\necho\nif [ "$DNS_OK"', 1)[0]
+        block = text.split('# ---- 5. engine declaration', 1)[1].split('\necho\nif [ "$STAGED"', 1)[0]
         # Restore the first comment line removed by the section delimiter.
         block = '#' + block
         with tempfile.TemporaryDirectory() as temp:

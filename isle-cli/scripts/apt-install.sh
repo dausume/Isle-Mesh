@@ -51,6 +51,30 @@ OPTS=(-o "Dir::Etc::SourceList=$WORK/sources.list" -o "Dir::Etc::SourceParts=$WO
       -o "Dir::State::extended_states=$WORK/extended_states" -o APT::Get::List-Cleanup=0)
 OPTS+=(-o APT::Update::Error-Mode=any)
 export APT_CONFIG="$WORK/apt.conf"
+# Every pin of the device applies here too (holds, a recovery block, and isle-mesh.pref, which lets only
+# isle-* and polari-* packages come out of the main isle index). Operating system packages of the offline
+# dependency set come from their own index, deps/<Ubuntu release name>/, and this installer reads that
+# index only for the release this device runs: a package built for another release is never offered.
+# One exception, until this core's first publication with the two indexes: its own repository then still
+# lists the operating system packages (its own) in the main index, so isle-mesh.pref is left out there.
+# >>> host-pins (test-apt-isle-pin.py runs the lines between these markers)
+mkdir -p "$WORK/preferences.d"
+SKIP_PIN=""
+if [ -f "$REPO/InRelease" ] && [ ! -d "$REPO/deps" ]; then SKIP_PIN=isle-mesh.pref; fi
+for pref in /etc/apt/preferences.d/*; do
+    if [ -f "$pref" ] && [ "${pref##*/}" != "$SKIP_PIN" ]; then cp "$pref" "$WORK/preferences.d/"; fi
+done
+OPTS+=(-o "Dir::Etc::PreferencesParts=$WORK/preferences.d")
+# <<< host-pins
+# >>> deps-set (test-apt-deps-index.py runs the lines between these markers)
+CODENAME=$( ( . /etc/os-release 2>/dev/null; n="${UBUNTU_CODENAME:-${VERSION_CODENAME:-}}"
+              [[ "$n" =~ ^[a-z][a-z0-9]*$ ]] && printf '%s' "$n" ) || true )
+deps_served() { # a member asks the core, over verified TLS, whether it serves a dependency set for this release
+    [ -n "$CODENAME" ] && command -v curl >/dev/null 2>&1 || return 1
+    [ "$(curl --http1.1 --silent --output /dev/null --max-time 8 --cacert "$CA" --write-out '%{http_code}' \
+            "https://apt.isle/deps/$CODENAME/InRelease" 2>/dev/null || true)" = 200 ]
+}
+# <<< deps-set
 # Resolve using installed packages and local sources FIRST. Merely enabling
 # online mode must not contact upstream when the local pool is sufficient.
 # No >1000 priority pins, forced downgrades or reinstalls are used.
@@ -81,9 +105,12 @@ READY=0
 if apt-get "${OPTS[@]}" update > "$WORK/update.log" 2>&1 && try_local_transaction; then READY=1; fi
 if [ "$READY" = 0 ]; then
     if [ -f "$REPO/InRelease" ] && [ -f "$REPO/isle-archive-keyring.gpg" ]; then
-        if try_source "deb [signed-by=$REPO/isle-archive-keyring.gpg] copy:$REPO ./"; then READY=1; fi
+        if try_source "deb [signed-by=$REPO/isle-archive-keyring.gpg] copy:$REPO ./"; then READY=1
+        elif [ -n "$CODENAME" ] && [ -f "$REPO/deps/$CODENAME/InRelease" ] \
+            && try_source "deb [signed-by=$REPO/isle-archive-keyring.gpg] copy:$REPO deps/$CODENAME/"; then READY=1; fi
     elif [ -f "$CA" ] && [ -f "$KEY" ]; then
-        if try_source "deb [signed-by=$KEY] https://apt.isle ./"; then READY=1; fi
+        if try_source "deb [signed-by=$KEY] https://apt.isle ./"; then READY=1
+        elif deps_served && try_source "deb [signed-by=$KEY] https://apt.isle deps/$CODENAME/"; then READY=1; fi
     fi
 fi
 MEDIUM=$(cat /etc/polari/offline-source 2>/dev/null || true)

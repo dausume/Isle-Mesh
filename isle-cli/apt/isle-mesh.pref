@@ -1,0 +1,12 @@
+Explanation: isle-mesh: the isle package source supplies isle and polari packages only.
+Explanation: Operating system packages of the offline dependency set are built for one Ubuntu release.
+Explanation: From this source they are never a candidate for apt on this device. The isle installer
+Explanation: (isle apt install) reads them from their own index, and only for this device's own release.
+Explanation: Managed by the isle CLI: isle apt-repo pin check | apply. Do not edit.
+Package: isle-* polari-*
+Pin: release o=isle-mesh
+Pin-Priority: 500
+
+Package: *
+Pin: release o=isle-mesh
+Pin-Priority: -1

@@ -1,0 +1,34 @@
+#!/usr/bin/python3
+"""pkexec entry for the App button (polkit org.islemesh.release.run). Accepts ONLY:
+  run <absolute packet dir> --expect <64 lowercase hex> [--wait <1..720> | --no-wait]
+and execs release_run.py with --yes. Everything else is refused (exit 2)."""
+import os, re, sys
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+
+
+def validate(argv):
+    """Return the release_run.py argv tail for an accepted shape, else raise ValueError(one-line reason)."""
+    if len(argv) < 4 or argv[0] != 'run': raise ValueError('only: run <packet dir> --expect <run id> [--wait N|--no-wait]')
+    d = argv[1]
+    if not d.startswith('/') or '\0' in d or '\n' in d: raise ValueError('packet directory must be an absolute path')
+    if '..' in d.split('/'): raise ValueError('packet directory must not contain ..')
+    if argv[2] != '--expect' or not re.fullmatch(r'[0-9a-f]{64}', argv[3]): raise ValueError('--expect needs 64 lowercase hex characters')
+    rest = argv[4:]
+    if rest == []: wait = []
+    elif rest == ['--no-wait']: wait = ['--no-wait']
+    elif len(rest) == 2 and rest[0] == '--wait' and re.fullmatch(r'[1-9][0-9]{0,2}', rest[1]) and 1 <= int(rest[1]) <= 720: wait = ['--wait', rest[1]]
+    else: raise ValueError('only --wait <1..720> or --no-wait may follow --expect')
+    if not os.path.isdir(d): raise ValueError('packet directory does not exist')
+    return ['run', d, '--expect', argv[3], '--yes', *wait]
+
+
+def main(argv):
+    try: tail = validate(argv)
+    except ValueError as exc:
+        print('release-pkexec: ' + str(exc), file=sys.stderr); return 2
+    os.execv('/usr/bin/python3', ['/usr/bin/python3', str(HERE / 'release_run.py'), *tail])
+
+
+if __name__ == '__main__': sys.exit(main(sys.argv[1:]))

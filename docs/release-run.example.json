@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "name": "board-engines 2026.11.15-2",
+  "publish": [
+    {
+      "kind": "catalog",
+      "release": "release.json"
+    }
+  ],
+  "devices": {
+    "econ-core": [
+      {
+        "verb": "store-install",
+        "app": "board-engines",
+        "version": "2026.11.15-2",
+        "manifestSha256": "18b230c96384a7e8e6ee0bc30ffc64fad967f3a12f56936d648feabc9b4941b5",
+        "expectImageDigest": "sha256:8cd5ef72b66dd9a30b84da78a66b028c84cd23cce92aded2218116c673ab3cbc"
+      }
+    ]
+  },
+  "verify": [
+    {
+      "url": "https://board-engines.isle/capability",
+      "expectStatus": 200,
+      "device": "econ-core"
+    },
+    {
+      "url": "https://twin.board-engines.isle/health",
+      "expectStatus": 200,
+      "expectJsonContains": {
+        "ok": true
+      },
+      "device": "econ-core"
+    }
+  ]
+}

@@ -272,3 +272,145 @@ not group/world writable. Enabling checks trusted HTTPS OIDC discovery and its
 issuer before saving; it does not deploy Keycloak. The frontend reloads only after
 successful readback. This toggle changes sign-in availability; it is deliberately
 separate from `POLARI_APP_PERMISSIONS` and backend enforcement policy.
+
+
+### Shared local operations
+
+`sudo isle store install <catalog-name> --yes` and the native Install button
+invoke the same store operation. The command prints `Operation: <id>`; inspect
+it with `isle operation status <id>` and retry with
+`sudo isle operation retry <id>`. Retry keeps the original catalog response and
+replays its plan through the existing shared deployment commands. Successful
+operations are not replayed by retry; use a new install for an intentional
+upgrade. Per-app locks prevent concurrent attempts. A killed process is reported
+as interrupted, never completed. Journals persist in `/var/lib/isle-mesh/operations`.
+
+`isle app status <name>` reports configuration, actual runtime and trusted local
+HTTPS evidence separately. A directory alone is staged, not deployed. HTTPS
+checks currently require success from the registered domain's root path;
+applications with a different health endpoint need catalog health metadata.
+This local probe is not evidence of cross-device reachability.
+
+`isle update plan` reviews the exact published package manifest and actual local
+dpkg status. `sudo isle update apply <release-id>` verifies HTTPS artifact hashes,
+package names and versions, refuses implicit downgrades, installs with
+`apt-get --no-remove`, and reconciles owned local host routes and reporting.
+`sudo isle reconcile` reruns that reconciliation without recreating membership or
+applications. These actions share the operation journal and native bridge.
+An update does not rebuild/recreate the agent image or migrate core runtime
+images; those remain distinct coordinated release actions, not implied by package
+success. No general system upgrade or rejoin is performed.
+
+Native operation routes: `device.updatePlan`, `device.updateApply(releaseId)`,
+`device.reconcile`, `operation.status(id)`, and `operation.retry(id)` use fixed
+argument arrays; there is no arbitrary command/path bridge. Administrator
+refusal is returned to the caller without a success claim. The existing
+`store.install(name)` boundary is preserved.
+
+### Member identity reconciliation
+
+CLI 205 refuses updates, deployments and reconciles when the two saved member names
+disagree: `/etc/isle-mesh/device-name` (canonical; mounted into the agent and reported
+to the core) and `/etc/isle-mesh/agent/remote/hostname` (the registration name saved by
+the original `isle join`). `isle identity status` shows both. `isle identity plan
+--expected-legacy <saved-registration-name> --canonical <device-name>` is read-only and
+states what would change. `sudo isle identity reconcile ...` with the same two explicit
+values is a journaled operation: it refuses when the saved name is not the stated one,
+when `device-name` is missing or differs from `--canonical`, or when a hosting credential
+names another device; otherwise it copies the old file beside the original (mtime kept),
+rewrites it atomically, re-runs the preflight and journals a receipt in the operation
+directory and `agent/remote/identity-reconcile-receipts.jsonl`. MAC, DHCP lease,
+discovery, interface, NetworkManager profile, certificates, enrollment credential and the
+OS hostname are never modified (the OS hostname is not an Isle identity). It never joins,
+rejoins or renames a device at the core. Afterwards retry the refused operation with
+`sudo isle operation retry <id>`.
+
+### Storage placement inspection
+
+`isle storage list` returns a timestamped JSON inventory, including unmounted
+partitions and filesystem UUIDs. It does not mount, format or alter any disk.
+Use filesystem UUIDs rather than changing device names such as `/dev/sdc1`.
+
+Before a planned copy, on the destination device run:
+
+```sh
+isle storage check --path /mnt/storage/isle-repository --uuid <filesystem-uuid> --required-bytes <copy-budget>
+```
+
+This read-only operation uses the same local preflight helper available to
+placement code. It refuses a different or absent filesystem, fallback to the
+root filesystem, symlink paths, read-only mounts and insufficient capacity.
+Success reports `localMountVerified`, not approval to migrate. It does not prove
+write permissions, persistent boot ordering or safety after a later unplug.
+It creates no directories. Errors return JSON `ok:false` and a nonzero exit.
+
+These inspection commands need no administrator privileges or mutation journal.
+Repository migration and native planning execution are not implemented by these
+commands; keep the existing serving source until a coordinated migration has
+verified its replacement. No storage inspection button is exposed yet.
+
+For the public APT/artifact repository, `sudo isle apt-repo snapshot` prints a
+deterministic content manifest while holding the same publication lock as APT,
+runtime-image and catalog publication. The fixed source is the public `repo/`
+directory, not its sibling signing-key directory. Store the output outside that
+source and check command success before using it. Creating the lock may require
+administrator rights; no repository contents are changed.
+
+`isle storage snapshot --path <absolute-directory>` provides the same inventory
+for other app data, but the caller must first quiesce that app's writers. These
+public-content inventories reject symlinks, hardlinks, special files, nested
+filesystems, hidden entries and incomplete `.part`/`.partial` files. They stream
+file hashes with bounded memory and detect observed changes during hashing.
+They are not live-database backup tools or point-in-time filesystem snapshots.
+
+After a separately coordinated copy, the shared verification command is:
+
+```sh
+isle storage verify --path <destination> --manifest <snapshot.json> --sha256 <trusted-manifest-sha256>
+```
+
+The digest must come through the authenticated plan or operator channel, not
+from an untrusted copy alongside the files. Verification checks the manifest
+digest and exact tree contents, including extra or missing files. This proves
+content equality only. It neither verifies repository signatures nor changes
+DNS, starts an app, authorizes removal, or records migration completion. Both
+snapshot and destination verification remain preparatory shared operations;
+copy, mount lifecycle, app deployment and verified cutover are separate work.
+
+### Storage migration contract (stm-1)
+
+`scripts/storage_contract.py` holds the typed contract for moving a dataset onto another device's
+filesystem (`docs/STORAGE-MIGRATION-CONTRACT.md`). It is pure stdlib code: it validates the plan item's
+`storage` block (unknown keys are dropped), builds the planned action, the `storage migrate|cutover|rollback|sync`
+argv, the receipt skeleton and the binding record, and parses requests for `operations.py` later.
+The plan digest (D6) is the sha256 of the canonical JSON (`sort_keys`, `(",", ":")`, `ensure_ascii`) of the
+execution tuple `{planId, revision, itemId, device, originDevice, app, state, storage (whitelisted),
+hostingRelease {name, version, manifestSha256}}`; any change to any of them changes it. Requests (D5) are
+`storage migrate --dataset D --plan P --revision N --item I --digest H` and `storage sync --dataset D` on the
+target, `storage cutover|rollback --dataset D --generation G` on the core; `lock_name()` and `journal_name()`
+derive `app-storage-<dataset>.lock` and `storage-<dataset>` from the parsed tokens.
+The backend carries the same function and both check `scripts/fixtures/storage-digest-vector.json`.
+Nothing executes yet: no command, stage, mount, copy or DNS change is wired to this module.
+Check it with `python3 isle-cli/scripts/test-storage-contract.py`.
+
+### Placement record and content manifests (stm-3)
+
+`storage_placement.py` keeps the core-side record of which device hosts a dataset
+(`/etc/isle-mesh/storage/placement.json`): one entry per dataset with `device`, `domain`, `sourcePath`,
+`state`, `generation`, the plan `{id, revision, digest}`, a `history` of every transition and the
+source/target addresses. States: `authorized` → `migrated` → `cutover` → `hosting`, plus `recovery-needed`.
+Every change is a compare-and-set on the current state (and, where given, the generation) under a lock;
+`transition()` is the one function that moves an entry, and only `migrated → cutover` bumps the generation.
+Core-side verbs (root): `sudo isle storage authorize --dataset D --device X --domain Y
+--source-path P --plan-id I --plan-revision N --plan-digest H [--replace]` creates the entry;
+`mark-migrated --dataset D --digest H` (authorized → migrated, after the target's receipt);
+`accept --dataset D --generation G` (cutover → hosting, after a neighbour witness).
+The cutover and rollback transitions belong to the executor slice and are not exposed here yet.
+While an entry exists in any state, every publisher (`apt-repo.sh publish`, `isle store publish`,
+`isle update publish-runtime`) also writes `repo/snapshot/<sha256>.json` (the content inventory plus a
+`binding` block: dataset, source device, taken-at, lock path, plan id) and `repo/snapshot/latest.json`,
+under the publication lock it already holds (the helper never re-takes it: a nested flock would deadlock).
+`sudo isle storage publish-manifest --repo PATH` prepares a manifest with no placement record at all.
+The repo's top-level `snapshot/` directory is reserved for these manifests and excluded from content
+inventories; a failed manifest step prints `[storage] manifest not published: ...` and never fails the
+publication itself. None of this moves data; nothing executes a migration yet.

@@ -148,6 +148,17 @@ EOF
     log_info "Initialized DNS configuration file"
 }
 
+# Managed-names fence (verbatim from lib/managed-names.sh; /etc/isle-managed-names is pushed by the core)
+isle_managed_skip() {
+    _mn_file="${2:-${ISLE_MANAGED_NAMES_FILE:-/etc/isle-managed-names}}"
+    [ -r "$_mn_file" ] || return 1
+    if tr -d '\r' < "$_mn_file" | grep -Fxq -- "$1"; then
+        if command -v log_info >/dev/null 2>&1; then log_info "managed name skipped: $1"; else echo "managed name skipped: $1" >&2; fi
+        return 0
+    fi
+    return 1
+}
+
 # Discover mDNS domains and extract hostname and IP
 discover_domains() {
     local tmpfile="/tmp/avahi-browse-output.$$"
@@ -199,6 +210,11 @@ EOF
     echo -e "$domains" | while IFS='|' read -r hostname ip; do
         [ -z "$hostname" ] && continue
         [ -z "$ip" ] && continue
+
+        # Storage-managed names are written only by a storage operation; never from the mDNS scan
+        if isle_managed_skip "${hostname}.isle" || isle_managed_skip "${hostname}.local"; then
+            continue
+        fi
 
         # Create both .local and .isle mappings pointing to same IP
         echo "address=/${hostname}.local/${ip}" >> "$tmpconf"

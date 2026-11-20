@@ -570,6 +570,7 @@ check_device_name() {
 }
 
 finish_join() {
+    python3 -c 'import sys; sys.path.insert(0,sys.argv[1]); from member_link import reconcile; reconcile()' "$SCRIPT_DIR" || return 1
     setup_remote_dns
     local args=()
     [[ -z "$FINGERPRINT" ]] || args+=(--fingerprint "$FINGERPRINT")
@@ -587,6 +588,7 @@ finish_join() {
         log_warning "Joined, but capability reporting needs a retry: isle capabilities status --publish https://api.polari.isle"
     systemctl daemon-reload
     systemctl enable --now isle-resource-report.timer || log_warning "Periodic resource reports need a retry: sudo systemctl enable --now isle-resource-report.timer"
+    systemctl enable --now isle-release-follow.timer || log_warning "Automatic release following needs a retry: sudo systemctl enable --now isle-release-follow.timer"
     echo "App hosting capabilities can be enabled afterward in the Isle App."
     if [[ "$WITH_SAMPLE" == true ]]; then
         bash "$SCRIPT_DIR/sample.sh" mesh up || { log_warning "Joined successfully, but sample Mesh App failed; retry: sudo isle sample mesh up"; return 1; }

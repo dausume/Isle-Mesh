@@ -24,6 +24,12 @@ const scriptsDir = path.join(__dirname, 'scripts');
 //   deprecated: string → print a deprecation notice before running
 // ─────────────────────────────────────────────────────────────────────────────
 const commands = {
+  update: { script: 'update.sh', desc: 'Review/apply exact local release through shared journal' },
+  reconcile: { script: 'reconcile.sh', desc: 'Reconcile existing local membership routes and reports' },
+  identity: { script: 'identity.sh', desc: 'Saved member identity: status/plan; guarded reconcile of the registration name to the canonical device-name (journaled)' },
+  operation: { script: 'operation.sh', desc: 'Durable shared operation status/retry <id>' },
+  release: { script: 'release.sh', desc: 'One reviewed release across the isle: check/run (core)/follow (member)/status/setting' },
+  hotfix: { script: 'hotfix.sh', desc: 'Named, idempotent repairs of state already on this device: list/status/check/apply <name>' },
   // Namespace modules (dispatch their own subcommands)
   app:      { script: 'app.sh',      desc: 'Mesh application management', docker: true },
   router:   { script: 'router.sh',   desc: 'Router and network management' },
@@ -35,7 +41,7 @@ const commands = {
   registry: { script: 'registry.sh', desc: 'Isle image registry setup and trusted access verification' },
   store:    { script: 'store.sh',    desc: 'The general isle app store (list/show/install/uninstall)' },
   apt:      { script: 'apt.sh', desc: 'Install packages from local Isle supply first (online fallback only)' },
-  'apt-repo': { script: 'apt-repo.sh', desc: 'Apt-on-mesh: signed deb repo at apt.isle (publish/enable/status)' },
+  'apt-repo': { script: 'apt-repo.sh', desc: 'Apt-on-mesh: signed deb repo at apt.isle (publish/enable/pin/status)' },
   'core-install': { script: 'core-install.sh', desc: 'ONE flow: fresh box to working isle core (5a)' },
   polari:   { script: 'polari.sh',   desc: 'Polari instances and placement (instance deploy/verify/rebase/undeploy, app plan/ensure)' },
   url:      { script: 'url.sh',      desc: 'Selective web exposure: outside host:port doors into contained .isle services' },
@@ -66,6 +72,7 @@ const commands = {
   // Diagnostics / status
   names: { script: 'names.sh', desc: 'Memorable device-name suggestions and instance-name planning' },
   capabilities: { script: 'capabilities.sh', desc: 'Read-only timestamped device observations (status --json; explicit --publish)' },
+  storage: { script: 'storage.sh', desc: 'Read-only local disk inventory and exact-UUID placement preflight' },
   status:    { script: 'status.sh',    desc: 'Comprehensive system status (all components)' },
   diagnose:  { script: 'diagnose.sh',  desc: 'Mesh-expansion hardware capacity diagnostic', aliases: ['capacity'] },
   test:      { script: 'test.sh',      desc: 'Run diagnostic tests (isle/mdns/all/check)' },

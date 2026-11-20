@@ -180,6 +180,9 @@ main(){
   replay_reserved_ports || return 1
   resync_macvlan || return 1
   bring_up_agent || return 1
+  if [[ -f /var/lib/isle-mesh/host-network.json ]]; then
+    python3 "$(dirname "${BASH_SOURCE[0]}")/host_network.py" || return 1
+  fi
   reconcile_apps
   log "=== summary ==="
   docker ps --format '  {{.Names}}: {{.Status}}' 2>/dev/null | grep -iE 'isle|vlan|sample' || true

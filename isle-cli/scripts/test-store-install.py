@@ -14,10 +14,13 @@ class StoreInstall(unittest.TestCase):
                 path = root/name; path.write_text(code); path.chmod(0o755)
             catalog = root/'catalog.json'
             catalog.write_text(json.dumps({'ok': True, 'entry': {
-                'kind': 'polari-app', 'install_plan': {'steps': steps}}}))
-            return subprocess.run(['bash', str(SCRIPT), 'install', 'fixture', '--yes'],
+                'kind': 'polari-app', 'install_plan': {'ok':True,'steps': steps}}}))
+            ident='a'*32; journal=root/'operations'/ident;journal.mkdir(parents=True)
+            script=root/'store.sh';script.write_text(SCRIPT.read_text().replace('/var/lib/isle-mesh/operations',str(root/'operations')).replace('$EUID == 0','1 == 1'))
+            (root/'operations.py').write_text('import sys; assert sys.argv[1]=="stage"\n')
+            return subprocess.run(['bash', str(script), 'install', 'fixture', '--yes'],
                 env={**os.environ, 'PATH': str(root)+':'+os.environ['PATH'],
-                     'CATALOG': str(catalog)}, text=True, capture_output=True)
+                     'CATALOG': str(catalog),'ISLE_OPERATION_ID':ident,'ISLE_OPERATION_DIR':str(journal)}, text=True, capture_output=True)
     def test_success(self):
         r = self.invoke(['true']); self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn('installed fixture', r.stdout)
