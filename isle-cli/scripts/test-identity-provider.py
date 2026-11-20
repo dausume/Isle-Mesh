@@ -38,9 +38,9 @@ def keycloak(issuer=ISSUER, keys=KEYS, status=200, raw=None):
 class Device:
     api = 'https://api.example.isle'
 
-    def __init__(self, folder, mode='core', root=True, http=None, start='core-only', publish_fails=False):
+    def __init__(self, folder, mode='core', root=True, http=None, publish_fails=False):
         self.setting_file = str(Path(folder) / 'identity' / 'provider.json')
-        self._mode, self._root, self._http, self._start, self._fails = mode, root, http or keycloak(), start, publish_fails
+        self._mode, self._root, self._http, self._fails = mode, root, http or keycloak(), publish_fails
         self.lines, self.published, self.asked = [], [], []
 
     def say(self, line=''): self.lines.append(line)
@@ -48,7 +48,6 @@ class Device:
     def is_root(self): return self._root
     def mode(self): return self._mode
     def device(self): return 'core-one' if self._mode == 'core' else 'member-one'
-    def start_setting(self): return self._start
 
     def http(self, url):
         self.asked.append(url)
@@ -231,12 +230,9 @@ class Clear(Case):
         self.assertEqual((d.stored(), d.published, os.path.exists(d.setting_file)), (None, [None], False))
         self.assertEqual(ip.main(['none'], d), 0)
 
-    def test_refused_while_the_isle_starts_releases_from_any_device(self):
-        d = self.device(start='any-device')
-        d.write(RECORD)
-        self.assertEqual(ip.main(['none'], d), 1)
-        self.assertIn('sudo isle release setting core-only', d.said)
-        self.assertEqual((d.stored(), d.published), (RECORD, []))
+    def test_the_start_setting_of_releases_is_not_asked(self):
+        # releases need no Keycloak unless the isle's security settings switch it on and require it
+        self.assertFalse(hasattr(ip.IO, 'start_setting'))
 
     def test_member_and_no_root(self):
         d = self.device(mode='remote')

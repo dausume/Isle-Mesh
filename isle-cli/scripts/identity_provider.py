@@ -118,7 +118,6 @@ class IO:
     def mode(self): return self._deps.mode()
     def device(self): return self._deps.device()
     def http(self, url): return self._deps.http(url)
-    def start_setting(self): return self._runner.core_start_setting(self._deps)[0]
 
     def write(self, record):
         path = Path(self.setting_file)
@@ -202,9 +201,8 @@ def set_provider(io, address, client=DEFAULT_CLIENT):
 def clear_provider(io):
     why = _core_only(io, 'provider none')
     if why: io.say(why); return 1
-    if io.start_setting() == 'any-device':
-        io.say('REFUSED: provider none on %s: the start setting of this isle is any-device, and that needs a Keycloak. '
-               'Nothing was changed. First: sudo isle release setting core-only' % io.device()); return 1
+    # The start setting of releases (core-only or any-device) does not decide this: a release needs sign-in only where
+    # the isle's security settings switch Keycloak on and require it.
     if not io.is_root(): io.say('This changes the isle. Type: sudo %s none' % VERB); return 1
     io.remove()
     io.say('Keycloak of this isle: none named.')
