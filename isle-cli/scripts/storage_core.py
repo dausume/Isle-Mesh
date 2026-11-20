@@ -4,7 +4,7 @@ accept, reconcile-address.  docs/STORAGE-MIGRATION-CONTRACT.md sections 2.1, 2.3
 
 `run(argv, *, env, io) -> int`.  `io` bundles every outside effect so tests run with fakes:
 
-  placement_path, state_dir, hostable_path           files (the placement record is the one authority)
+  placement_path, state_dir                          files (the placement record is the one authority)
   read_plan(plan_id, revision) -> plan dict          GET placement-plan
   router_dns(domain) -> address|None                 dig @router
   register_dns(domain, address, intent_path)         dns-register.sh with ISLE_STORAGE_INTENT=<json path>
@@ -18,7 +18,7 @@ accept, reconcile-address.  docs/STORAGE-MIGRATION-CONTRACT.md sections 2.1, 2.3
   source_latest(entry) -> {manifestSha, contentSha}  the source snapshot/latest.json
   sample_paths(entry) -> [(path, sha256|None)]       the InRelease-equivalent plus 3 sampled entries
   timer_installed(dataset), verify_poster(row)       sync trigger report; poster against the CA members
-  registry_owner(domain), claims_owner(domain)       who owns the domain today (allowlist ownership check)
+  registry_owner(domain), claims_owner(domain)       who owns the domain today (the ownership check)
   post_placement_view()                              write the placement view into the backend container (docker exec)
   http_get_json(url) -> dict                         GET with the trusted CA, no auth (relay)
   run_mark_migrated(dataset, digest) -> exit code    `operations.py run storage mark-migrated` (relay)
@@ -38,6 +38,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import subprocess
 import sys
+from urllib.parse import urlsplit
 import uuid
 
 import operations
@@ -46,7 +47,6 @@ import storage_placement as sp
 
 SCRIPTS = Path(__file__).resolve().parent
 STATE_DIR = Path('/var/lib/isle-mesh/storage')
-HOSTABLE = Path('/etc/isle-mesh/storage/hostable-names')
 CA_FILE = '/etc/isle-mesh/ca/isle-root.crt'
 MEMBERS = Path('/etc/isle-mesh/ca/enrollment/members.json')
 CLAIMS = Path('/etc/isle-mesh/ca/enrollment/claims.json')
@@ -102,7 +102,6 @@ class RealIo:
         self.env = dict(env if env is not None else os.environ)
         self.placement_path = sp.PLACEMENT
         self.state_dir = STATE_DIR
-        self.hostable_path = HOSTABLE
         self.lease = real_lease(device=self.device_name())
 
     def out(self, text):
@@ -449,12 +448,12 @@ def _item_for(plan, plan_ref, dataset, item_id=None):
 
 # ------------------------------------------------------------------ authorize / mark-migrated
 
-def _hostable(io):
-    try:
-        lines = Path(io.hostable_path).read_text().splitlines()
-    except OSError:
-        return set()
-    return {l.strip() for l in lines if l.strip() and not l.strip().startswith('#')}
+def core_itself():
+    """The names that are never moved.  The user, 2026-11-14: "everything may move with the exception of the core
+    itself ... do not make assumptions about what should not be allowed for moving".  So this is not a list of
+    protected names: it holds the one name the isle itself calls the core, the address its members reach the core
+    at (ISLE_CORE_API, which is API here).  Every other name may be placed when its source device owns it."""
+    return {urlsplit(API).hostname}
 
 
 def do_authorize(ctx):
@@ -470,10 +469,10 @@ def do_authorize(ctx):
         raise Refusal('the plan changed since it was reviewed (digest %s, reviewed %s)' % (digest[:12], req['digest'][:12]), 'fetching-plan')
     if block['source']['snapshotSha256'] is None:
         raise Refusal('the plan has no published source snapshot yet (snapshotSha256 is null)', 'fetching-plan')
-    ctx.stage('checking-allowlist')
+    ctx.stage('checking-ownership')
     domain = block['domain']
-    if domain not in _hostable(io):
-        raise Refusal('domain %s is not on the hostable-infrastructure-names allowlist; nothing was written' % domain, 'checking-allowlist')
+    if domain in core_itself():
+        raise Refusal('%s is the core itself, and the core is the one thing that is never moved; nothing was written' % domain, 'checking-ownership')
     owners = set()
     if io.registry_owner(domain):
         owners.add(io.registry_owner(domain))
@@ -481,10 +480,10 @@ def do_authorize(ctx):
         owners.add(io.claims_owner(domain))
     if block['source']['device'] not in owners:
         raise Refusal('%s does not currently own %s (owners: %s); nothing was written'
-                      % (block['source']['device'], domain, ', '.join(sorted(owners)) or 'none recorded'), 'checking-allowlist')
+                      % (block['source']['device'], domain, ', '.join(sorted(owners)) or 'none recorded'), 'checking-ownership')
     address = io.core_address()
     if not address:
-        raise Refusal('the core agent address is unknown; nothing was written', 'checking-allowlist', True)
+        raise Refusal('the core agent address is unknown; nothing was written', 'checking-ownership', True)
     ctx.stage('writing-placement')
     target = item['device']
     ref3 = dict(id=ref['id'], revision=ref['revision'], digest=digest)

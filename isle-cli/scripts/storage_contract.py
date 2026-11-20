@@ -24,7 +24,7 @@ SYNC_STAGES = ('checking-placement', 'fetching-latest', 'fetching-manifest', 're
 CUTOVER_STAGES = ('checking-placement', 'registering-target', 'verifying-cutover', 'reverting',
                   'recovery-needed')
 # Every label storage_core.py passes to ctx.stage(): the cutover verbs plus authorize, mark-migrated, recover, accept, reconcile-address.
-CORE_STAGES = ('fetching-plan', 'checking-allowlist', 'writing-placement', 'checking-placement', 'pushing-managed-names',
+CORE_STAGES = ('fetching-plan', 'checking-ownership', 'writing-placement', 'checking-placement', 'pushing-managed-names',
                'marking-migrated',
                'writing-intent', 'moving-pin', 'registering-target', 'verifying-cutover', 'committing', 'reverting',
                'recovery-needed', 'verifying-recovery', 'accepting')

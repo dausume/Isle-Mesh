@@ -1792,10 +1792,13 @@ class V3Additions(CoreCase):
                 inner.assertEqual(claims.read_bytes(), before)
         OwnershipAndDns._run_case(self, Case)
 
-    def test_CORE_NAME_not_on_the_allowlist_refused(self):
+    def test_the_core_itself_is_refused(self):
+        # the denylist holds the core itself and nothing else; no list of movable names exists any more
         w = self.w
-        w.io.hostable_path.write_text('# v1\nother.isle\n')
-        self.refuse(lambda: w.authorize(), 'allowlist')
+        self.assertEqual(core.core_itself(), {'api.polari.isle'})
+        self.assertFalse(hasattr(core, 'HOSTABLE') or hasattr(w.io, 'hostable_path'))
+        with mock.patch.object(core, 'API', 'https://' + PO.DOMAIN):
+            self.refuse(lambda: w.authorize(), 'the core itself')
         self.assertIsNone(w.entry())
 
         class Case(CaCase):

@@ -67,8 +67,6 @@ class FakeIo:
         self.placement_path = root / 'storage' / 'placement.json'
         self.placement_path.parent.mkdir(parents=True, exist_ok=True)
         self.state_dir = root / 'var'
-        self.hostable_path = root / 'storage' / 'hostable-names'
-        self.hostable_path.write_text('# v1\napt.isle\n')
         self.plan = make_plan()
         self.router = {DOMAIN: CORE_ADDR}
         self.serve = {CORE_ADDR: {'current': CONTENT, 'ok': True}, TARGET_ADDR: {'current': CONTENT, 'ok': True}}
@@ -342,9 +340,12 @@ def t_authorize_refusals(w):
     w.io.plan['active'] = False
     check('authorize: inactive plan refused', w.authorize() == 1 and w.entry() is None and 'not active' in w.io.said())
     w.io.plan['active'] = True
-    w.io.hostable_path.write_text('other.isle\n')
-    check('authorize: domain off the allowlist refused', w.authorize() == 1 and w.entry() is None and 'allowlist' in w.io.said())
-    w.io.hostable_path.write_text('apt.isle\n')
+    check('authorize: the core itself is the one name on the denylist', core.core_itself() == {'api.polari.isle'})
+    api, core.API = core.API, 'https://' + DOMAIN
+    try:
+        check('authorize: the core itself refused, nothing written', w.authorize() == 1 and w.entry() is None and 'the core itself' in w.io.said())
+    finally:
+        core.API = api
     w.io.registry = {}
     check('authorize: nobody owns the domain -> refused', w.authorize() == 1 and w.entry() is None)
     w.io.registry = {DOMAIN: 'econ-core'}

@@ -328,7 +328,7 @@ fsync file and directory, rename.  A mismatch fails with the current values.  **
 
 | transition | command | where / who | precondition |
 |---|---|---|---|
-| ∅ → authorized | `authorize` | core, root | plan active, digest matches, source snapshot published, no entry; domain on the allowlist; `source.device` owns the domain now |
+| ∅ → authorized | `authorize` | core, root | plan active, digest matches, source snapshot published, no entry; the domain is not the core itself; `source.device` owns the domain now |
 | authorized → authorized | `authorize` (new revision) | core, root | same dataset/device/domain, new plan revision |
 | authorized → migrated | `mark-migrated` | core, root (invoked by the receipt relay or by hand) | stored receipt `ok`, `stagedDeploy`, `readinessVerified`, `contentVerified`; receipt digest == stored plan digest and == entry digest; receipt device == entry device; poster identity verified |
 | migrated + pending(cutover) → cutover | `cutover` | core, root | after verification, §2.3 steps 1–7 |
@@ -357,8 +357,9 @@ A rerun with the same `G` and a stored `pending` whose action, digest and operat
   cert are refused for members.  v2: such a domain is issued to **exactly the device named by an entry** in state
   `authorized|migrated|cutover|hosting`; `claims[domain]` in `claims.json` stays a STRING (device) so every reader keeps working; placement-granted
   claims live in a separate `placement-claims.json` consulted by `cert-authority.issue` only.  The core's own cert for the domain stays valid and
-  `certs.sh` renewal of it keeps working (its cert file is never removed in Phase A).  **Policy**: only names on the
-  `hostable-infrastructure-names` allowlist (v1: `apt.isle`) may be placed, never any `CORE_NAMES` entry solely from a storage entry; at authorize the
+  `certs.sh` renewal of it keeps working (its cert file is never removed in Phase A).  **Policy** (the user, 2026-11-14: "everything may move with the exception of the core
+  itself"): `authorize` refuses one name, the core itself (`storage_core.core_itself()`: the address members reach the core at, `api.polari.isle`);
+  no list of movable or protected names exists, and the earlier `hostable-names` file is no longer read.  At authorize the
   entry's source device must be the domain's current owner (core registry or claims).  `recovery-needed` issues nothing new.  Without an entry the refusal is
   unchanged.
 - **dns-reconcile** (audit F3–F5).  A domain with an entry is excluded from the "first sorted catalog instance" rule that otherwise flaps by name
