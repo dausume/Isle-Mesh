@@ -177,6 +177,7 @@ class Set(Case):
         self.assertEqual((d.stored(), d.published), (expected, [expected]))
         self.assertEqual(os.stat(d.setting_file).st_mode & 0o777, 0o644)
         self.assertIn('Nothing was switched on', d.said)
+        self.assertIn('sudo isle reconcile', d.said)
         self.assertEqual(ip.known(d), (expected, None))
 
     def test_client(self):

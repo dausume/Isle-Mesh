@@ -234,8 +234,9 @@ sudo isle polari security provider none
 
 The first form shows it (on a member: what the core publishes). Naming one asks that Keycloak for its
 discovery document over verified TLS and refuses when it does not answer or names itself differently.
-Naming one switches nothing on and changes no backend rule: a backend deployed or updated afterwards is
-told where to check a sign-in token, and `enable` and `require` below write the address into the
+Naming one switches nothing on and changes no backend rule. The backend of the core is told where to check a
+sign-in token at the next `sudo isle reconcile` (which restarts it once); a backend on another device when its
+instance is deployed or updated. And `enable` and `require` below write the address into the
 frontend's file. With none named, everything an isle does without sign-in works as before.
 
 On the device hosting a Polari frontend, manage its deployment-owned setting:

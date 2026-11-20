@@ -193,7 +193,8 @@ def set_provider(io, address, client=DEFAULT_CLIENT):
     io.say('Keycloak of this isle: %s.' % _words(record))
     _publish(io, record)
     io.say('Nothing was switched on: sign-in stays as it was and no backend rule changed.')
-    io.say('  A backend is given this address when its instance is deployed or updated; a running backend keeps what it started with.')
+    io.say('  The backend of the core takes this address with: sudo isle reconcile   (it restarts that backend once)')
+    io.say('  A backend on another device takes it when its instance is deployed or updated; until then it keeps what it started with.')
     io.say('  A sign-in page takes it with: sudo isle polari security enable --config <runtime-config.json>')
     return 0
 
@@ -208,7 +209,8 @@ def clear_provider(io):
     io.remove()
     io.say('Keycloak of this isle: none named.')
     _publish(io, None)
-    io.say('A backend or a sign-in page that already holds the old address keeps it until it is updated or switched off.')
+    io.say('The backend of the core drops the old address with: sudo isle reconcile   (it restarts that backend once)')
+    io.say('A backend on another device, or a sign-in page, that holds the old address keeps it until it is updated or switched off.')
     return 0
 
 
