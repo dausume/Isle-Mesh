@@ -155,6 +155,7 @@ of `operations.py` stays intact.
 | reconcile-address | core (run by `dns-reconcile`, §2.5a) | `['storage','reconcile-address','--dataset',D,'--generation',G]` |
 | sync | target | `['storage','sync','--dataset',D]` |
 | witness | third device | `['storage','witness','--dataset',D,'--generation',G]` |
+| units prove | hosting device, root, not journaled itself (it starts the sync unit, whose run is the journaled `sync`; §2.5b) | typed only: `sudo isle storage units prove --dataset D` |
 | units-apply | hosting device (typed as `isle storage units apply --dataset D [--overrides keep\|remove]`) | `['storage','units-apply','--dataset',D]` or with `'--overrides','keep'\|'remove'` |
 
 (`authorize-placement` / `accept-placement` in older text mean `authorize` / `accept`.)  `gc` is not a dataset verb: it is a root CLI (`isle storage gc --repo`) that runs under the publication lock (§1.3).  `publish-manifest` and `gc` are publisher-side root CLIs on the core, not journaled operations: they take the publication lock, not the dataset lock.
@@ -198,6 +199,8 @@ PARAM=<path>` is consumed by the overlay generator only after `storage check` pr
    trigger not installed"); and the target's `last-committed` contentSha equal to the source `latest.json` contentSha (else "run sync first").
    The router's own managed-names list (`isle dns managed-names list`) holds the domain: cutover reads it and does not trust that authorize
    pushed it; a missing name is pushed once and read again, and cutover refuses when the router does not answer or still does not hold it.
+   The target has shown that its units run (§2.5b): a verified unit proof for this plan digest is stored that is not older than the last
+   migrate receipt; else refuse, naming `sudo isle storage units prove --dataset D` on the target and `sudo isle storage relay` on the core.
    Re-verify the target serves, using `curl --resolve` to its lease IP.
 3. **Durable intent.**  CAS-write `pending: {action:"cutover", digest, from:"migrated", to:"cutover", epoch:G+1, address:<target lease IP>, previousPin, newPin, at, operation}`
    under the placement flock: the CAS expects `generation == G` and leaves `generation = G+1`, with `pending.epoch = G+1` (the post-write value, §5).  No DNS has been touched.  Pins are part of the intent (`previousPin` = the core's current hosts pin for the domain, `newPin` = none) so recovery restores both the router record and the pin.  From here `dns-reconcile`/`hosts-reconcile` write nothing
@@ -227,6 +230,24 @@ The auto-revert paragraph of §2.3 run on demand: allowed only from `cutover` wi
 
 ### 2.5 `sync` (target; `sudo isle storage sync --dataset D`)
 Allowed in `migrated`, `cutover`, `hosting`.  Fetches `snapshot/latest.json` from the source origin (by address, SNI = domain; before and after cutover alike), then stages 3–5 into a **new generation** keyed by contentSha: unchanged files link from `store/`; `current` moves only after the new generation re-inventories to its `contentSha`; the previous generation stays and keeps serving on interruption.  Old generations are not reclaimed here (a later verb).  Shares the dataset lock.  **The trigger is mandatory before cutover is admitted** (§2.3): root timer `isle-storage-sync@<dataset>.timer` on the target, every 10 min, compares the source `latest.json` contentSha with `current` and runs the sync operation on change (plus the App action). `syncStatus` `{lastPublished, lastReceived, lastCommitted (contentShas + times), lagSeconds, error}` is reported by `status` (§2.7); a later contentSha has its own status and is never implied by an old witness.  Publisher words: when the entry is `cutover|hosting`, a publisher's success line says "published on the core; hosting replica lags until sync" and never announces success for artifacts absent from the serving target.
+
+### 2.5b Unit proof (target; made by the sync unit, or now with `sudo isle storage units prove --dataset D`)
+An enabled unit has shown nothing: a wrong path in its text is found only when systemd starts it (Phase A 2026-11-14: the hosting unit's
+compose command exited 14 when the unit was started).  Migrate cannot start the hosting unit, because the unit's own `storage check` refuses the state `authorized`.
+So the proof is made after `mark-migrated` and before cutover, while the name still points at the source:
+- The sync service's own text sets `ISLE_STORAGE_TRIGGER=unit`.  A sync that sees it, in placement `migrated`, with no posted proof for the last
+  migrate receipt recorded on the device, asks systemd for its own service's `ActiveState`; only `activating` counts (the variable alone, typed by
+  hand, proves nothing).  It then runs `systemctl restart isle-storage-<dataset>.service` and `systemctl is-active` on it: the unit's own check and
+  its own compose command, the path a boot takes.
+- On success the sync receipt gains `device` and `unitProof: {for, device, gateUnit, syncUnit, syncByUnit, gateStarted, ok, error}` and is POSTed
+  to `POST /api/islemesh/storage/receipt` (kind `isle.storage.sync`, the door's existing kind).  This is the only sync receipt that is POSTed, once
+  per migration.  The outcome is kept in `/var/lib/isle-mesh/storage/<dataset>/unit-proof.json` and shown by `status` as `unitProof`.
+- A unit that did not start, or a report that did not reach the core, ends the sync run with exit 1 and the reason in its output (the content
+  sync itself stays recorded as done); the next run of the timer tries again.
+- `sudo isle storage units prove --dataset D` starts the sync service now and exits 0 only when the proof for the last migration is posted.
+- Core side: cutover (§2.3 step 2) reads the relayed receipts and requires a sync receipt with the plan digest, `device` equal to the placement's
+  device, `unitProof.ok`, `syncByUnit` and `gateStarted` all true, a poster verified against the CA members, and `at` not before the last migrate
+  receipt's `at`.  A target whose CLI predates this section posts no proof, and cutover refuses until it is updated.
 
 ### 2.5a Steady-state address drift: `reconcile-address` (core; `sudo isle storage reconcile-address --dataset D --generation G`; F5, Codex v3-5)
 Without this, `dns-register.sh` (which allows only a pending cutover, rollback or recover) could not follow a changed target lease.  For a managed domain in `cutover|hosting` with **no** `pending`, `dns-reconcile` (root timer on the core) detects router address ≠ the owner device's current lease and runs this journaled operation under the same authority as every core verb: dataset lock and shared lease, then an intent `{action:"reconcile-address", epoch:G+1, from-address, to-address}`, registration through `dns-register.sh` under it, verification (`dig @router`, https by `--resolve` to the new address), clear.  Ownership and state do not change (one `history` row appended); the epoch advances by the same two writes as every transition (intent G→G+1, clear G+1→G+2), so a witness bound to the pre-drift epoch is stale by construction and a dataset in `cutover` must be witnessed again at the new address before `accept`.  A concurrent cutover, rollback or recover refuses because a `pending` exists; a crash leaves `pending`, resumed by the exact retry (operation id included) or `recover`.
@@ -267,7 +288,8 @@ against `members.json` locally and never log tokens (fingerprint only).
 {"dataset": "apt-public-repo", "device": "pol-core", "placement": {"state": "migrated", "generation": 3},
  "operation": {"id": "…", "state": "succeeded", "stage": "verifying-readiness"}, "receipt": {"ok": true, "digest": "…", "epoch": 3, "at": "…"},
  "mount": {"bound": true, "mounted": true, "uuidMatches": true, "currentGeneration": "<contentSha>", "hostRunning": true, "pointerAhead": false},
- "syncStatus": {"lastPublished": "<contentSha>", "lastReceived": "<contentSha>", "lastCommitted": "<contentSha>", "lagSeconds": 0, "error": null}, "timer": "enabled"}
+ "syncStatus": {"lastPublished": "<contentSha>", "lastReceived": "<contentSha>", "lastCommitted": "<contentSha>", "lagSeconds": 0, "error": null}, "timer": "enabled",
+ "unitProof": {"for": "<at of the last migrate receipt>", "ok": true, "syncByUnit": true, "gateStarted": true, "posted": true, "attempt": 1, "at": "…", "error": null}}
 ```
 `check` and `status` read the root-filesystem copy `/var/lib/isle-mesh/storage/<dataset>/binding.json` for `mountpoint`, uuid and `relativePath`, then verify the disk against it. When the disk is absent they report from the root-filesystem copies (§3) and say so.  `pointerAhead: true` means `control/latest.json` disagrees with `readlink(current)` (§3); `current` is the truth.
 

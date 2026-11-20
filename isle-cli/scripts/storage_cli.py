@@ -159,6 +159,13 @@ def status_document(root, dataset, *, http=None, latest=None, unit_dir=None, che
             document['syncStatus'] = sync
     except (OSError, ValueError):
         pass
+    try:
+        with open(os.path.join(root, dataset, 'unit-proof.json'), 'rb') as handle:
+            proof = json.loads(handle.read(1 << 20))
+        if isinstance(proof, dict):
+            document['unitProof'] = proof
+    except (OSError, ValueError):
+        pass
     return document
 
 

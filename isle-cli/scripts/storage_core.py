@@ -19,6 +19,7 @@ accept, reconcile-address.  docs/STORAGE-MIGRATION-CONTRACT.md sections 2.1, 2.3
   source_latest(entry) -> {manifestSha, contentSha}  the source snapshot/latest.json
   sample_paths(entry) -> [(path, sha256|None)]       the InRelease-equivalent plus 3 sampled entries
   timer_installed(dataset), verify_poster(row)       sync trigger report; poster against the CA members
+  unit_proof(dataset, entry) -> None|words           stored report that the hosting device's units ran
   registry_owner(domain), claims_owner(domain)       who owns the domain today (the ownership check)
   post_placement_view()                              write the placement view into the backend container (docker exec)
   http_get_json(url) -> dict                         GET with the trusted CA, no auth (relay)
@@ -45,6 +46,7 @@ import uuid
 import operations
 import storage_contract as sc
 import storage_placement as sp
+import storage_unit_proof
 
 SCRIPTS = Path(__file__).resolve().parent
 STATE_DIR = Path('/var/lib/isle-mesh/storage')
@@ -235,6 +237,9 @@ class RealIo:
             if receipt.get('kind') == 'isle.storage.migrate':
                 return receipt.get('syncTimerInstalled') is True
         return False
+
+    def unit_proof(self, dataset, entry):
+        return storage_unit_proof.stored(_jsonl(self.state_dir / dataset / 'inbound-receipts.jsonl'), entry, self.verify_poster)
 
     def verify_poster(self, row):
         """The presented Bearer's subject must be a paired member, its fingerprint EQUAL to the member's stored
@@ -535,8 +540,10 @@ def do_authorize(ctx):
 
 def qualifying_receipt(io, entry, dataset, digest):
     """The stored migrate receipt mark-migrated needs; raises Refusal naming what is missing. Also used by relay."""
+    body = lambda r: r.get('receipt') if isinstance(r.get('receipt'), dict) else r
     rows = [r for r in _jsonl(Path(io.state_dir) / dataset / 'inbound-receipts.jsonl')
-            if ((r.get('receipt') if isinstance(r.get('receipt'), dict) else r).get('plan') or {}).get('digest') == digest]
+            if (body(r).get('plan') or {}).get('digest') == digest]
+    rows = [r for r in rows if body(r).get('unitProof') is None] or rows    # a unit proof is a sync receipt, stored beside
     if not rows:
         raise Refusal('no stored migrate receipt for digest %s' % digest[:12], 'checking-receipt')
     row = rows[-1]
@@ -705,6 +712,11 @@ def do_cutover(ctx):
             raise Refusal('the source has no published snapshot (latest.json); publish first', 'checking-placement')
         if not io.timer_installed(ctx.dataset):
             raise Refusal('sync trigger not installed: isle-storage-sync@%s.timer is not reported installed on %s' % (ctx.dataset, entry['device']), 'checking-placement')
+        missing = io.unit_proof(ctx.dataset, entry)
+        if missing:
+            raise Refusal('%s has not shown that its storage units run: %s. Its sync timer reports this within 10 minutes of '
+                          'mark-migrated. To do it now, on %s: sudo isle storage units prove --dataset %s; then here: sudo isle storage relay'
+                          % (entry['device'], missing, entry['device'], ctx.dataset), 'checking-placement', True)
         _router_skips(ctx, domain)
         target_addr = io.lease_address(entry['device'])
         core_addr = io.core_address()

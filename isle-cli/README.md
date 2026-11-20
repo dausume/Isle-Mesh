@@ -320,6 +320,11 @@ enabled and a hand override are named in the output and left as found. `isle sto
 [--dataset D]` shows the same comparison at any time, and `sudo isle storage units apply --dataset D
 [--overrides keep|remove]` rewrites, enables and (with `remove`) drops the overrides. This step never fails an
 update.
+An enabled unit has not shown that it runs. After `mark-migrated`, the first sync that the sync timer starts on the
+hosting device restarts the hosting unit through systemd, reads that it is active and reports that to the core once;
+`sudo isle storage cutover` refuses until the core holds that report. `sudo isle storage units prove --dataset D`
+on the hosting device does it now instead of within the timer's 10 minutes, and `isle storage status --dataset D`
+shows the result as `unitProof`.
 An update does not rebuild/recreate the agent image or migrate core runtime
 images; those remain distinct coordinated release actions, not implied by package
 success. No general system upgrade or rejoin is performed.

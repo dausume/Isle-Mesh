@@ -248,7 +248,14 @@ def main(argv=None, *, root=LOCAL_ROOT, unit_dir=None, systemctl=_systemctl, eui
     changing.add_argument('--dataset', required=True)
     changing.add_argument('--overrides', choices=('keep', 'remove'), default='keep')
     commands.add_parser('after-update')
+    commands.add_parser('prove').add_argument('--dataset', required=True)
     args = parser.parse_args(argv)
+    if args.command == 'prove':     # starts the sync unit now; the run itself proves and reports (storage_unit_proof)
+        import storage_unit_proof
+        if euid() != 0:
+            out('Starting the sync unit needs root: sudo isle storage units prove --dataset %s' % args.dataset)
+            return 1
+        return storage_unit_proof.run_now(args.dataset, root=root, out=out)
     if args.command == 'after-update':  # never fails the update it runs in: every finding is a printed line
         try:
             for line in after_update_lines(after_update(root=root, unit_dir=unit_dir, systemctl=systemctl, euid=euid,

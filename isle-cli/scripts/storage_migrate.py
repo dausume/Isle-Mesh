@@ -246,6 +246,29 @@ def default_systemctl(args):
         return 127
 
 
+def post_receipt(http, enrollment, receipt):
+    """POST a receipt to the core's door with this device's enrollment token and set posted / postError on it.
+    A number the core already holds for the action is stepped past.  Returns True when `attempt` moved."""
+    token, first = None, receipt['attempt']
+    try:
+        token = json.loads(Path(enrollment).read_text()).get('token')
+        if not isinstance(token, str) or not token:
+            raise ValueError('the enrollment file has no token')
+        status, text = http.post_json(API + '/api/islemesh/storage/receipt', receipt, token)
+        while status == 409 and TAKEN in str(text) and receipt['attempt'] - first < TAKEN_TRIES:
+            # The core holds another receipt under this number and this device's record of it is gone.
+            receipt['attempt'] += 1
+            status, text = http.post_json(API + '/api/islemesh/storage/receipt', receipt, token)
+        receipt['posted'] = 200 <= status < 300
+        if not receipt['posted']:
+            receipt['postError'] = 'HTTP %d %s' % (status, str(text)[:200])
+    except (OSError, ValueError, HttpError) as error:
+        receipt['posted'] = False
+        message = str(error)
+        receipt['postError'] = message.replace(token, '***') if token else message
+    return receipt['attempt'] != first
+
+
 class Deps:
     """Everything outside the process that a stage touches.  Override by keyword in tests."""
 
@@ -800,26 +823,8 @@ class Migration:
             receipt['recordError'] = str(error)
 
     def _post(self, receipt):
-        token = None
-        try:
-            token = json.loads(self.enrollment.read_text()).get('token')
-            if not isinstance(token, str) or not token:
-                raise ValueError('the enrollment file has no token')
-            status, text = self.http.post_json(API + '/api/islemesh/storage/receipt', receipt, token)
-            first = receipt['attempt']
-            while status == 409 and TAKEN in str(text) and receipt['attempt'] - first < TAKEN_TRIES:
-                # The core holds another receipt under this number and this device's record of it is gone.
-                receipt['attempt'] += 1
-                status, text = self.http.post_json(API + '/api/islemesh/storage/receipt', receipt, token)
-            if receipt['attempt'] != first:
-                self._record(receipt)       # the number the core was offered last is the one kept here too
-            receipt['posted'] = 200 <= status < 300
-            if not receipt['posted']:
-                receipt['postError'] = 'HTTP %d %s' % (status, str(text)[:200])
-        except (OSError, ValueError, HttpError) as error:
-            receipt['posted'] = False
-            message = str(error)
-            receipt['postError'] = message.replace(token, '***') if token else message
+        if post_receipt(self.http, self.enrollment, receipt):
+            self._record(receipt)       # the number the core was offered last is the one kept here too
 
     def execute(self):
         error = None

@@ -99,7 +99,8 @@ def sync_unit_names(dataset):
 
 def sync_timer_text(dataset):
     """Return (service_text, timer_text) of isle-storage-sync@<dataset>.service and .timer (contract section 2.5).
-    The timer fires 5 minutes after boot and 10 minutes after each run; the service runs `isle storage sync` as root."""
+    The timer fires 5 minutes after boot and 10 minutes after each run; the service runs `isle storage sync` as root
+    and tells it so (ISLE_STORAGE_TRIGGER=unit), which is what lets a run prove the units (storage_unit_proof)."""
     service_name, _ = sync_unit_names(dataset)
     service = '\n'.join([
         '[Unit]',
@@ -108,6 +109,7 @@ def sync_timer_text(dataset):
         '[Service]',
         'Type=oneshot',
         'User=root',
+        'Environment=ISLE_STORAGE_TRIGGER=unit',    # storage_unit_proof: this run was started by the unit
         'ExecStart=%s storage sync --dataset %s' % (ISLE_CLI, dataset),
         ''])
     timer = '\n'.join([

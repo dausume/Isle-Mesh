@@ -7,8 +7,9 @@ lock is taken by operations.py before this starts) and from the root timer isle-
 Stages (storage_contract.SYNC_STAGES): checking-placement, fetching-latest, fetching-manifest,
 receiving-content, verifying-content, promoting.  Only `promoting` holds the shared device-update lease; the
 fetch holds nothing, so a device update is never refused for the whole transfer.  The previous generation
-stays and keeps serving until `current` moves.  Nothing is POSTed: the receipt is local evidence
-(ISLE_OPERATION_DIR/storage-receipt.json and receipts.jsonl).  Outside effects are injected exactly as in
+stays and keeps serving until `current` moves.  The receipt is local evidence (ISLE_OPERATION_DIR/
+storage-receipt.json and receipts.jsonl) and is not POSTed, with one exception: the first run the sync unit
+starts after a migration proves the units and reports that to the core (storage_unit_proof).  Outside effects are injected exactly as in
 storage_migrate (http, deps), which supplies CurlHttp, Deps and the shared helpers.
 """
 import contextlib
@@ -26,6 +27,7 @@ import operations
 import storage_contract as sc
 import storage_migrate as sm
 import storage_receive as sr
+import storage_unit_proof
 from storage_migrate import CurlHttp, Deps, HttpError, default_now
 from storage_receive import ReceiveError
 from urllib.parse import quote
@@ -382,7 +384,7 @@ class Sync:
                 operations.atomic(self.op_dir / 'storage-receipt.json', receipt)
 
     def execute(self):
-        error = None
+        error = unproven = None
         with self.stack:
             try:
                 self.load_binding()
@@ -406,10 +408,15 @@ class Sync:
                     operations.atomic(self.op_dir / 'storage-receipt.json', self.receipt)
             else:
                 self.finish(error)
+                if error is None:
+                    unproven = storage_unit_proof.after_sync(self)
         if error is not None:
             print('storage sync: ' + self.receipt['words'], file=sys.stderr)
             return 1
         print(self.receipt['words'])
+        if unproven:
+            print('storage sync: ' + unproven, file=sys.stderr)
+            return 1
         return 0
 
 

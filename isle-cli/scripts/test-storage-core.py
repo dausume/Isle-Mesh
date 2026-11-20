@@ -83,6 +83,7 @@ class FakeIo:
         self.register_error = None
         self.crash_after_register = False
         self.timer = True
+        self.units_missing = None
         self.poster_ok = True
         self.registry = {DOMAIN: 'isle-core'}
         self.claims = {}
@@ -201,6 +202,9 @@ class FakeIo:
 
     def timer_installed(self, dataset):
         return self.timer
+
+    def unit_proof(self, dataset, entry):
+        return self.units_missing
 
     def verify_poster(self, row):
         return self.poster_ok
@@ -436,6 +440,12 @@ def t_cutover_refusals(w):
     w.io.timer = False
     check('cutover: no sync timer -> "sync trigger not installed"', w.cutover() == 1 and 'sync trigger not installed' in w.io.said() and w.raw() == before)
     w.io.timer = True
+    w.io.units_missing = 'no report that the units ran is stored'
+    pushed = getattr(w.io, 'pushed', 0)
+    check('cutover: no stored unit proof -> refused with the verb to run, nothing written',
+          w.cutover() == 1 and 'has not shown that its storage units run: no report' in w.io.said()
+          and 'sudo isle storage units prove --dataset ' + DATASET in w.io.said() and w.raw() == before and getattr(w.io, 'pushed', 0) == pushed)
+    w.io.units_missing = None
     w.io.managed = None
     check('cutover: router does not show its managed-names list -> refused, nothing written',
           w.cutover() == 1 and 'did not show its managed-names list' in w.io.said() and w.raw() == before)

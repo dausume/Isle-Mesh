@@ -10,6 +10,7 @@
 #   this machine's storage records (root, under the records' own lock; no dataset, so not journaled):
 #     device register, partition assign;
 #   units apply --dataset D: root, journaled (rewrites the dataset's systemd units on the hosting device).
+#   units prove --dataset D: root; starts the sync unit now (the sync it starts is the journaled operation).
 #   (reconcile.sh runs storage_units.py after-update itself; it is not a verb here.)
 set -euo pipefail
 here="$(dirname "${BASH_SOURCE[0]}")"
@@ -36,7 +37,7 @@ case "$verb" in
         if [ "${2:-}" = apply ]; then
             shift 2; exec python3 "$here/operations.py" run storage units-apply "$@"
         fi
-        [ "${2:-}" = check ] || { echo "Usage: isle storage units check [--dataset D] | apply --dataset D [--overrides keep|remove]" >&2; exit 1; }
+        case "${2:-}" in check|prove) ;; *) echo "Usage: isle storage units check [--dataset D] | apply --dataset D [--overrides keep|remove] | prove --dataset D" >&2; exit 1 ;; esac
         shift; exec python3 "$here/storage_units.py" "$@" ;;
     device|partition|role)  # what this machine has, by serial and by filesystem identifier, and the role of each partition
         exec python3 "$here/storage_roles.py" "$@" ;;
