@@ -119,8 +119,8 @@ class Artifacts(unittest.TestCase):
   for extra in (dict(domain='x',parent='alpha'),dict(domain='twin.alpha.isle',parent='Bad'),dict(domain=5,parent='alpha')):
    m=dict(deploy=dict(service='web',port=80),images=[]);m['deploy'].update(extra)
    with self.assertRaises(ValueError):artifacts.validate_manifest(m)
- def install_domain(self,deploy,registry,instance,served=None,name='twin-board-engines'):
-  m=dict(name=name,version='v1',deploy=dict(service='web',port=80,**deploy));calls=[]
+ def install_domain(self,deploy,registry,instance,served=None,name='twin-board-engines',health=None,staged=False):
+  m=dict(name=name,version='v1',deploy=dict(service='web',port=80,**deploy),**({'health':health} if health else {}));calls=[]
   reg=self.root/'registry.json';reg.write_text(json.dumps({'apps':registry}))
   real=artifacts.Path
   class P(type(real())):
@@ -128,7 +128,7 @@ class Artifacts(unittest.TestCase):
   catalog=self.root/'catalog.json';catalog.write_text(json.dumps({'entry':{'name':name,'install_plan':{'release':{'sha256':'a'*64}}}}))
   def run(argv,**kw):calls.append(argv);return subprocess.CompletedProcess(argv,0)
   with patch.object(artifacts,'Path',P),patch.object(artifacts.os,'geteuid',return_value=0),patch.dict(os.environ,ISLE_OPERATION_ID='a'*32,ISLE_OPERATION_DIR=str(self.root)),patch.object(artifacts,'stage'),patch.object(artifacts,'atomic'),patch.object(artifacts,'wait_ready',return_value=0),patch.object(artifacts,'prepare',return_value=(m,self.root/'c.yml')),patch.object(artifacts.subprocess,'run',side_effect=run):
-   code=artifacts.install(catalog,instance,served=served)
+   code=artifacts.install(catalog,instance,served=served,staged=staged)
   return code,calls
  def test_install_domain_precedence(self):
   parent={'board-engines':{'domain':'board-engines.isle'}}
@@ -143,4 +143,17 @@ class Artifacts(unittest.TestCase):
   _,c=self.install_domain({},{'twin-board-engines':{'domain':'old.isle'}},'twin-board-engines');self.assertEqual(used(c),'old.isle')
   _,c=self.install_domain({},{},'twin-board-engines');self.assertEqual(used(c),'twin-board-engines.isle')
   _,c=self.install_domain({},{},'twin-board-engines-2');self.assertEqual(used(c),'twin-board-engines-2.isle')
+ def test_staged_install_probes_the_release_health_path(self):
+  # Storage fix-list item 5: the staged probe (app-deploy.sh, by --resolve) asks for the path the release declares.
+  where='/.well-known/isle-storage/current'
+  def path(calls):return calls[0][calls[0].index('--health-path')+1]
+  _,c=self.install_domain({},{},'isle-content-host',served='apt.isle',name='isle-content-host',health={'path':where},staged=True)
+  self.assertEqual(path(c),where);self.assertIn('--staged',c[0])
+  _,c=self.install_domain({},{},'isle-content-host',served='apt.isle',name='isle-content-host',staged=True)
+  self.assertEqual(path(c),'/')   # a release that declares none is probed at /
+  release=json.loads((Path(__file__).resolve().parent.parent/'releases'/'isle-content-host'/'release.json').read_text())
+  self.assertEqual(release['health'],{'path':where})
+  deploy=(Path(__file__).resolve().parent/'app-deploy.sh').read_text()
+  staged=deploy[deploy.index('RESOLVE_ARGS=(--resolve'):]
+  self.assertIn('"https://$DOMAIN$HEALTH_PATH"',staged[:staged.index('READY=1')])
 if __name__=='__main__':unittest.main()

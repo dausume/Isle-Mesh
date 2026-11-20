@@ -152,6 +152,10 @@ def execute(args=None, ident=None):
         d.update(state='succeeded' if code==0 else 'cancelled' if code==130 else 'failed',exitCode=code,retryable=code!=0,updatedAt=now())
         d['history'].append(dict(attempt=d['attempt'],state=d['state'],at=now(),exitCode=code))
         atomic(p/'status.json',d)
+        if code!=0:
+            # The resume of any journaled operation: same id, same stored request, same journal.  On stderr, so nothing that
+            # reads the two Operation lines on stdout sees a new line.
+            print('To continue this operation where it stopped: sudo isle operation retry '+ident,file=sys.stderr,flush=True)
         print('Operation '+ident+': '+d['state'],flush=True)
         return code if code>=0 else 128-code
 

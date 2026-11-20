@@ -294,7 +294,8 @@ separate from `POLARI_APP_PERMISSIONS` and backend enforcement policy.
 `sudo isle store install <catalog-name> --yes` and the native Install button
 invoke the same store operation. The command prints `Operation: <id>`; inspect
 it with `isle operation status <id>` and retry with
-`sudo isle operation retry <id>`. Retry keeps the original catalog response and
+`sudo isle operation retry <id>`. Every journaled operation that ends other than
+`succeeded` prints that command with its id (on stderr). Retry keeps the original catalog response and
 replays its plan through the existing shared deployment commands. Successful
 operations are not replayed by retry; use a new install for an intentional
 upgrade. Per-app locks prevent concurrent attempts. A killed process is reported

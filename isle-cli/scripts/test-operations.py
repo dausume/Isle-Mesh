@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import importlib.util,json,os,subprocess,tempfile,unittest,sys
+import contextlib,importlib.util,io,json,os,subprocess,tempfile,unittest,sys
 from pathlib import Path
 from unittest.mock import patch
 import operations as op
@@ -26,9 +26,15 @@ test "$(cat "$ISLE_OPERATION_DIR/catalog.json")" = pinned
 ''')
  def test_unrelated_apps_retry_same_request_and_snapshot(self):
   for name in ['odoo','board-engines']:
-   self.assertEqual(op.execute(['store','install',name,'--yes']),7)
+   out,err=io.StringIO(),io.StringIO()
+   with contextlib.redirect_stdout(out),contextlib.redirect_stderr(err):self.assertEqual(op.execute(['store','install',name,'--yes']),7)
+   ident=op.latest(name)['id']   # a failed operation names its resume, on stderr; stdout keeps its two Operation lines
+   self.assertIn('To continue this operation where it stopped: sudo isle operation retry '+ident,err.getvalue())
+   self.assertEqual(out.getvalue().splitlines(),['Operation: '+ident,'Operation '+ident+': failed'])
    d=op.latest(name);self.assertEqual(d['state'],'failed');self.assertTrue(d['retryable'])
-   self.assertEqual(op.execute(ident=d['id']),0)
+   out,err=io.StringIO(),io.StringIO()
+   with contextlib.redirect_stdout(out),contextlib.redirect_stderr(err):self.assertEqual(op.execute(ident=d['id']),0)
+   self.assertNotIn('operation retry',out.getvalue()+err.getvalue())   # a success names no resume
    after=op.read(d['id']);self.assertEqual(after['request'],d['request']);self.assertEqual(after['attempt'],2)
    self.assertEqual(op.execute(ident=d['id']),0);self.assertEqual(op.read(d['id'])['attempt'],2)
  def test_retry_clears_previous_result_before_real_child_starts(self):

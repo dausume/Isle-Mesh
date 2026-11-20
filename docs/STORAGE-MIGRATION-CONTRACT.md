@@ -178,6 +178,9 @@ creation, so `latest(name)` works per dataset.  The lock is dedicated: a long co
 After stage 8 the operation writes the receipt (§2.6), POSTs it to `POST /api/islemesh/storage/receipt` and exits `succeeded`.  The backend only
 stores it (after verifying `plan.digest` against the stored plan and revision); the core-side `isle storage mark-migrated` decides (§5).  **No DNS
 write happens in migrate.**  The operation never removes anything on the source (it has no credentials there).
+**Resume.**  A migrate that stopped is continued with `sudo isle operation retry <id>`: the same operation, its stored request and its journal;
+each stage re-checks its evidence and does not redo what holds.  Every journaled operation that ends other than `succeeded` prints that command
+with its id on stderr.  Typing the migrate command again also works, as a new operation whose receipt takes the next `attempt` (§2.6).
 
 **Source origin (D11, Codex 2).**  The source address comes from the authenticated core devices door (`api.polari.isle`) for `originDevice`.  The
 target fetches `https://<domain>/…` with `--resolve <domain>:443:<source agent address>`, verified against the isle root CA, `--max-redirs 0`, no
