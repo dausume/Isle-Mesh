@@ -289,6 +289,29 @@ successful readback. This toggle changes sign-in availability; it is deliberatel
 separate from `POLARI_APP_PERMISSIONS` and backend enforcement policy.
 
 
+### Device-backups
+
+A device-backup is one backup of one machine taken at one time: a folder `device-backups/<device>/<id>/` with one
+archive per item and `device-backup.json`.
+
+    isle backup plan [--json]          read-only: what one would hold, what is left out and why, where it would go
+    sudo isle backup create --yes      journaled: write one, re-read every file, then keep two
+    sudo isle backup list [--json]     the device-backups of this machine
+    sudo isle backup verify <id>       re-read every file of one against its record
+    sudo isle backup release-hold      lower a write gate that an interrupted device-backup left up
+
+- It holds the isle's settings folder (without the package store), the isle's state folder (without release files,
+  operation journals and the device-backups themselves) and the data volume of every Polari instance the isle CLI
+  deployed on the machine. A running instance is copied only behind the engine's write gate. Every other named
+  Docker volume is listed as not covered.
+- It lives on the partition the machine records with the role `backup` (`isle storage partition list`); a machine
+  that records none keeps it in its state folder. A recorded `backup` partition that cannot be used is a refusal.
+- It is complete only after every file was read back and matched. Two are kept per device: `release` (the newest)
+  and `long-term` (the previous one takes that place when the long-term one is 7 days old or older, otherwise the
+  previous one is deleted). Nothing is deleted before the new one is complete.
+- Nothing is encrypted and nothing is sent anywhere.
+- `isle release run` takes one as a device step: `{"verb": "backup"}`. The run stops there if it is not complete.
+
 ### Shared local operations
 
 `sudo isle store install <catalog-name> --yes` and the native Install button

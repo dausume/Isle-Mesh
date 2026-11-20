@@ -247,6 +247,7 @@ STEP_KEYS = {
                       {'verb', 'app', 'version', 'manifestSha256'}),
     'module-add': ({'verb', 'instance', 'module'}, {'verb', 'instance', 'module'}),
     'hotfix': ({'verb', 'name'}, {'verb', 'name'}),
+    'backup': ({'verb'}, {'verb'}),
 }
 
 def validate_step(step, where):
@@ -265,6 +266,8 @@ def validate_step(step, where):
         # Only the SHAPE is checked here: whether the name is a registered fix is decided by the installed CLI of the
         # device that runs the step (an older CLI may not know it yet), so an unknown name is not a packet error.
         _match(step['name'], NAME, where + ' name')
+    elif verb == 'backup':
+        pass        # no parameters: what a device-backup holds and where it lives is decided on the device that takes it
     else:
         _match(step['instance'], NAME, where + ' instance'); _match(step['module'], NAME, where + ' module')
 
@@ -472,6 +475,8 @@ def describe_step(step):
         return text + (' and check it runs image %s' % step['expectImageDigest'][:19] if 'expectImageDigest' in step else '')
     if verb == 'hotfix':
         return 'apply hotfix %s (isle hotfix apply; idempotent, backs up what it replaces)' % step['name']
+    if verb == 'backup':
+        return 'take a device-backup of this device (isle backup create; the run stops here if it is not complete)'
     return 'add module %s to instance %s (isle polari module add, then check it is recorded and the backend is ready)' % (step['module'], step['instance'])
 
 def summary_lines(record, run_id, publications=None):
@@ -665,7 +670,7 @@ def installed_release_ok(deps, step, op):
                 instance, ', '.join(i[:19] for i in images) or 'nothing'), op, 'failed')
 
 def step_name(step):
-    return step['verb'] + ' ' + (step.get('app') or step.get('releaseId', '')[:12] or step.get('module', '') or step.get('name', ''))
+    return (step['verb'] + ' ' + (step.get('app') or step.get('releaseId', '')[:12] or step.get('module', '') or step.get('name', ''))).rstrip()
 
 def exec_store_install(deps, step, e):
     name = step_name(step)
@@ -756,8 +761,17 @@ def exec_hotfix(deps, step, e):
     if code: raise Refused(name, 'hotfix %s failed (exit %d); see isle hotfix status' % (fix, code), op, 'failed')
     return op, 'hotfix %s applied or already in place' % fix
 
+def exec_backup(deps, step, e):
+    """isle backup create --yes through the journal. Exit 0 only when every file was re-read and matched."""
+    name, args = step_name(step), ['backup', 'create', '--yes']
+    if not deps.journal_allows(args):
+        raise Refused(name, 'this CLI has no journaled "backup create" operation (an older installed CLI); update the CLI first')
+    code, op = journaled(deps, args)
+    if code: raise Refused(name, 'the device-backup is not complete (exit %d), so nothing after it was started; see: sudo isle backup list' % code, op, 'failed')
+    return op, 'device-backup taken and read back (sudo isle backup list)'
+
 EXECUTORS = {'update-apply': exec_update_apply, 'store-install': exec_store_install, 'module-add': exec_module_add,
-             'hotfix': exec_hotfix}
+             'hotfix': exec_hotfix, 'backup': exec_backup}
 
 def run_device_steps(deps, receipt, steps, publications, release_id=None):
     """release_id: the id "published" means. On the core it is what the publication produced; on a member it

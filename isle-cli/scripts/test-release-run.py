@@ -189,6 +189,9 @@ class Fake(rr.Deps):
                 rec['modules'] = ','.join(x for x in (rec.get('modules', ''), mod) if x); self.files[path] = rec
                 self.texts[str(self.polari_dir / inst / 'docker-compose.yml')] = 'POLARI_MODULES=' + rec['modules'] + '\n'
             return 0, 'Operation: ' + 'e' * 32 + '\n'
+        if 'operations.py run backup create' in joined:
+            self.events.append('backup'); self.backup_argv = list(argv[3:])
+            return getattr(self, 'backup_rc', 0), 'Operation: ' + 'b' * 32 + '\n'
         if 'operations.py run hotfix apply' in joined:
             self.events.append('hotfix'); self.hotfix_argv = list(argv[3:])
             return getattr(self, 'hotfix_rc', 0), 'Operation: ' + 'd' * 32 + '\n'
@@ -1376,6 +1379,36 @@ def hotfix_step_runs_the_journaled_apply_and_failures_are_clean():
     with tmp() as t:        # an older CLI without the journaled verb
         d = make_packet(t, devices={'core1': HOTFIX_STEP}, publish=False); f = Fake(t)
         assert rr.main(['run', str(d), '--yes', '--no-wait'], f) == 1 and 'no journaled' in refused(f)[0] and 'hotfix' not in f.events
+
+BACKUP_STEP = {'verb': 'backup'}
+
+@test
+def backup_step_takes_a_device_backup_first_and_a_failed_one_stops_the_run():
+    steps = [BACKUP_STEP] + HOTFIX_STEP
+    did = lambda fake: [e for e in fake.events if e in ('backup', 'hotfix')]
+    with tmp() as t:
+        d = make_packet(t, devices={'core1': steps}, publish=False); f = Fake(t); f.allow_module = True
+        assert rr.main(['run', str(d), '--yes', '--no-wait'], f) == 0, f.said
+        assert f.backup_argv == ['backup', 'create', '--yes'] and did(f) == ['backup', 'hotfix'], f.events
+        pk = rr.load_packet(d); got = json.loads((f.runs_dir / pk.run_id / 'receipt.json').read_text())['steps']
+        assert got[0]['state'] == 'done' and got[0]['operationId'] == 'b' * 32 and 'read back' in got[0]['detail'], got[0]
+        assert got[0]['key'] == 'step:0:backup' and got[1]['verb'] == 'hotfix' and got[1]['state'] == 'done', got
+        assert rr.step_name(BACKUP_STEP) == 'backup'
+        assert rr.describe_step(BACKUP_STEP).startswith('take a device-backup of this device')
+        f2 = Fake(t); f2.allow_module = True      # a rerun takes no second device-backup
+        assert rr.main(['run', str(d), '--yes', '--no-wait'], f2) == 0 and did(f2) == []
+    with tmp() as t:        # not complete: nothing after it is started
+        d = make_packet(t, devices={'core1': steps}, publish=False); f = Fake(t); f.allow_module = True; f.backup_rc = 1
+        assert rr.main(['run', str(d), '--yes', '--no-wait'], f) == 1 and did(f) == ['backup'], f.events
+        assert 'the device-backup is not complete (exit 1)' in refused(f)[0] and 'b' * 32 in refused(f)[0]
+    with tmp() as t:        # an older installed CLI without the journaled verb
+        d = make_packet(t, devices={'core1': steps}, publish=False); f = Fake(t)
+        assert rr.main(['run', str(d), '--yes', '--no-wait'], f) == 1 and 'no journaled "backup create"' in refused(f)[0] and did(f) == []
+    for bad in ({'verb': 'backup', 'slot': 'long-term'}, {'verb': 'backup', 'name': 'x'}, {'verb': 'backup', 'to': '/somewhere'}):
+        with tmp() as t:    # the step takes no parameter: where it lives and what it holds is the device's own
+            d = make_packet(t, devices={'core1': [bad]}, publish=False)
+            try: rr.load_packet(d); raise AssertionError(bad)
+            except rr.PacketError: pass
 
 @test
 def compose_modules_reads_both_compose_formats():

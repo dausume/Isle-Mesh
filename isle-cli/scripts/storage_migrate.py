@@ -6,7 +6,8 @@ section 2.6 receipt.  Every outside effect is injected so the stages can be test
 network, a disk or a container runtime:
 
   http   get_json(url, resolve=None), get_bytes(url, resolve=None, max_bytes=None),
-         stream_to(url, sink, resolve=None, expected_size=None), post_json(url, payload, token)
+         stream_to(url, sink, resolve=None, expected_size=None),
+         post_json(url, payload, token=None, resolve=None)
          (CurlHttp is the real one: curl with the isle root CA, never -k, never a bare IP, no redirects)
   deps   Deps(): identity, findmnt_json, run/statvfs (preflight), fstatvfs (receive), deploy,
          agent_address, lease_path, sleep, monotonic
@@ -149,9 +150,9 @@ class CurlHttp:
         max_time = max(600, (expected_size or 0) // 262144 + 120)
         self._read(url, resolve, max_time, limit, sink)
 
-    def post_json(self, url, payload, token=None):
+    def post_json(self, url, payload, token=None, resolve=None):
         """POST payload as JSON; return (status, text).  The token goes through curl's stdin config, never argv."""
-        argv = self._argv(url, None, 60)
+        argv = self._argv(url, resolve, 60)
         argv = [a for a in argv if a not in ('--fail',)]
         with tempfile.NamedTemporaryFile('w', suffix='.json') as body:
             os.chmod(body.name, 0o600)

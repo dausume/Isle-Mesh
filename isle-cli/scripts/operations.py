@@ -72,6 +72,17 @@ def _hotfix_names(args):
     if not _hotfix_apply(args): return None
     return 'app-hotfix-'+args[2]+'.lock','hotfix-'+args[2]
 
+def _backup_create(args):
+    return args==['backup','create','--yes']
+
+def _backup_names(args):
+    # One device-backup of this machine at a time.
+    if not _backup_create(args): return None
+    return 'app-device-backup.lock','device-backup'
+
+def _names(args):
+    return _storage_names(args) or _module_names(args) or _hotfix_names(args) or _backup_names(args)
+
 def _busy(sn, lock_file):
     # Contract 2.1: only a refused app-device-update.lock may be attributed to a storage operation, and only
     # when no device-update or identity-reconcile journal (the exclusive holders) is running. The storage
@@ -104,6 +115,9 @@ def request(args):
     if args[:1]==['hotfix']:
         if not _hotfix_apply(args): raise ValueError('Invalid hotfix parameters; use: hotfix apply <name> --yes')
         return list(args)
+    if args[:1]==['backup']:
+        if not _backup_create(args): raise ValueError('Invalid backup parameters; use: backup create --yes')
+        return list(args)
     if len(args)==3 and args[:2]==['update','apply'] and re.fullmatch('[a-f0-9]{64}',args[2]): return list(args)
     if args in (['reconcile','apply','device'], ['agent','restart','device']): return list(args)
     if len(args)==6 and args[:2]==['identity','reconcile'] and args[2]=='--expected-legacy' and args[4]=='--canonical' \
@@ -120,11 +134,11 @@ def execute(args=None, ident=None):
     ROOT.mkdir(parents=True,exist_ok=True,mode=0o755)
     os.chmod(ROOT,0o755)
     if ident:
-        p=path_for(ident); d=read(ident); args=request(d['request']); sn=_storage_names(args) or _module_names(args) or _hotfix_names(args)
+        p=path_for(ident); d=read(ident); args=request(d['request']); sn=_names(args)
         if d['state']=='succeeded':
             print(json.dumps(d)); return 0
     else:
-        args=request(args); sn=_storage_names(args) or _module_names(args) or _hotfix_names(args); ident=uuid.uuid4().hex; p=path_for(ident);p.mkdir(mode=0o755);os.chmod(p,0o755)
+        args=request(args); sn=_names(args); ident=uuid.uuid4().hex; p=path_for(ident);p.mkdir(mode=0o755);os.chmod(p,0o755)
         d=dict(id=ident,name=sn[1] if sn else args[2] if args[0]=='store' else args[args.index('--name')+1] if args[:3]==['polari','instance','deploy'] else 'identity-reconcile' if args[0]=='identity' else 'device-update',request=args,state='pending',createdAt=now(),attempt=0,history=[])
     # Serialize all operations for one app, including retries/new requests.
     app_lock=ROOT/(sn[0] if sn else 'app-'+(args[2] if args[0]=='store' else 'device-update')+'.lock')

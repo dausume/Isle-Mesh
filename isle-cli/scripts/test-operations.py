@@ -187,6 +187,14 @@ PY
    with self.assertRaises(ValueError,msg=a):op.request(a)
   self.assertIsNone(op._hotfix_names(['store','install','x']))
 
+ def test_backup_create_request_and_journal_names(self):
+  good=['backup','create','--yes']
+  self.assertEqual(op.request(good),good);self.assertEqual(op._names(good),('app-device-backup.lock','device-backup'))
+  for a in (['backup'],['backup','create'],['backup','create','--yes','--slot','long-term'],['backup','restore','x','--yes'],['backup','release-hold'],['backup','verify','x']):
+   with self.assertRaises(ValueError,msg=a):op.request(a)
+  self.assertIsNone(op._backup_names(['store','install','x']))
+  self.assertEqual(op._names(['hotfix','apply','storage-units','--yes']),('app-hotfix-storage-units.lock','hotfix-storage-units'))
+
  def test_polari_module_add_request_journal_lock_and_retry(self):
   good=['polari','module','add','board_engines.v2','--to','twin-a']
   self.assertEqual(op.request(good),good)
