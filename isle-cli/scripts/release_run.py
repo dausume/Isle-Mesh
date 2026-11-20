@@ -33,7 +33,7 @@ MODE_FILE = '/etc/isle-mesh/agent/agent.mode'
 NOTICE_READ = ("import os,sys; from pathlib import Path; "
                "p=Path(os.environ['DATABASE_PATH']).parent/'isle-release.json'; "
                "sys.stdout.write(p.read_text() if p.exists() else '{}')")
-# Read the existing notice, replace ONLY one key (`run`, or `startSetting`), write atomically (same way release_notice.py writes).
+# Read the existing notice, replace ONLY one key (`run`, `startSetting`, or `identityProvider`), write atomically (same way release_notice.py writes).
 # It refuses when no runtime release notice exists yet: the backend serves this file to every member and
 # needs its `packages`; a file holding only `run` would turn /api/islemesh/updates into a 503 for the isle.
 NOTICE_WRITE = """import json, os, sys, tempfile
@@ -43,7 +43,7 @@ if not p.exists(): sys.exit('no runtime release notice exists on the core yet (p
 d = json.loads(p.read_text())
 if not isinstance(d, dict) or 'id' not in d or 'packages' not in d: sys.exit('the release notice on the core is not a release')
 key = sys.argv[1] if len(sys.argv) > 1 else 'run'
-if key not in ('run', 'startSetting'): sys.exit('not a key this writer may replace')
+if key not in ('run', 'startSetting', 'identityProvider'): sys.exit('not a key this writer may replace')
 d[key] = json.load(sys.stdin)
 f = tempfile.NamedTemporaryFile(mode='w', dir=p.parent, delete=False)
 json.dump(d, f); f.flush(); os.fsync(f.fileno()); f.close(); os.replace(f.name, p)

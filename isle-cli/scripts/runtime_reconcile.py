@@ -88,9 +88,10 @@ def reconcile(release,mode):
             config['services'][service]['volumes']=[str(main)+':/etc/nginx/nginx.conf:ro']
         if name=='prf-isle-backend':
             from dns_publication import resolver
+            from identity_provider import local_record,backend_environment
             config['services'][service].update({
                 'environment':{'ISLE_CORE_API':'https://api.polari.isle','POLARI_INSTANCE_NAME':'polari','POLARI_MACHINE_NAME':CANONICAL.read_text().strip(),'SSL_CERT_FILE':'/etc/isle-trust/ca-certificates.crt',
-                               'REQUESTS_CA_BUNDLE':'/etc/isle-trust/ca-certificates.crt'},
+                               'REQUESTS_CA_BUNDLE':'/etc/isle-trust/ca-certificates.crt',**backend_environment(local_record())},
                 'volumes':['/etc/ssl/certs:/etc/isle-trust:ro'], 'dns':[resolver()]})
         # Keep recovery information separate from immutable package files.
         before=OVERLAYS/(project+'-'+service+'-before.json')

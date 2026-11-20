@@ -8,10 +8,15 @@ class Runtime(unittest.TestCase):
   self.exercise_runtime('agent')
  def test_core_backend_gets_explicit_registry_origin_and_identity(self):
   self.exercise_runtime('prf-isle-backend')
- def exercise_runtime(self,name):
+ def test_core_backend_is_told_the_keycloak_the_isle_names(self):
+  record={'issuer':'https://auth.example.isle/realms/Polari','realm':'Polari','jwksUri':'https://auth.example.isle/realms/Polari/protocol/openid-connect/certs','clientId':'polari-frontend','setAt':'t','setOn':'core-one'}
+  self.exercise_runtime('prf-isle-backend',record)
+ def exercise_runtime(self,name,provider=None):
   with tempfile.TemporaryDirectory() as tmp:
    root=Path(tmp);compose=root/'compose.yml';compose.write_text('services:\n  agent:\n    hostname: ${ISLE_HOSTNAME}\n    environment: [VIRTUAL_MAC=${VIRTUAL_MAC}]\n')
    canonical=root/'device-name';canonical.write_text('member-core')
+   setting=root/'provider.json'   # never this machine's own setting
+   if provider:setting.write_text(json.dumps(provider))
    config='sha256:'+'c'*64;manifest='sha256:'+'d'*64;calls=[];changed=False
    labels={'com.docker.compose.project':'existing','com.docker.compose.service':'agent','com.docker.compose.project.working_dir':str(root),'com.docker.compose.project.config_files':str(compose),'isle.role':'remote-proxy'}
    def inspect(container):
@@ -22,7 +27,7 @@ class Runtime(unittest.TestCase):
     if argv[:2]==['docker','compose']:changed=True
     return subprocess.CompletedProcess(argv,0,manifest+'\n')
    row={'container':name,'image':{'ref':'example/agent:v1','configDigest':config,'manifestDigest':manifest,'archive':{'sha256':'a'*64,'url':'https://apt.isle/image.tar','size':123}}}
-   with patch.object(runtime,'OVERLAYS',root/'overlays'),patch.object(runtime,'CACHE',root/'cache'),patch.object(runtime,'CANONICAL',canonical),patch('dns_publication.resolver',return_value='10.10.0.1'),patch.object(runtime,'inspect',side_effect=inspect),patch.object(runtime,'fetch',return_value=root/'archive'),patch.object(runtime,'verify_archive',return_value={config,manifest}),patch.object(runtime,'run',side_effect=run),patch.object(runtime.subprocess,'run',side_effect=run):
+   with patch.object(runtime,'OVERLAYS',root/'overlays'),patch.object(runtime,'CACHE',root/'cache'),patch.object(runtime,'CANONICAL',canonical),patch('identity_provider.SETTING_FILE',str(setting)),patch('dns_publication.resolver',return_value='10.10.0.1'),patch.object(runtime,'inspect',side_effect=inspect),patch.object(runtime,'fetch',return_value=root/'archive'),patch.object(runtime,'verify_archive',return_value={config,manifest}),patch.object(runtime,'run',side_effect=run),patch.object(runtime.subprocess,'run',side_effect=run):
     runtime.reconcile({'runtimes':{'remote':[row]}},'remote')
    deployment=next((a,k) for a,k in calls if a[:2]==['docker','compose'])
    self.assertIn('--no-build',deployment[0]);self.assertIn('--no-deps',deployment[0]);self.assertNotIn('down',deployment[0])
@@ -32,6 +37,9 @@ class Runtime(unittest.TestCase):
    if name=='prf-isle-backend':
     env=json.loads((root/'overlays/existing.json').read_text())['services']['agent']['environment']
     self.assertEqual(env['ISLE_CORE_API'],'https://api.polari.isle');self.assertEqual(env['POLARI_MACHINE_NAME'],'member-core');self.assertEqual(env['POLARI_INSTANCE_NAME'],'polari')
+    told={k:v for k,v in env.items() if 'KEYCLOAK' in k}
+    self.assertEqual(told,{'POLARI_KEYCLOAK_ISSUER_URI':provider['issuer'],'POLARI_KEYCLOAK_JWKS_URI':provider['jwksUri'],'POLARI_KEYCLOAK_REALM':'Polari','POLARI_KEYCLOAK_FRONTEND_CLIENT_ID':'polari-frontend'} if provider else {})
+    self.assertFalse([k for k in env if 'PERMISSIONS' in k])
  def test_rejects_incomplete_or_unsafe_targets_before_execution(self):
   valid={'container':'agent','image':{'ref':'example/agent:v1','configDigest':'sha256:'+'a'*64,'archive':{'url':'https://apt.isle/image.tar','size':123,'sha256':'b'*64}}}
   for mutation in ('digest','http','duplicate','health'):

@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Deployment-owned Keycloak switch. Never changes backend authorization rules."""
+"""Deployment-owned Keycloak switch. Never changes backend authorization rules.
+
+enable and require write the Keycloak the isle names (isle polari security provider) into the file first, when
+the isle names one; with none named the address already in the file is used, as before.
+"""
 import argparse
 import fcntl
 import json
@@ -41,6 +45,10 @@ def main():
     a = p.parse_args()
     if a.action != 'status' and os.geteuid() != 0:
         p.error('Run with sudo on the device hosting this frontend')
+    provider, why, written = None, None, []
+    if a.action in ('enable', 'require'):
+        import identity_provider
+        provider, why = identity_provider.known(identity_provider.IO())
     try:
         # Keep inode: Docker binds this individual file into the frontend.
         with a.config.open('r+' if a.action != 'status' else 'r') as f:
@@ -48,6 +56,8 @@ def main():
             original = f.read()
             cfg = json.loads(original)
             if a.action != 'status':
+                if provider:
+                    written = identity_provider.fill_frontend(cfg, provider)
                 update(cfg, a.action, a.feature)
                 backup = a.config.with_name(a.config.name + '.before-security')
                 if not backup.exists():
@@ -57,6 +67,12 @@ def main():
                 f.seek(0); f.write(json.dumps(cfg, indent=2) + '\n'); f.truncate(); f.flush(); os.fsync(f.fileno())
             kc = cfg.get('keycloak', {})
             print(json.dumps({'enabled': bool(kc) and kc.get('enabled', True), 'requiredBy': kc.get('requiredBy', []), 'config': str(a.config)}))
+            if provider:
+                print('The Keycloak of this isle is %s (client %s)%s.' % (provider['issuer'], provider['clientId'],
+                      '; written into this file' if written else '; this file already held it'))
+            elif a.action in ('enable', 'require'):
+                print('%s; the address already in this file was used.' % ('The Keycloak of this isle is not known here (%s)' % why if why
+                      else 'This isle names no Keycloak (isle polari security provider)'))
             if a.action != 'status':
                 print('Reload Isle App. Backend authorization is unchanged. Enabled sign-in still requires a healthy Keycloak service.')
     except (ValueError, OSError) as e:

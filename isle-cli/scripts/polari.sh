@@ -531,7 +531,9 @@ if [[ "${1:-}" == instance && "${2:-}" == deploy && -z "${ISLE_OPERATION_ID:-}" 
     exec python3 "$SCRIPT_DIR/operations.py" run polari "$@"
 fi
 case "${1:-help}" in
-    security) shift; exec python3 "$SCRIPT_DIR/polari-security.py" "$@" ;;
+    security) shift
+        if [[ "${1:-}" == provider ]]; then shift; exec python3 "$SCRIPT_DIR/identity_provider.py" "$@"; fi
+        exec python3 "$SCRIPT_DIR/polari-security.py" "$@" ;;
     instance)
         case "${2:-}" in
             deploy) shift 2; deploy "$@" ;;
@@ -553,5 +555,5 @@ case "${1:-help}" in
             *) echo "usage: isle polari app [plan <app>|ensure <app> [--yes]]" ;;
         esac ;;
     instances) instances ;;
-    *) echo "usage: isle polari [security status|enable|disable|require|release --config FILE [--feature NAME]|instance deploy|instance verify <n>|instance rebase|instance undeploy <n>|module move <m> --from A --to B|instances]" ;;
+    *) echo "usage: isle polari [security status|enable|disable|require|release --config FILE [--feature NAME]|security provider [<issuer-address> [--client ID]|none]|instance deploy|instance verify <n>|instance rebase|instance undeploy <n>|module move <m> --from A --to B|instances]" ;;
 esac

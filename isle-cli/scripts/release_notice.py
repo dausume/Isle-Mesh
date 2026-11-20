@@ -46,5 +46,8 @@ f=tempfile.NamedTemporaryFile(mode='w',dir=p.parent,delete=False);f.write(json.d
 if __name__=='__main__':
     document=notice(sys.argv[1]);setting=start_setting()
     if setting:document['startSetting']=setting
+    from identity_provider import local_record,NOTICE_KEY   # the isle's Keycloak, set by `isle polari security provider`
+    provider=local_record()
+    if provider:document[NOTICE_KEY]=provider
     payload=json.dumps(document)
     subprocess.run(['docker','exec','-i','prf-isle-backend','python3','-c',WRITE],input=payload,text=True,check=True,timeout=15)
