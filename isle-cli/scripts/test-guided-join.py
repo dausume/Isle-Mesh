@@ -71,12 +71,12 @@ class GuidedJoin(unittest.TestCase):
             self.assertEqual('show_completion' in r.stdout,failure is None)
             if failure=='wait_for_health': self.assertNotIn('\nfinish_join\n',r.stdout)
     def test_certificate_failure_stops_before_https(self):
-        r=self.shell('setup_remote_dns(){ :; }; bash(){ return 1; }; curl(){ echo UNEXPECTED; }; finish_join')
+        r=self.shell('python3(){ :; }; setup_remote_dns(){ :; }; bash(){ return 1; }; curl(){ echo UNEXPECTED; }; finish_join')
         self.assertNotEqual(r.returncode,0)
         self.assertNotIn('UNEXPECTED',r.stdout)
         self.assertIn('--finish',r.stdout)
     def test_https_failure_not_success(self):
-        r=self.shell('setup_remote_dns(){ :; }; bash(){ return 0; }; curl(){ return 60; }; finish_join')
+        r=self.shell('python3(){ :; }; setup_remote_dns(){ :; }; bash(){ return 0; }; curl(){ return 60; }; finish_join')
         self.assertNotEqual(r.returncode,0)
         self.assertNotIn('HTTPS verified',r.stdout)
     def test_selects_requested_isle_and_refuses_implicit_selection(self):
