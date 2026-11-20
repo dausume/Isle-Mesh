@@ -10,6 +10,8 @@ fi
 [[ $EUID == 0 ]] || { echo 'Use sudo isle reconcile'; exit 1; }
 python3 "$DIR/member_preflight.py" --repair
 python3 "$DIR/legacy_units.py"
+# A storage unit file whose text an update changed is rewritten here. The step never stops the reconcile.
+python3 "$DIR/storage_units.py" after-update || echo "Storage units were not checked; see: isle storage units check"
 # runtime_reconcile.py runs the storage check (storage_gate) before restarting any app that has a storage-bind.json.
 python3 "$DIR/runtime_reconcile.py"
 python3 "$DIR/provider_reconcile.py"

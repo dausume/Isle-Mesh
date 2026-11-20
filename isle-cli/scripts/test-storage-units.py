@@ -1,4 +1,5 @@
 """isle storage units check | apply: temp folders and a recorded systemctl; no real unit is read or written."""
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -229,6 +230,104 @@ class Main(Case):
                                 env=env, capture_output=True, text=True, timeout=20)
         data = json.loads(result.stdout)
         self.assertEqual((result.returncode, data['ok'], data['result']['bound']), (1, False, False))
+
+
+class AfterUpdate(Case):
+    def run_step(self, euid=0):
+        return su.after_update(root=str(self.root), unit_dir=str(self.units), systemctl=self.systemctl,
+                               euid=lambda: euid, lock_root=str(self.root / 'locks'), stamp='20261120T000000Z')
+
+    def old_gate(self):
+        text = su.expected(BINDING)[GATE].replace('/usr/local/bin/isle', '/usr/bin/isle')
+        (self.units / GATE).write_text(text)
+        return text
+
+    def test_matching_units_are_left_alone(self):
+        self.install()
+        rows = self.run_step()
+        self.assertEqual(rows, [dict(dataset=D, rewritten=[], attention=[])])
+        self.assertEqual((self.changes(), su.after_update_lines(rows)), ([], []))
+        self.assertFalse((self.root / D / su.REPLACED).exists())
+
+    def test_a_differing_unit_is_rewritten_and_its_old_text_kept(self):
+        self.install()
+        old = self.old_gate()
+        rows = self.run_step()
+        kept = self.root / D / su.REPLACED / '20261120T000000Z'
+        self.assertEqual(rows, [dict(dataset=D, rewritten=[GATE], attention=[], replacedTextKeptIn=str(kept))])
+        self.assertEqual((self.units / GATE).read_text(), su.expected(BINDING)[GATE])
+        self.assertEqual(((kept / GATE).read_text(), sorted(os.listdir(kept))), (old, [GATE]))
+        self.assertEqual(self.changes(), [['daemon-reload']])  # no enable, no start, no restart
+        line, = su.after_update_lines(rows)
+        self.assertIn('rewrote ' + GATE, line)
+        self.assertIn('nothing was restarted', line)
+        self.assertEqual(self.run_step()[0]['rewritten'], [])  # a second run finds nothing to do
+
+    def test_missing_link_not_enabled_and_override_are_named_not_changed(self):
+        self.install()
+        (self.units / TIMER).unlink()
+        os.unlink(self.units / SERVICE)
+        os.symlink('/dev/null', self.units / SERVICE)
+        self.enabled.clear()
+        (self.units / (GATE + '.d')).mkdir()
+        (self.units / (GATE + '.d') / 'hand.conf').write_text('[Service]\n')
+        rows = self.run_step()
+        self.assertEqual(rows[0]['rewritten'], [])
+        self.assertEqual(rows[0]['attention'], [GATE + ' is not enabled', GATE + ' has 1 hand override(s)',
+                                                SERVICE + ' is a link, not a file', TIMER + ' is missing',
+                                                TIMER + ' is not enabled'])
+        self.assertEqual(self.changes(), [])
+        self.assertTrue(os.path.islink(self.units / SERVICE) and not (self.units / TIMER).exists())
+        self.assertIn('see: isle storage units check --dataset ' + D, su.after_update_lines(rows)[0])
+
+    def test_a_held_dataset_is_skipped(self):
+        self.install()
+        self.old_gate()
+        (self.root / 'locks').mkdir()
+        with open(self.root / 'locks' / ('app-storage-%s.lock' % D), 'a+') as holder:
+            fcntl.flock(holder, fcntl.LOCK_EX)
+            rows = self.run_step()
+        self.assertEqual((rows[0]['rewritten'], rows[0]['skipped']), ([], 'Another storage operation holds this dataset.'))
+        self.assertEqual(self.changes(), [])
+        self.assertIn('/usr/bin/isle', (self.units / GATE).read_text())
+
+    def test_one_bad_binding_does_not_stop_the_next_dataset(self):
+        self.install()
+        self.old_gate()
+        self.bind(dict(BINDING, dataset='aaa-broken', hostApp=''), dataset='aaa-broken')
+        rows = self.run_step()
+        self.assertEqual([r['dataset'] for r in rows], ['aaa-broken', D])
+        self.assertIn('hostApp', rows[0]['error'])
+        self.assertEqual(rows[1]['rewritten'], [GATE])
+
+    def test_failed_reload_is_reported(self):
+        self.install()
+        self.old_gate()
+        self.fail = 'daemon-reload'
+        rows = self.run_step()
+        self.assertIn('daemon-reload failed', rows[0]['error'])
+        self.assertIn('fault:', su.after_update_lines(rows)[0])
+
+    def test_the_step_always_exits_zero(self):
+        self.install()
+        self.old_gate()
+        for euid, expected in ((1000, 'Storage units were not checked'), (0, 'Storage units of ' + D)):
+            self.lines = []
+            code = su.main(['after-update'], root=str(self.root), unit_dir=str(self.units), systemctl=self.systemctl,
+                           euid=lambda e=euid: e, out=self.lines.append, lock_root=str(self.root / 'locks'))
+            self.assertEqual(code, 0)
+            self.assertIn(expected, self.lines[0])
+        self.lines = []
+        self.assertEqual(su.main(['after-update'], root=str(self.root / 'absent'), unit_dir=str(self.units),
+                                 systemctl=self.systemctl, euid=lambda: 0, out=self.lines.append,
+                                 lock_root=str(self.root / 'locks')), 0)
+        self.assertEqual(self.lines, [])
+
+    def test_only_check_and_apply_are_public(self):
+        result = subprocess.run(['node', str(ENTRY), 'storage', 'units', 'after-update'], capture_output=True, text=True,
+                                timeout=20)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('Usage: isle storage units check', result.stderr)
 
 
 class Request(unittest.TestCase):

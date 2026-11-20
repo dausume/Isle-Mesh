@@ -6,19 +6,28 @@ The three systemd units of a dataset bound on this machine (the gate that hosts 
 timer) against the text this CLI writes today.  A package update does not rewrite units that a migration wrote
 earlier; `check` says whether they still match and `apply` rewrites them.  Neither starts, stops nor restarts
 the host: a changed gate unit is used from its next start.
+
+   storage_units.py after-update   root; the step of `isle update apply` and `isle reconcile` (reconcile.sh)
+A unit file whose text differs from today's is rewritten and the replaced text is kept under the dataset's state
+folder.  That is all it changes: a missing unit, a unit that is not enabled and a hand override are named, and
+`isle storage units apply` stays the verb for them.
 """
 import argparse
 from datetime import datetime, timezone
+import fcntl
 import json
 import os
+import shutil
 import subprocess
 import sys
 
 import storage_mount
 from storage_cli import LOCAL_ROOT, read_copies
-from storage_contract import DATASET
+from storage_contract import DATASET, lock_name
 
 UNIT_DIR = '/etc/systemd/system'
+LOCK_ROOT = '/var/lib/isle-mesh/operations'  # the dataset lock every journaled storage operation takes
+REPLACED = 'units-replaced'
 NEEDED = ('dataset', 'mountpoint', 'relativePath', 'hostApp')
 
 
@@ -153,7 +162,83 @@ def apply(dataset, *, drop_overrides=False, root=LOCAL_ROOT, unit_dir=UNIT_DIR, 
     return ok, after
 
 
-def main(argv=None, *, root=LOCAL_ROOT, unit_dir=None, systemctl=_systemctl, euid=os.geteuid, out=print):
+def _refresh(dataset, row, *, root, unit_dir, systemctl, stamp):
+    _, doc = check(dataset, root=root, unit_dir=unit_dir, systemctl=systemctl)
+    if not doc.get('bound'):
+        row['error'] = doc['reason']
+        return
+    texts = expected(read_copies(root, dataset)[0])
+    for unit in doc['units']:
+        name, path = unit['unit'], os.path.join(unit_dir, unit['unit'])
+        if unit['state'] == 'differs':
+            kept = os.path.join(root, dataset, REPLACED, stamp)
+            os.makedirs(kept, mode=0o700, exist_ok=True)
+            shutil.copyfile(path, os.path.join(kept, name))
+            _write(path, texts[name])
+            row['rewritten'].append(name)
+            row['replacedTextKeptIn'] = kept
+        elif unit['state'] != 'matches':
+            row['attention'].append('%s is %s' % (name, unit['state']))
+        if unit.get('enabled') is False:
+            row['attention'].append('%s is not enabled' % name)
+        if unit['overrides']:
+            row['attention'].append('%s has %d hand override(s)' % (name, len(unit['overrides'])))
+
+
+def after_update(*, root=LOCAL_ROOT, unit_dir=UNIT_DIR, systemctl=_systemctl, euid=os.geteuid, lock_root=LOCK_ROOT,
+                 stamp=None):
+    """Rewrite the unit files that differ, for every dataset bound here.  Returns one row per dataset.
+
+    A dataset another storage operation holds is skipped.  One dataset's fault is put in its row and the others
+    are still handled."""
+    if euid() != 0:
+        raise PermissionError('This step runs as root, inside sudo isle reconcile.')
+    stamp = stamp or datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+    rows = []
+    for dataset in bound_datasets(root):
+        row = dict(dataset=dataset, rewritten=[], attention=[])
+        rows.append(row)
+        try:
+            os.makedirs(lock_root, exist_ok=True)
+            with open(os.path.join(lock_root, lock_name(dict(dataset=dataset))), 'a+') as lock:
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    row['skipped'] = 'Another storage operation holds this dataset.'
+                    continue
+                _refresh(dataset, row, root=root, unit_dir=unit_dir, systemctl=systemctl, stamp=stamp)
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            row['error'] = str(exc)
+    if any(row['rewritten'] for row in rows) and systemctl(['daemon-reload']) != 0:
+        for row in rows:
+            if row['rewritten']:
+                row['error'] = 'The unit files are written, but systemctl daemon-reload failed.'
+    return rows
+
+
+def after_update_lines(rows):
+    """What the update prints: one line per dataset that was touched or needs a look, nothing for the rest."""
+    lines = []
+    for row in rows:
+        said, dataset = [], row['dataset']
+        if row['rewritten']:
+            said.append('rewrote %s (the replaced text is in %s); a rewritten unit is used from its next start, '
+                        'nothing was restarted' % (', '.join(row['rewritten']), row['replacedTextKeptIn']))
+        if row.get('skipped'):
+            said.append('not checked: ' + row['skipped'])
+        if row.get('error'):
+            said.append('fault: ' + row['error'])
+        if row['attention']:
+            said.append('left as found: ' + '; '.join(row['attention']))
+        if row.get('skipped') or row.get('error') or row['attention']:
+            said.append('see: isle storage units check --dataset ' + dataset)
+        if said:
+            lines.append('Storage units of %s: %s.' % (dataset, '. '.join(said)))
+    return lines
+
+
+def main(argv=None, *, root=LOCAL_ROOT, unit_dir=None, systemctl=_systemctl, euid=os.geteuid, out=print,
+         lock_root=LOCK_ROOT):
     unit_dir = unit_dir or os.environ.get('ISLE_STORAGE_UNIT_DIR') or UNIT_DIR
     parser = argparse.ArgumentParser(prog='isle storage units', description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -162,7 +247,16 @@ def main(argv=None, *, root=LOCAL_ROOT, unit_dir=None, systemctl=_systemctl, eui
     changing = commands.add_parser('apply')
     changing.add_argument('--dataset', required=True)
     changing.add_argument('--overrides', choices=('keep', 'remove'), default='keep')
+    commands.add_parser('after-update')
     args = parser.parse_args(argv)
+    if args.command == 'after-update':  # never fails the update it runs in: every finding is a printed line
+        try:
+            for line in after_update_lines(after_update(root=root, unit_dir=unit_dir, systemctl=systemctl, euid=euid,
+                                                        lock_root=lock_root)):
+                out(line)
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            out('Storage units were not checked: %s' % exc)
+        return 0
     evaluated = datetime.now(timezone.utc).isoformat()
     operation = 'storage.units.' + args.command
     read_only = args.command == 'check'

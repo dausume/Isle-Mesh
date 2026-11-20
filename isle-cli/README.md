@@ -312,6 +312,14 @@ package names and versions, refuses implicit downgrades, installs with
 `apt-get --no-remove`, and reconciles owned local host routes and reporting.
 `sudo isle reconcile` reruns that reconciliation without recreating membership or
 applications. These actions share the operation journal and native bridge.
+`sudo isle update apply` and `sudo isle reconcile` also look at the systemd units of every storage dataset bound on the device (the gate that hosts it, its
+sync service, its sync timer). A unit file whose text differs from what the installed CLI writes is rewritten,
+and the replaced text is kept in `/var/lib/isle-mesh/storage/<dataset>/units-replaced/<time>/`. Nothing is
+enabled, started or restarted: a rewritten unit is used from its next start. A missing unit, a unit that is not
+enabled and a hand override are named in the output and left as found. `isle storage units check
+[--dataset D]` shows the same comparison at any time, and `sudo isle storage units apply --dataset D
+[--overrides keep|remove]` rewrites, enables and (with `remove`) drops the overrides. This step never fails an
+update.
 An update does not rebuild/recreate the agent image or migrate core runtime
 images; those remain distinct coordinated release actions, not implied by package
 success. No general system upgrade or rejoin is performed.
