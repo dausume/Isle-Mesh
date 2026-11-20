@@ -49,6 +49,8 @@ UNIT_DIR = '/etc/systemd/system'
 MiB = 1024 * 1024
 MANIFEST_MAX = 64 * MiB
 READY_SECONDS = 60
+TAKEN = 'already stored for this actionId and attempt'   # the core's 409 words for a number it already holds
+TAKEN_TRIES = 50
 PRE_DISK_STAGES = sc.STAGES[:2]  # stages 1-2 write nothing on the target disk
 
 
@@ -767,10 +769,24 @@ class Migration:
             operations.atomic(self.op_dir / 'storage-receipt.json', r)
         if sc.STAGES.index(self.current) < len(PRE_DISK_STAGES) and error is not None:
             return  # stages 1-2 refused: nothing recorded outside the journal directory
+        r['attempt'] = max(r['attempt'], self._recorded_attempt(r.get('actionId')) + 1)
         self._record(r)
         self._post(r)
         if self.op_dir:
             operations.atomic(self.op_dir / 'storage-receipt.json', r)
+
+    def _recorded_attempt(self, action):
+        """The highest attempt this device already recorded for the action, whatever operation made it; 0 if none.
+        The core keeps one receipt per action and attempt and refuses a different one.  The same migrate command
+        typed again is a new operation whose own count starts at 1, so the receipt counts per action instead."""
+        highest = 0
+        with contextlib.suppress(OSError):
+            for line in (self.state_dir / self.req['dataset'] / 'receipts.jsonl').read_bytes().splitlines():
+                with contextlib.suppress(ValueError, AttributeError):
+                    row = json.loads(line)
+                    if action and row.get('actionId') == action and type(row.get('attempt')) is int:
+                        highest = max(highest, row['attempt'])
+        return highest
 
     def _record(self, receipt):
         try:
@@ -790,6 +806,13 @@ class Migration:
             if not isinstance(token, str) or not token:
                 raise ValueError('the enrollment file has no token')
             status, text = self.http.post_json(API + '/api/islemesh/storage/receipt', receipt, token)
+            first = receipt['attempt']
+            while status == 409 and TAKEN in str(text) and receipt['attempt'] - first < TAKEN_TRIES:
+                # The core holds another receipt under this number and this device's record of it is gone.
+                receipt['attempt'] += 1
+                status, text = self.http.post_json(API + '/api/islemesh/storage/receipt', receipt, token)
+            if receipt['attempt'] != first:
+                self._record(receipt)       # the number the core was offered last is the one kept here too
             receipt['posted'] = 200 <= status < 300
             if not receipt['posted']:
                 receipt['postError'] = 'HTTP %d %s' % (status, str(text)[:200])

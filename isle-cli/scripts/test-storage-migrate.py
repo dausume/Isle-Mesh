@@ -349,6 +349,64 @@ def happy_checks():
               s.rc == 0 and s.receipt['posted'] is False and not s.http.posts)
 
 
+def attempt_checks():
+    """The receipt's attempt counts per action on this device, not per operation (the core keeps one receipt per
+    action and attempt and answers 409 to a different one)."""
+    def new_operation(s, name):
+        s.opdir = os.path.join(s.tmp, name)
+        os.makedirs(s.opdir)
+    with scenario() as s:
+        s.http.corrupt.add(hashlib.sha256(FILES['a/one.deb']).hexdigest())
+        s.go()
+        check('attempt: the first receipt of an action is attempt 1', s.rc == 1 and s.receipt['attempt'] == 1)
+        s.http.corrupt.clear()
+        new_operation(s, 'op-typed-again')
+        s.go()
+        sent = [body['attempt'] for _, body, _ in s.http.posts]
+        check('attempt: the same command typed again (a new operation) sends attempt 2, not 1 again',
+              s.rc == 0 and s.receipt['ok'] is True and sent == [1, 2] and s.receipt['posted'] is True)
+        check('attempt: both receipts are for one action', len({body['actionId'] for _, body, _ in s.http.posts}) == 1)
+        check('attempt: the record on this device holds both numbers',
+              [json.loads(line)['attempt'] for line in s.jsonl()] == [1, 2])
+        (Path(s.opdir) / 'status.json').write_text(json.dumps(dict(attempt=7)))
+        s.go()
+        check('attempt: a retried operation whose own count is higher keeps its own count', s.receipt['attempt'] == 7)
+    with scenario() as s:
+        # This device lost its record; the core still holds attempts 1 and 2 of the action.
+        held = {1, 2}
+        plain = s.http.post_json
+        def door(url, payload, token=None):
+            plain(url, payload, token)
+            if payload['attempt'] in held:
+                return 409, '{"ok": false, "error": "a different receipt is already stored for this actionId and attempt"}'
+            return 201, 'stored'
+        s.http.post_json = door
+        s.go()
+        sent = [body['attempt'] for _, body, _ in s.http.posts]
+        check('attempt: a number the core already holds is stepped past, one by one', sent == [1, 2, 3] and s.receipt['attempt'] == 3)
+        check('attempt: the receipt counts as posted and the operation succeeds', s.rc == 0 and s.receipt['posted'] is True
+              and 'postError' not in s.receipt)
+        check('attempt: the number the core took is the last one recorded here', json.loads(s.jsonl()[-1])['attempt'] == 3)
+    with scenario() as s:
+        plain = s.http.post_json
+        def other(url, payload, token=None):
+            plain(url, payload, token)
+            return 409, '{"ok": false, "error": "The plan revision is no longer the active one."}'
+        s.http.post_json = other
+        s.go()
+        check('attempt: another 409 is not retried and is reported as it is',
+              len(s.http.posts) == 1 and s.receipt['posted'] is False and 'no longer the active one' in s.receipt['postError'])
+    with scenario() as s:
+        plain = s.http.post_json
+        def always(url, payload, token=None):
+            plain(url, payload, token)
+            return 409, 'a different receipt is already stored for this actionId and attempt'
+        s.http.post_json = always
+        s.go()
+        check('attempt: stepping stops after %d numbers and says why' % sm.TAKEN_TRIES,
+              len(s.http.posts) == sm.TAKEN_TRIES + 1 and s.receipt['posted'] is False and '409' in s.receipt['postError'] and s.rc == 0)
+
+
 # ------------------------------------------------------------------ stage 1
 
 def stage1_checks():
@@ -836,7 +894,7 @@ def shell_checks():
 
 
 def main():
-    for group in (happy_checks, stage1_checks, stage2_checks, stage3_checks, stage4_checks, systemctl_checks, lease_checks,
+    for group in (happy_checks, attempt_checks, stage1_checks, stage2_checks, stage3_checks, stage4_checks, systemctl_checks, lease_checks,
                   stage7_checks, stage8_checks, curl_checks, helper_checks, shell_checks):
         group()
     print('\n%d checks, %d failed' % (COUNT[0], len(FAILED)))

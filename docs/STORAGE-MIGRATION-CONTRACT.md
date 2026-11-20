@@ -251,7 +251,11 @@ Without this, `dns-register.sh` (which allows only a pending cutover, rollback o
 }
 ```
 Cutover and rollback receipts add `cutover: {done, at, previousAddress, newAddress, rolledBack, recoveryNeeded}` and
-`placement.generationBefore/After`.  A failed attempt writes the same file with `ok:false`, the failing stage and `retryable`.  Receipts are the
+`placement.generationBefore/After`.  A failed attempt writes the same file with `ok:false`, the failing stage and `retryable`.  **`attempt` of a migrate
+receipt counts per `actionId` on the device** (one more than the highest it already recorded for that action in `receipts.jsonl`, or the operation's
+own count when that is higher), because the door keeps one receipt per `actionId` and `attempt` and answers 409 to a different body: the same migrate
+command typed again is a new operation and must not send attempt 1 a second time.  If the door still answers that 409 (the device lost its record),
+the device steps the number up and posts again.  Receipts are the
 evidence the core CLI checks; the backend stores them and never decides.  The receipt carries **both** `manifestSha` and `contentSha`; the `actionId`
 stays keyed by the storage digest.  **Binding (E5)**: every stored receipt is bound to `{device (authenticated), actionId, digest, epoch, contentSha}`;
 a door rejects a receipt whose plan/revision is not the stored one, stores the presented Bearer as `posterPresented` with `verified: false` (the
