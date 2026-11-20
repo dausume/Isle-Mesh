@@ -239,15 +239,15 @@ See [EXTENSION-GUIDE.md](EXTENSION-GUIDE.md) for:
 ## Important File Locations
 
 ### CLI Entry Point
-- `/home/dustin/Desktop/IsleMesh/isle-cli/index.js` (500+ lines)
+- `/path/to/Isle-Mesh/isle-cli/index.js` (500+ lines)
 
 ### Command Scripts
-- `/home/dustin/Desktop/IsleMesh/isle-cli/scripts/router.sh` (500 lines)
-- `/home/dustin/Desktop/IsleMesh/isle-cli/scripts/discover.sh` (480 lines)
+- `/path/to/Isle-Mesh/isle-cli/scripts/router.sh` (500 lines)
+- `/path/to/Isle-Mesh/isle-cli/scripts/discover.sh` (480 lines)
 
 ### Router Infrastructure
-- `/home/dustin/Desktop/IsleMesh/openwrt-router/scripts/` - Router scripts
-- `/home/dustin/Desktop/IsleMesh/openwrt-router/tests/` - Test scripts
+- `/path/to/Isle-Mesh/openwrt-router/scripts/` - Router scripts
+- `/path/to/Isle-Mesh/openwrt-router/tests/` - Test scripts
 
 ### Configuration
 - `~/.isle-config.yml` - CLI configuration
@@ -294,4 +294,4 @@ All documentation created: **November 1, 2024**
 **Version**: 1.0
 **Created**: November 1, 2024
 **Author**: Exploration by Claude Code
-**Location**: `/home/dustin/Desktop/IsleMesh/isle-cli/`
+**Location**: `/path/to/Isle-Mesh/isle-cli/`

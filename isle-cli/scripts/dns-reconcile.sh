@@ -11,7 +11,7 @@
 set -u
 API="https://api.polari.isle"
 CURL="curl -skf --max-time 8"
-HOSTN=$(hostname | sed "s/dustin-etts-mesh-core/isle-core/")
+HOSTN=$(python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"/names.py current-device 2>/dev/null) || HOSTN=$(hostname)
 KEY=/etc/isle-mesh/router/ssh/isle_router_key
 SSH_OPTS="-i $KEY -o ConnectTimeout=8 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
 

@@ -76,7 +76,7 @@ for p in d["ports"]:
     print("  :%-6s %s" % (p["port"], p["container"]))'
         ;;
     report)
-        HOST=$(hostname | sed "s/dustin-etts-mesh-core/isle-core/")
+        HOST=$(python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"/names.py current-device 2>/dev/null) || HOST=$(hostname)
         RPT=$(mktemp)
         printf '{"device":"%s","facts":{"machine_name":"%s"},"net":%s}' \
             "$HOST" "$HOST" "$(collect)" > "$RPT"

@@ -35,15 +35,8 @@ require_member(){
 
 next_name(){
     local device catalog
-    # Prefer an explicitly configured Isle identity, then the joined agent's
-    # saved name. Preserve the existing core alias convention as a fallback.
-    if [ -s /etc/isle-mesh/device-name ]; then
-        device=$(cat /etc/isle-mesh/device-name)
-    elif [ -s /etc/isle-mesh/agent/remote/hostname ]; then
-        device=$(cat /etc/isle-mesh/agent/remote/hostname)
-    else
-        device=$(hostname -s | sed 's/^dustin-etts-mesh-core$/isle-core/')
-    fi
+    # The saved Isle name of this device, then the joined agent's saved name, then the OS name (names.py).
+    device=$(python3 "$SCRIPT_DIR/names.py" current-device) || return 1
     catalog=$(api_get /api/islemesh/catalog) || return 1
     printf '%s' "$catalog" | python3 "$SCRIPT_DIR/names.py" instance --app polari --device "$device"
 }

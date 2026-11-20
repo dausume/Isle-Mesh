@@ -30,7 +30,7 @@ The Isle Join Protocol enables automatic discovery and dual-domain access for de
 
 ### Router-Side: Join Protocol Service
 
-**Location:** `/home/dustin/Desktop/IsleMesh/openwrt-router/scripts/router-setup/configure-join-protocol.sh`
+**Location:** `/path/to/Isle-Mesh/openwrt-router/scripts/router-setup/configure-join-protocol.sh`
 
 **What it does:**
 - Runs on the OpenWRT router as a procd service
@@ -42,7 +42,7 @@ The Isle Join Protocol enables automatic discovery and dual-domain access for de
 
 **Installation:**
 ```bash
-cd /home/dustin/Desktop/IsleMesh/openwrt-router/scripts/router-setup
+cd /path/to/Isle-Mesh/openwrt-router/scripts/router-setup
 sudo ./configure-join-protocol.sh --isle-name my-isle --vlan-id 10
 ```
 
@@ -63,7 +63,7 @@ ssh root@192.168.1.1 'cat /etc/dnsmasq.d/isle-vlan-domains.conf'
 
 ### Agent-Side: Dual-Domain Configuration
 
-**Location:** `/home/dustin/Desktop/IsleMesh/isle-agent-mdns/scripts/configure-dual-domain.sh`
+**Location:** `/path/to/Isle-Mesh/isle-agent-mdns/scripts/configure-dual-domain.sh`
 
 **What it does:**
 - Configures nginx to respond to both `.local` and `.isle` domains
@@ -98,7 +98,7 @@ server {
 ### 1. Deploy Join Protocol to Router
 
 ```bash
-cd /home/dustin/Desktop/IsleMesh/openwrt-router/scripts/router-setup
+cd /path/to/Isle-Mesh/openwrt-router/scripts/router-setup
 
 # Deploy the service
 sudo ./configure-join-protocol.sh \
@@ -109,7 +109,7 @@ sudo ./configure-join-protocol.sh \
 ### 2. Configure Isle Agent for Dual-Domain
 
 ```bash
-cd /home/dustin/Desktop/IsleMesh/isle-agent-mdns
+cd /path/to/Isle-Mesh/isle-agent-mdns
 
 # Start the agent (if not already running)
 docker-compose up -d
@@ -124,7 +124,7 @@ docker exec isle-agent-mdns nginx -s reload
 ### 3. Verify the Join Protocol
 
 ```bash
-cd /home/dustin/Desktop/IsleMesh/openwrt-router/scripts/router-setup
+cd /path/to/Isle-Mesh/openwrt-router/scripts/router-setup
 
 # Run verification tests
 ./verify-join-protocol.sh --vlan-id 10

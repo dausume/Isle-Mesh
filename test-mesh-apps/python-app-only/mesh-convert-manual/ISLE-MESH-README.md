@@ -28,7 +28,7 @@ Check the generated `isle-mesh.yml` and `setup.yml` files to ensure they match y
 Set this as your current Isle-Mesh project for easier management:
 
 ```bash
-isle config set-project /home/dustin/Desktop/IsleMesh/test-mesh-apps/python-app-only/mesh-convert-manual
+isle config set-project /path/to/Isle-Mesh/test-mesh-apps/python-app-only/mesh-convert-manual
 ```
 
 ### 3. Update Hosts File (for local development)

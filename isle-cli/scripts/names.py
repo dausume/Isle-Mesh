@@ -61,8 +61,8 @@ def current_device():
             continue
         if not valid_label(value):raise ValueError('Invalid saved Isle device name')
         return value
-    value=socket.gethostname().lower()
-    return 'isle-core' if value == 'dustin-etts-mesh-core' else value
+    # No machine name is written into this code: a machine's OS name can change, its saved Isle name is the identity.
+    return socket.gethostname().lower()
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
