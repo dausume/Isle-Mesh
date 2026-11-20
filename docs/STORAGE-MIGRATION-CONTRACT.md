@@ -196,6 +196,8 @@ PARAM=<path>` is consumed by the overlay generator only after `storage check` pr
 1. Take the dataset lock and the shared lease; re-fetch the plan: active, digest equals the placement entry's `plan.digest`.
 2. **Precondition** (epoch arithmetic: §5): require placement `state == migrated`, `generation == G`, where `G` is the value the caller observed (a rerun whose stored `pending` matches skips to step 4, see step 3); the target's `isle-storage-sync@<dataset>.timer` installed and enabled, read from the migrate receipt's claim (`syncTimer: "receipt-claimed"`, stage 6 `syncTimerInstalled`; else refuse, "sync
    trigger not installed"); and the target's `last-committed` contentSha equal to the source `latest.json` contentSha (else "run sync first").
+   The router's own managed-names list (`isle dns managed-names list`) holds the domain: cutover reads it and does not trust that authorize
+   pushed it; a missing name is pushed once and read again, and cutover refuses when the router does not answer or still does not hold it.
    Re-verify the target serves, using `curl --resolve` to its lease IP.
 3. **Durable intent.**  CAS-write `pending: {action:"cutover", digest, from:"migrated", to:"cutover", epoch:G+1, address:<target lease IP>, previousPin, newPin, at, operation}`
    under the placement flock: the CAS expects `generation == G` and leaves `generation = G+1`, with `pending.epoch = G+1` (the post-write value, §5).  No DNS has been touched.  Pins are part of the intent (`previousPin` = the core's current hosts pin for the domain, `newPin` = none) so recovery restores both the router record and the pin.  From here `dns-reconcile`/`hosts-reconcile` write nothing

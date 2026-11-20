@@ -104,7 +104,8 @@ def t_push(tmp):
     (bindir / 'ssh').write_text('''#!/bin/bash
 args=("$@"); cmd="${args[-1]}"
 echo "ssh $cmd" >> "$FAKE_LOG"
-case "$cmd" in true) exit 0;; mv*) [ -n "${FAKE_MV_FAIL:-}" ] && exit 1
+case "$cmd" in true) exit 0;; cat*) [ -n "${FAKE_CAT_FAIL:-}" ] && exit 255
+  eval "$(echo "$cmd" | sed "s#/etc/#$FAKE_ROOT/#g")"; exit $?;; mv*) [ -n "${FAKE_MV_FAIL:-}" ] && exit 1
   eval "$(echo "$cmd" | sed "s#/etc/#$FAKE_ROOT/#g")"; exit $?;; rm*) eval "$(echo "$cmd" | sed "s#/etc/#$FAKE_ROOT/#g")"; exit 0;; esac
 exit 0
 ''')
@@ -140,6 +141,18 @@ cp "$src" "$FAKE_ROOT/${dst#/etc/}"
     r = run('push', FAKE_MV_FAIL='1')
     check('push: failed mv exits 1 and leaves the router list unchanged', r.returncode == 1 and pushed.read_text() == 'keep\n')
     check('push: usage error without "push"', run().returncode == 1)
+    pushed.write_text('apt.isle\nstore.isle\n')
+    r = run('list')
+    check('list: prints the names the router holds, and nothing else, exit 0', r.returncode == 0 and r.stdout == 'apt.isle\nstore.isle\n')
+    pushed.unlink()
+    r = run('list')
+    check('list: a router without the file is an empty list, not an error', r.returncode == 0 and r.stdout == '')
+    r = run('list', FAKE_CAT_FAIL='1')
+    check('list: a router that does not answer is exit 1 with no name printed', r.returncode == 1 and r.stdout == '')
+    pushed.write_text('keep\n')
+    listed = run('list')
+    check('list: writes nothing on the router', pushed.read_text() == 'keep\n' and ' mv ' not in (tmp / 'calls').read_text().split('ssh cat')[-1]
+          and listed.stdout == 'keep\n')
     placement.unlink()
     check('push: no placement record is an error, not an empty push', run('push').returncode == 1 and pushed.read_text() == 'keep\n')
     placement.write_text('{"datasets": {}}')
@@ -161,7 +174,7 @@ def t_cli_verb(tmp):
     check('cli: `isle dns managed-names push` reaches dns-register.sh managed-names push',
           r.returncode == 0 and r.stdout.strip() == 'dns-register managed-names push')
     r = subprocess.run(['bash', str(d / 'dns.sh'), 'help'], capture_output=True, text=True)
-    check('cli: `isle dns help` lists managed-names push', 'managed-names push' in r.stdout)
+    check('cli: `isle dns help` lists managed-names push and list', 'managed-names push' in r.stdout and 'managed-names list' in r.stdout)
 
 
 def main():

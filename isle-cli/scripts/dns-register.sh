@@ -14,6 +14,7 @@
 #   isle dns managed-names push       (core only) copy the managed-name list, derived from placement.json
 #                                     (every entry's domain, any state), to the router's /etc/isle-managed-names
 #                                     so the router's mDNS join scan skips those names
+#   isle dns managed-names list       the list the router holds now, one name per line (reads only)
 set -uo pipefail
 
 OPENWRT_IP="${OPENWRT_IP:-192.168.1.1}"; OPENWRT_USER="${OPENWRT_USER:-root}"
@@ -120,7 +121,11 @@ EOF
     rssh "i=0; while uci -q get dhcp.@domain[\$i] >/dev/null 2>&1; do n=\$(uci -q get dhcp.@domain[\$i].name); ip=\$(uci -q get dhcp.@domain[\$i].ip); case \"\$n\" in *.isle) echo \"  \$n -> \$ip\";; esac; i=\$((i+1)); done"
     ;;
   managed-names)
-    [[ "${1:-}" == push ]] || { err "usage: isle dns managed-names push"; exit 1; }
+    if [[ "${1:-}" == list ]]; then   # names only on stdout: storage_core.py reads this before a cutover
+      rssh "cat /etc/isle-managed-names 2>/dev/null || true" || { err "the router did not answer; its managed-names list is not known"; exit 1; }
+      exit 0
+    fi
+    [[ "${1:-}" == push ]] || { err "usage: isle dns managed-names push | list"; exit 1; }
     [[ -e "$PLACEMENT" ]] || { err "no placement record at $PLACEMENT (managed-names push runs on the core)"; exit 1; }
     tmp="$(mktemp)"; trap 'rm -f "$tmp"' EXIT
     python3 - "$PLACEMENT" > "$tmp" <<'PY' || { err "cannot read $PLACEMENT"; exit 1; }
@@ -137,7 +142,7 @@ PY
     ;;
   *)
     err "unknown action: $ACTION"
-    echo "Usage: isle dns register <name> <ip> | unregister <name> | list | managed-names push"
+    echo "Usage: isle dns register <name> <ip> | unregister <name> | list | managed-names push|list"
     exit 1
     ;;
 esac

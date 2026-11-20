@@ -56,6 +56,7 @@ show_help() {
     echo "                       Verify .isle domains are resolving correctly"
     echo ""
     echo -e "${CYAN}isle dns managed-names push${NC}  (core, sudo) Push the storage-managed names to the router"
+    echo -e "${CYAN}isle dns managed-names list${NC}  (core, sudo) Show the storage-managed names the router holds"
     echo "                       Names the router's mDNS scan must never map (placement.json domains)"
     echo ""
     echo -e "${CYAN}isle dns get-ip${NC}        Get router IP address for DNS configuration"

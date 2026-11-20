@@ -69,6 +69,8 @@ class FakeIo:
         self.state_dir = root / 'var'
         self.plan = make_plan()
         self.router = {DOMAIN: CORE_ADDR}
+        self.managed = {DOMAIN}      # the router's own managed-names list; None = the router does not answer
+        self.push_effective = True
         self.serve = {CORE_ADDR: {'current': CONTENT, 'ok': True}, TARGET_ADDR: {'current': CONTENT, 'ok': True}}
         self.pins = {DOMAIN: '127.0.0.1'}
         self.leases = {'pol-core': TARGET_ADDR}
@@ -136,6 +138,11 @@ class FakeIo:
         if self.push_error:
             raise ValueError(self.push_error)
         self.pushed = getattr(self, 'pushed', 0) + 1
+        if self.push_effective and self.managed is not None:
+            self.managed = self.managed | {DOMAIN}
+
+    def managed_names(self):
+        return None if self.managed is None else set(self.managed)
 
     def register_dns(self, domain, address, intent_path):
         env_op = json.loads(Path(intent_path).read_text())['operation']
@@ -390,9 +397,12 @@ def t_mark(w):
 # ------------------------------------------------------------------ cutover
 def t_cutover_happy(w):
     w.migrated()
+    w.io.managed, pushes = set(), w.io.pushed      # the router lost its list (or authorize's push never arrived)
     code = w.cutover()
     e = w.entry()
     check('cutover: exit 0, state cutover', code == 0 and e['state'] == 'cutover')
+    check('cutover: a name the router list lacked is pushed once and read again before any name moves',
+          w.io.pushed == pushes + 1 and DOMAIN in w.io.managed)
     check('cutover: epoch arithmetic G=2 -> intent 3 -> commit E=4', e['generation'] == 4)
     check('cutover: pending cleared', not e.get('pending'))
     check('cutover: router moved to the target and the pin left the block', w.io.router[DOMAIN] == TARGET_ADDR and DOMAIN not in w.io.pins)
@@ -426,11 +436,23 @@ def t_cutover_refusals(w):
     w.io.timer = False
     check('cutover: no sync timer -> "sync trigger not installed"', w.cutover() == 1 and 'sync trigger not installed' in w.io.said() and w.raw() == before)
     w.io.timer = True
+    w.io.managed = None
+    check('cutover: router does not show its managed-names list -> refused, nothing written',
+          w.cutover() == 1 and 'did not show its managed-names list' in w.io.said() and w.raw() == before)
+    w.io.managed, w.io.push_effective, pushes = set(), False, w.io.pushed
+    check('cutover: name absent from the router list and the push does not put it there -> refused, nothing written',
+          w.cutover() == 1 and 'still does not hold %s' % DOMAIN in w.io.said() and w.io.pushed == pushes + 1 and w.raw() == before)
+    w.io.push_effective, w.io.push_error = True, 'router unreachable'
+    check('cutover: name absent and the push fails -> refused with the reason, nothing written',
+          w.cutover() == 1 and 'the push failed: router unreachable' in w.io.said() and w.raw() == before)
+    w.io.push_error = None
     w.io.serve[TARGET_ADDR]['current'] = 'd' * 64
     check('cutover: stale replica -> "run sync first"', w.cutover() == 1 and 'run sync first' in w.io.said() and w.raw() == before)
     w.io.serve[TARGET_ADDR]['current'] = CONTENT
     w.io.serve[TARGET_ADDR]['ok'] = False
+    pushes = w.io.pushed
     check('cutover: target not serving samples refused', w.cutover() == 1 and w.raw() == before)
+    check('cutover: a router list that holds the name is not pushed again', w.io.pushed == pushes)
     w.io.serve[TARGET_ADDR]['ok'] = True
     w.io.leases = {}
     check('cutover: unknown target lease refused', w.cutover() == 1 and w.raw() == before)

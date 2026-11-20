@@ -9,6 +9,7 @@ accept, reconcile-address.  docs/STORAGE-MIGRATION-CONTRACT.md sections 2.1, 2.3
   router_dns(domain) -> address|None                 dig @router
   register_dns(domain, address, intent_path)         dns-register.sh with ISLE_STORAGE_INTENT=<json path>
   push_managed_names()                               dns-register.sh managed-names push (router skip list)
+  managed_names() -> set|None                        dns-register.sh managed-names list; None = the router did not answer
   https_check(domain, resolve_addr|None, paths)      paths = [(path, sha256|None)]; None = ordinary resolution
   fetch_current(domain, resolve_addr) -> contentSha|None   /.well-known/isle-storage/current via --resolve
   hosts_pin(domain, address|None) / current_pin(domain)    managed /etc/hosts block (hosts-reconcile.sh)
@@ -156,6 +157,10 @@ class RealIo:
         done = _run(['bash', str(SCRIPTS / 'dns-register.sh'), 'managed-names', 'push'], env=self.env, timeout=120)
         if done.returncode != 0:
             raise ValueError('managed-names push failed: ' + (done.stderr or done.stdout).strip()[-200:])
+
+    def managed_names(self):
+        done = _run(['bash', str(SCRIPTS / 'dns-register.sh'), 'managed-names', 'list'], env=self.env, timeout=60)
+        return set(done.stdout.split()) if done.returncode == 0 else None
 
     def https_check(self, domain, resolve_addr, paths):
         import tempfile
@@ -641,6 +646,27 @@ def _run_back_to_core(ctx, pending, kind, why, *, cutover_failed):
     return 1
 
 
+def _router_skips(ctx, domain):
+    """Cutover reads the router's own managed-names list; it does not trust that authorize pushed it.  Without the
+    name there, the router's join scan may register the name again for another device after the move.  A missing
+    name is pushed once (the same push authorize makes; it changes no name's address) and read again."""
+    io = ctx.io
+    names = io.managed_names()
+    if names is not None and domain not in names:
+        ctx.say('the router\'s managed-names list does not hold %s; pushing the list' % domain)
+        try:
+            io.push_managed_names()
+        except Exception as exc:
+            raise Refusal('the router\'s managed-names list does not hold %s and the push failed: %s; no name was moved' % (domain, exc),
+                          'checking-placement', True)
+        names = io.managed_names()
+    if names is None:
+        raise Refusal('the router did not show its managed-names list; no name was moved', 'checking-placement', True)
+    if domain not in names:
+        raise Refusal('the router\'s managed-names list still does not hold %s after a push; no name was moved; '
+                      'see: sudo isle dns managed-names list' % domain, 'checking-placement', True)
+
+
 def do_cutover(ctx):
     req, io = ctx.req, ctx.io
     G = req['generation']
@@ -679,6 +705,7 @@ def do_cutover(ctx):
             raise Refusal('the source has no published snapshot (latest.json); publish first', 'checking-placement')
         if not io.timer_installed(ctx.dataset):
             raise Refusal('sync trigger not installed: isle-storage-sync@%s.timer is not reported installed on %s' % (ctx.dataset, entry['device']), 'checking-placement')
+        _router_skips(ctx, domain)
         target_addr = io.lease_address(entry['device'])
         core_addr = io.core_address()
         if not target_addr or not core_addr:
