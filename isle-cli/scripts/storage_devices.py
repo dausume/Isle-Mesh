@@ -2,8 +2,8 @@
 """isle storage device list | isle storage partition list - read-only, for anyone.
 
 What this machine has, by identity: a device by its hardware serial, a partition by its filesystem identifier.
-Nothing is mounted, written or registered.  Roles and the declared device class come with the storage records
-and are not reported until those exist; this file never guesses them.
+Nothing is mounted, written or registered.  The declared device class and the role come from the storage records
+of this machine (storage_roles.py), which hands them in; this file never guesses them.
 """
 from datetime import datetime, timezone
 import json
@@ -17,7 +17,9 @@ COLUMNS = 'NAME,TYPE,SIZE,ROTA,TRAN,RM,HOTPLUG,RO,SERIAL,MODEL,FSTYPE,UUID,PARTU
 SYSTEM_MOUNTS = ('/', '/boot', '/boot/efi', '/usr', '/var', '/home', '[SWAP]')
 NOT_A_FILESYSTEM = ('crypto_LUKS', 'LVM2_member', 'linux_raid_member', 'swap')
 VERBS = {'device': ('list',), 'partition': ('list',)}
-LATER = {'device': ('register', 'health', 'retire'), 'partition': ('create', 'assign', 'check', 'retire')}
+LATER = {'device': ('health', 'retire'), 'partition': ('create', 'retire')}
+#: verbs of the same two words that storage_roles.py answers
+RECORD_VERBS = {'device': ('register',), 'partition': ('assign', 'check')}
 
 
 def read_tree(run=subprocess.run):
@@ -131,20 +133,20 @@ def _size(count):
 
 def table(kind, rows):
     if kind == 'device':
-        head = ('DEVICE', 'SERIAL', 'MODEL', 'SIZE', 'MEDIUM', 'BUS', 'HOTPLUG', 'SYSTEM', 'PARTITIONS')
-        body = [(r['name'], r['serial'] or '(none)', r['model'] or '-', _size(r['sizeBytes']), r['medium'], r['transport'] or '-',
+        head = ('DEVICE', 'SERIAL', 'CLASS', 'MODEL', 'SIZE', 'MEDIUM', 'BUS', 'HOTPLUG', 'SYSTEM', 'PARTITIONS')
+        body = [(r['name'], r['serial'] or '(none)', r.get('class') or '-', r['model'] or '-', _size(r['sizeBytes']), r['medium'], r['transport'] or '-',
                  'yes' if r['hotplug'] else 'no', 'yes' if r['system'] else 'no',
                  'whole device' if r['wholeDeviceFilesystem'] else str(r['partitions'])) for r in rows]
     else:
-        head = ('PARTITION', 'DEVICE', 'SIZE', 'FILESYSTEM', 'IDENTIFIER', 'STATE', 'MOUNT', 'FREE', 'SYSTEM', 'DATASETS')
-        body = [(r['name'], r['device'], _size(r['sizeBytes']), r['filesystem'] or '-', r['filesystemUuid'] or '-', r['state'],
+        head = ('PARTITION', 'DEVICE', 'SIZE', 'FILESYSTEM', 'IDENTIFIER', 'ROLE', 'STATE', 'MOUNT', 'FREE', 'SYSTEM', 'DATASETS')
+        body = [(r['name'], r['device'], _size(r['sizeBytes']), r['filesystem'] or '-', r['filesystemUuid'] or '-', r.get('role') or '-', r['state'],
                  r['mount'] or '-', _size(r['availableBytes']) if 'availableBytes' in r else '-',
                  'yes' if r['system'] else 'no', ', '.join(r['datasets']) or '-') for r in rows]
     widths = [max(len(str(line[i])) for line in [head] + body) for i in range(len(head))]
     return '\n'.join('  '.join(str(cell).ljust(widths[i]) for i, cell in enumerate(line)).rstrip() for line in [head] + body)
 
 
-def main(argv=None, *, run=subprocess.run, root=LOCAL_ROOT, usage=_usage, out=None):
+def main(argv=None, *, run=subprocess.run, root=LOCAL_ROOT, usage=_usage, out=None, records=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     say = out or print
     plain = '--table' in argv
@@ -159,9 +161,11 @@ def main(argv=None, *, run=subprocess.run, root=LOCAL_ROOT, usage=_usage, out=No
     if kind not in VERBS or len(words) != 2:
         return refuse('Usage: isle storage device list [--table] | isle storage partition list [--table]')
     if verb in LATER[kind]:
-        return refuse('isle storage %s %s is not in this CLI. It needs the storage records, which are not built yet.' % (kind, verb))
+        return refuse('isle storage %s %s is not in this CLI yet.' % (kind, verb))
+    if verb in RECORD_VERBS[kind]:
+        return refuse('isle storage %s %s is not a listing; storage_roles.py answers it.' % (kind, verb))
     if verb not in VERBS[kind]:
-        return refuse('Unknown verb: isle storage %s %s. Known: %s.' % (kind, verb, ', '.join(VERBS[kind])))
+        return refuse('Unknown verb: isle storage %s %s. Known: %s.' % (kind, verb, ', '.join(VERBS[kind] + RECORD_VERBS[kind])))
     try:
         tree = read_tree(run)
         if kind == 'device':
@@ -169,12 +173,13 @@ def main(argv=None, *, run=subprocess.run, root=LOCAL_ROOT, usage=_usage, out=No
         else:
             datasets, status = local_datasets(root)
             rows, result = partitions(tree, datasets, usage), dict(datasetsStatus=status)
+        note = records(kind, rows) if records else 'Read-only report. The class and the role were not asked for.'
     except (OSError, ValueError, KeyError, TypeError, AttributeError, subprocess.SubprocessError) as exc:
         return refuse(str(exc) or exc.__class__.__name__)
     if plain:
         say(table(kind, rows))
         return 0
-    result.update({kind + 's': rows, 'note': 'Read-only report. Roles and the declared device class are not recorded yet.'})
+    result.update({kind + 's': rows, 'note': note})
     say(json.dumps(dict(ok=True, evaluatedAt=evaluated, operation=operation, readOnly=True, result=result)))
     return 0
 

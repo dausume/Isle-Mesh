@@ -6,7 +6,9 @@
 #   publisher-side root CLIs under the publication lock, not operations: publish-manifest, gc;
 #   core evidence relay (not journaled): relay;  placement view for the backend: view-export [--post];
 #   read-only verbs for anyone: list, check, check-path, guard-domain, status, domain-entry, fence-check,
-#     placement (prints the record), device list, partition list, units check;
+#     placement (prints the record), device list, partition list|check, role list|show, units check;
+#   this machine's storage records (root, under the records' own lock; no dataset, so not journaled):
+#     device register, partition assign;
 #   units apply --dataset D: root, journaled (rewrites the dataset's systemd units on the hosting device).
 set -euo pipefail
 here="$(dirname "${BASH_SOURCE[0]}")"
@@ -34,8 +36,8 @@ case "$verb" in
             shift 2; exec python3 "$here/operations.py" run storage units-apply "$@"
         fi
         shift; exec python3 "$here/storage_units.py" "$@" ;;
-    device|partition)  # read-only for anyone: what this machine has, by serial and by filesystem identifier
-        exec python3 "$here/storage_devices.py" "$@" ;;
+    device|partition|role)  # what this machine has, by serial and by filesystem identifier, and the role of each partition
+        exec python3 "$here/storage_roles.py" "$@" ;;
     authorize-placement|accept-placement)
         echo "storage: '$verb' is now the journaled operation 'isle storage ${verb%-placement} ...'" >&2; exit 1 ;;
     *)

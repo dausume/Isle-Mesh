@@ -1,4 +1,6 @@
-"""isle storage device list | partition list: fixtures only, no real disk is read."""
+"""isle storage device list | partition list: fixtures only, no real disk is read.
+
+The class and the role the listings carry come from the storage records and are tested in test-storage-roles.py."""
 import json
 import os
 from pathlib import Path
@@ -165,7 +167,8 @@ class Main(unittest.TestCase):
 
     def test_refusals_read_nothing(self):
         for argv, text in [(('device',), 'Usage'), (('device', 'list', 'extra'), 'Usage'), (('volume', 'list'), 'Usage'),
-                           (('device', 'register'), 'not in this CLI'), (('partition', 'assign'), 'not in this CLI'),
+                           (('device', 'register'), 'not a listing'), (('partition', 'assign'), 'not a listing'),
+                           (('partition', 'check'), 'not a listing'), (('device', 'health'), 'not in this CLI'),
                            (('partition', 'create'), 'not in this CLI'), (('device', 'wipe'), 'Unknown verb')]:
             code, lines, calls = self.call(*argv)
             data = json.loads(lines[0])
@@ -186,7 +189,7 @@ class Main(unittest.TestCase):
             result = subprocess.run(['node', str(ENTRY), 'storage', 'device', 'list'], env=env, capture_output=True, text=True, timeout=20)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual([d['name'] for d in json.loads(result.stdout)['result']['devices']], ['sda', 'sdb', 'sdc', 'sdd', 'nvme0n1'])
-            result = subprocess.run(['node', str(ENTRY), 'storage', 'partition', 'assign'], env=env, capture_output=True, text=True, timeout=20)
+            result = subprocess.run(['node', str(ENTRY), 'storage', 'partition', 'create'], env=env, capture_output=True, text=True, timeout=20)
             self.assertEqual(result.returncode, 1)
             self.assertFalse(json.loads(result.stdout)['ok'])
 

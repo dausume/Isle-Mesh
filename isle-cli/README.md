@@ -392,6 +392,50 @@ DNS, starts an app, authorizes removal, or records migration completion. Both
 snapshot and destination verification remain preparatory shared operations;
 copy, mount lifecycle, app deployment and verified cutover are separate work.
 
+### Storage devices, partitions and roles (st-1)
+
+A machine's storage is described by three things. A **device** is a disk, named by its hardware serial and
+declared with a class: `fixed` (stays in the machine), `dock` or `flash` (may be away). A **partition** is a
+filesystem, named by its filesystem identifier, never by a name such as `sdc1`. A **role** says what a partition
+is for; a partition carries exactly one: `package-repo`, `distribution`, `registry`, `blob`, `git`, `assets`,
+`backup`, `scratch` or `transfer`.
+
+```
+isle storage device list --table
+sudo isle storage device register <serial> --class fixed|dock|flash
+isle storage partition list --table
+sudo isle storage partition assign <filesystem-identifier> --role <role>
+isle storage partition check --table
+isle storage role list --table
+isle storage role show <role> --table
+```
+
+Without `--table` every listing is a JSON document. The two `sudo` verbs print the command to type when they
+are run without root, after every check has passed.
+
+`partition assign` adopts a filesystem that already exists and is mounted. It writes one file, the marker
+`isle-partition.json` at the root of the partition, and one entry in this machine's record
+(`/etc/isle-mesh/storage/device-records.json`). It creates, erases, formats, mounts and moves nothing, and it
+leaves every other file on the partition alone. The marker travels with the disk, so a partition marked on one
+machine is recognised on another: `partition check` shows it as `not recorded here`, and `assign` with the same
+role records it without rewriting the marker. A link at the marker's name is never followed.
+
+`assign` refuses, and writes nothing, when: the device is not registered or reports no serial; the partition
+carries the running system; it already carries another role (taking a role away is `partition retire`, which is
+not built yet); two partitions report the same identifier; the marker names another filesystem (the filesystem
+is a block copy); a file of that name exists that is not a marker; or the filesystem is not mounted whole where
+it can be reached (only a folder of it is mounted, or another mount covers it).
+
+`partition check` compares the record with the marker on each recorded partition and exits 1 when one needs
+attention: `marker missing`, `marker differs`, `marker cannot be read`, `device not registered`,
+`on another device`, or a partition of a `fixed` device that is away. A partition of a `dock` or `flash` device
+that is away is reported and is not an error. `role show <role>` lists the partitions of one role with their
+device, free space and the datasets bound on them.
+
+These records describe one machine. They are not yet part of the core's placement record, and no verb reads a
+role to decide where data goes. Not built: `device health|retire`, `partition create|retire`.
+Tests: `python3 isle-cli/scripts/test-storage-roles.py` and `test-storage-devices.py` (fixtures only).
+
 ### Storage migration contract (stm-1)
 
 `scripts/storage_contract.py` holds the typed contract for moving a dataset onto another device's
