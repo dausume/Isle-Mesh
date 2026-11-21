@@ -251,6 +251,49 @@ class DependencyRelease(Base):
         p = run(self.root / 'absent', 'noble', ''); self.assertEqual(p.returncode, 1); self.assertNotIn('Traceback', p.stderr)
 
 
+class ForTheBuilders(Base):
+    """What the scripts that build and prove an offline medium ask, by system id."""
+    LIST = 'nodejs,docker.io | docker-ce,systemd-resolved,libgtk-3-0t64,libasound2t64,libx11-6'
+
+    def entry(self, system): return so.system_of(so.load(), system)
+
+    def test_the_newest_system_keeps_every_name_and_every_character(self):
+        self.assertEqual(so.package_names(self.entry('ubuntu-24.04'), self.LIST), self.LIST)
+
+    def test_the_older_system_gets_its_own_names_and_nothing_else_changes(self):
+        self.assertEqual(so.package_names(self.entry('ubuntu-22.04'), self.LIST),
+                         'nodejs,docker.io | docker-ce,systemd,libgtk-3-0,libasound2,libx11-6')
+        self.assertEqual(so.package_names(self.entry('ubuntu-22.04'), ' libasound2t64 systemd-resolved:amd64 '), ' libasound2 systemd:amd64 ')
+
+    def test_only_a_whole_name_is_replaced(self):
+        entry = dict(self.entry('ubuntu-22.04'), packageNames={'libasound2t64': 'libasound2', 'old': 'new', 'new': 'newer'})
+        for text in ('libasound2t64-dev', 'xlibasound2t64', 'libasound2t64.1', 'my-old', 'old+x', 'gold'):
+            self.assertEqual(so.package_names(entry, text), text)
+        self.assertEqual(so.package_names(entry, 'old,new | old'), 'new,newer | new')          # each name once, never again
+        entry['packageNames'] = {'lib': 'a', 'lib-two': 'b'}                                   # one old name begins another
+        self.assertEqual(so.package_names(entry, 'lib-two,lib,lib-two-x'), 'b,a,lib-two-x')
+
+    def test_a_system_the_record_does_not_have_is_refused_with_the_ones_it_has(self):
+        with self.assertRaises(ValueError) as caught: so.system_of(so.load(), 'ubuntu-20.04')
+        self.assertEqual(str(caught.exception), 'ubuntu-20.04 is not in the record of supported operating systems (ubuntu-24.04, ubuntu-22.04).')
+
+    def test_the_command_forms_the_builders_use(self):
+        def run(*words): return subprocess.run([sys.executable, str(SCRIPTS / 'supported_os.py')] + list(words), capture_output=True, text=True)
+        for system in so.load():
+            done = run('base-image', system['id'])
+            self.assertEqual((done.returncode, done.stdout), (0, system['baseImage'] + '\n'))
+        done = run('package-names', 'ubuntu-22.04', self.LIST)
+        self.assertEqual((done.returncode, done.stdout), (0, 'nodejs,docker.io | docker-ce,systemd,libgtk-3-0,libasound2,libx11-6\n'))
+        for words in (('base-image', 'ubuntu-20.04'), ('package-names', 'debian-12', 'a,b')):
+            done = run(*words)
+            self.assertEqual((done.returncode, done.stdout), (1, ''))
+            self.assertIn('is not in the record of supported operating systems (ubuntu-24.04, ubuntu-22.04).', done.stderr)
+        for words in (('base-image',), ('base-image', 'ubuntu-22.04', 'more'), ('package-names', 'ubuntu-22.04')):
+            done = run(*words)
+            self.assertEqual((done.returncode, done.stdout), (1, ''))
+            self.assertIn('usage: supported_os.py base-image', done.stderr)
+
+
 class DeviceReport(unittest.TestCase):
     def collect(self, answer):
         sys.modules['storage_isle'] = None            # the storage fact would read this machine's real disks

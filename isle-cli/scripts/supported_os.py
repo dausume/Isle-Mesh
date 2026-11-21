@@ -10,6 +10,11 @@
 The record is the file apt/supported-os.json of this CLI.  It is data, not code: a system is added by adding its
 entry there, after it has been proven.  `isle apt-repo publish` reads the same record to decide under which release
 name a dependency set is filed (dependency_release below).  Every verb here only reads.
+
+For the scripts that build and prove an offline medium (they name a system by its id, as in --target):
+  python3 supported_os.py base-image <system id>             the container image that system's packages are resolved in
+  python3 supported_os.py package-names <system id> <list>   a list of package names, with the names that system uses
+An id the record does not have is exit 1 with the ids it has, so no builder keeps a list of its own.
 """
 from datetime import datetime, timezone
 import json
@@ -58,6 +63,26 @@ def load(path=RECORD):
 def find(systems, **want):
     (key, value), = want.items()
     return next((s for s in systems if s[key] == value), None)
+
+
+def system_of(systems, system_id):
+    """The entry of a system id.  ValueError, naming the ids the record has, when it is not one of them."""
+    entry = find(systems, id=system_id)
+    if entry is None:
+        raise ValueError('%s is not in the record of supported operating systems (%s).' % (system_id, ', '.join(s['id'] for s in systems)))
+    return entry
+
+
+def package_names(entry, listing):
+    """A list of package names -> the same text with the names this system uses (its packageNames).
+
+    The dependency lists are written with the names of the newest system.  Only a whole name is replaced
+    (libasound2t64 is, libasound2t64-dev is not), every other character stays, and a name is replaced once (a new
+    name that is also an old name of the record is not replaced again)."""
+    names = entry['packageNames']
+    if not names: return listing
+    whole = r'(?<![a-z0-9+.-])(%s)(?![a-z0-9+.-])' % '|'.join(re.escape(old) for old in sorted(names))
+    return re.sub(whole, lambda found: names[found.group(1)], listing)
 
 
 def read_os_release(path=OS_RELEASE):
@@ -229,5 +254,13 @@ if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1] == 'dependency-release':          # for apt-repo.sh: <directory> <own release> [stated]
         try: print('%s\t%s' % dependency_release(sys.argv[2], sys.argv[4] if len(sys.argv) > 4 else '', sys.argv[3], load()))
         except (ValueError, OSError) as error: sys.exit(str(error))
+        sys.exit(0)
+    if len(sys.argv) > 1 and sys.argv[1] in ('base-image', 'package-names'):     # for the builders of an offline medium
+        if len(sys.argv) != (3 if sys.argv[1] == 'base-image' else 4):
+            sys.exit('usage: supported_os.py base-image <system id> | package-names <system id> <list>')
+        try:
+            entry = system_of(load(), sys.argv[2])
+            print(entry['baseImage'] if sys.argv[1] == 'base-image' else package_names(entry, sys.argv[3]))
+        except ValueError as error: sys.exit(str(error))
         sys.exit(0)
     sys.exit(main(Io(), sys.argv[1:]))

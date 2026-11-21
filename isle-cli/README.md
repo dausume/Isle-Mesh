@@ -512,6 +512,17 @@ system and architecture are in the record and 1 when not. Every machine sends it
 normal device report; `isle os devices` shows them from the core's device list, so a machine with an
 older CLI shows as "not reported".
 
+The scripts that build and prove an offline medium read the same record, by system id, instead of
+keeping a list of their own. A system the record does not have is refused with the ids it has:
+
+```sh
+python3 scripts/supported_os.py base-image ubuntu-22.04            # the image that system's packages are resolved in
+python3 scripts/supported_os.py package-names ubuntu-22.04 <list>  # a list of package names, with the names that system uses
+```
+
+The dependency lists are written once, with the names of the newest system; `package-names` replaces
+only whole names that the record lists for the asked system and leaves every other character as it is.
+
 The isle package repository has two kinds of index. The main index holds only `isle-*` and `polari-*`
 packages and is what a device's own apt reads. The operating system packages those need offline are
 **dependency sets**. A set is built for one release, so each release has its own index,
