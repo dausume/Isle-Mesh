@@ -251,9 +251,14 @@ run_check_mode() {
     elif [[ "$mode" == "core" ]]; then
         # Core perspective: count visible remotes
         local isle_conf
-        isle_conf=$(ssh -o BatchMode=yes -o ConnectTimeout=3 -o StrictHostKeyChecking=no \
+        # only to the router whose key is pinned on this core (router_ssh.py)
+        local router pinned
+        router=$(python3 "$SCRIPT_DIR/router_ssh.py" address 2>/dev/null) || router=""
+        pinned=$(python3 "$SCRIPT_DIR/router_ssh.py" options 2>/dev/null) || router=""
+        isle_conf=""
+        [[ -n "$router" ]] && isle_conf=$(ssh -o BatchMode=yes -o ConnectTimeout=3 $pinned \
             -i /etc/isle-mesh/router/ssh/isle_router_key \
-            "root@192.168.1.1" "cat /etc/dnsmasq.d/isle-vlan-domains.conf 2>/dev/null" 2>/dev/null || echo "")
+            "root@$router" "cat /etc/dnsmasq.d/isle-vlan-domains.conf 2>/dev/null" 2>/dev/null || echo "")
 
         if [[ -n "$isle_conf" ]]; then
             local remote_count

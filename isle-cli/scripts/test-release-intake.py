@@ -467,6 +467,7 @@ def the_real_io_reads_no_credential_and_asks_only_over_verified_tls():
             argv = calls[0]
             assert argv[0] == 'curl' and argv[-1] == 'https://%s/packet/debs/a%%20b.deb' % NAME1 and argv[argv.index('--resolve') + 1] == NAME1 + ':443:10.10.0.11'
             assert argv[argv.index('--cacert') + 1] == '/etc/isle-mesh/ca/isle-root.crt' and argv[argv.index('--proto') + 1] == '=https'
+            assert argv[argv.index('--capath') + 1] == '/nonexistent'             # and no certificate of the system beside it
             assert argv[argv.index('--max-redirs') + 1] == '0' and argv[argv.index('--max-filesize') + 1] == '5'
             assert not {'-k', '--insecure', '-L', '--location'} & set(argv)
             calls.clear()

@@ -634,10 +634,13 @@ cmd_up() {
 
         # Wait for router to become reachable
         log_info "Waiting for router to boot..."
-        local attempts=0
-        while [[ $attempts -lt 30 ]]; do
-            if ping -c 1 -W 1 192.168.1.1 &>/dev/null; then
-                log_success "Router is reachable at 192.168.1.1"
+        local attempts=0 management
+        # the address this machine's record names for the router (host_network.py), not one written here
+        management=$(python3 "$(dirname "${BASH_SOURCE[0]}")/router_ssh.py" address 2>/dev/null) || management=
+        [[ -n "$management" ]] || log_warning "The router's address cannot be read from this machine's record, so whether it answers is not checked."
+        while [[ -n "$management" && $attempts -lt 30 ]]; do
+            if ping -c 1 -W 1 "$management" &>/dev/null; then
+                log_success "Router is reachable at $management"
                 break
             fi
             attempts=$((attempts+1))
@@ -1343,6 +1346,11 @@ cmd_help() {
     echo -e "                           - Firewall and DHCP status"
     echo -e "                           - Queries router via SSH if available"
     echo ""
+    echo -e "  ${CYAN}key-status${NC}              The router key pinned on this machine, and whether the router shows it now"
+    echo -e "  ${CYAN}trust-key${NC} <address> <public-key-file> <SHA256:fingerprint>"
+    echo -e "                           Pin the router's key (read on its own console). Isle commands connect"
+    echo -e "                           only to the router that shows the pinned key"
+    echo ""
     echo -e "  ${CYAN}security${NC}                Verify network isolation security"
     echo -e "                           - Checks ISP network isolation"
     echo -e "                           - Verifies no real MAC addresses visible"
@@ -1459,6 +1467,8 @@ cmd_help() {
 case "$SUBCOMMAND" in
     trust-key)
         exec python3 "$(dirname "${BASH_SOURCE[0]}")/router_trust.py" "$@" ;;
+    key-status)
+        exec python3 "$(dirname "${BASH_SOURCE[0]}")/router_ssh.py" status ;;
     init)
         cmd_init "$@"
         ;;

@@ -62,10 +62,12 @@ record_event() {  # KIND DETAIL
     printf 'kind=%s\nwhen=%s\ndetail=%s\n' "$1" "$(date -Iseconds)" "$2" > "$FLAG"
 }
 
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/tls.sh"
+
 core_alive() {
     # the core serves apt.isle + polari.isle; either answering = alive
-    curl -skf --max-time 6 -o /dev/null https://apt.isle/ 2>/dev/null && return 0
-    curl -skf --max-time 6 -o /dev/null https://polari.isle/ 2>/dev/null && return 0
+    isle_curl -sf --max-time 6 -o /dev/null https://apt.isle/ 2>/dev/null && return 0
+    isle_curl -sf --max-time 6 -o /dev/null https://polari.isle/ 2>/dev/null && return 0
     getent hosts polari.isle >/dev/null 2>&1 && return 0
     return 1
 }

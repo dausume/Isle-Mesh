@@ -43,7 +43,7 @@ KEYID="Isle Mesh Apt <apt@isle>"
 KEYRING_NAME=isle-archive-keyring.gpg
 URL=https://apt.isle
 CA=/etc/isle-mesh/ca/isle-root.crt
-CURL="curl -sf --max-time 8 --cacert $CA"
+CURL="curl -sf --max-time 8 --cacert $CA --capath /nonexistent"
 SOURCE_LIST=/etc/apt/sources.list.d/00-isle-mesh.list
 PIN_SRC="$SCRIPT_DIR/../apt/isle-mesh.pref"
 PIN_DST=/etc/apt/preferences.d/isle-mesh.pref
@@ -340,7 +340,8 @@ PYPACKAGES
    Everything here is installable two ways:</p>
 <h2>Join this isle (new device)</h2>
 <pre>curl -ko isle-bootstrap.sh https://apt.isle/isle-bootstrap.sh
-# VERIFY its sha256 against the core's printout, then:
+# first-trust: this device trusts nothing yet. Go on only when the next line says OK:
+echo '&lt;sha256 from the core&gt;  isle-bootstrap.sh' | sha256sum --check
 sudo bash isle-bootstrap.sh --fingerprint '&lt;from the core&gt;'</pre>
 <p>The CA fingerprint is the trust anchor — always compare it.
    This core's CA (<a href="isle-root.crt">isle-root.crt</a>)

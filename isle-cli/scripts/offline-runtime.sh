@@ -92,7 +92,7 @@ isle_prepare_offline_app_image() {
         isle_pinned_image_present "$ref" && return 0
         # No redirects or fallback hosts: validate the Isle root and requested
         # registry name before allowing Docker to obtain the exact digest.
-        curl -fsS --cacert /etc/isle-mesh/ca/isle-root.crt --max-time 10 \
+        curl -fsS --cacert /etc/isle-mesh/ca/isle-root.crt --capath /nonexistent --max-time 10 \
             "$origin/v2/" >/dev/null || {
                 echo "offline Isle supply: trusted registry access failed; no internet fallback" >&2
                 return 1

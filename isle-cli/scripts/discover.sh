@@ -42,12 +42,14 @@ print_warning() {
     echo -e "  ${YELLOW}⚠${NC} $1"
 }
 
-# Function to check if a URL is accessible
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/tls.sh"
+
+# Whether a URL answers. An HTTPS answer counts only with a certificate this machine trusts (lib/tls.sh).
 check_url() {
     local url=$1
     local timeout=${2:-2}
 
-    if curl -k -s -o /dev/null -w "%{http_code}" --connect-timeout "$timeout" "$url" | grep -qE "^(200|301|302|401|403)$"; then
+    if isle_curl_site -s -o /dev/null -w "%{http_code}" --connect-timeout "$timeout" "$url" | grep -qE "^(200|301|302|401|403)$"; then
         return 0
     else
         return 1
@@ -327,7 +329,7 @@ test_discovered_urls() {
         if check_url "$url" 2; then
             echo -e "${GREEN}✓ Accessible${NC}"
         else
-            echo -e "${RED}✗ Not accessible${NC}"
+            echo -e "${RED}✗ Not accessible, or its certificate is not one this machine trusts${NC}"
         fi
     done
 

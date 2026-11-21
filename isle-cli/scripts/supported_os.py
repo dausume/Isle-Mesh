@@ -128,7 +128,7 @@ class Io:
             return 'served' if os.path.isfile(os.path.join(self.repo, 'deps', name, 'InRelease')) else 'not served'
         if role != 'member': return 'not asked'
         try:      # the same question apt-install.sh asks, over TLS verified against the isle root
-            done = self.run(['curl', '--http1.1', '--silent', '--output', '/dev/null', '--max-time', '8', '--cacert', CA_FILE,
+            done = self.run(['curl', '--http1.1', '--silent', '--output', '/dev/null', '--max-time', '8', '--cacert', CA_FILE, '--capath', '/nonexistent',
                              '--write-out', '%{http_code}', 'https://apt.isle/deps/%s/InRelease' % name], capture_output=True, text=True, timeout=12)
         except (OSError, subprocess.SubprocessError): return 'not asked'
         return {'200': 'served', '404': 'not served'}.get(done.stdout.strip(), 'not asked')

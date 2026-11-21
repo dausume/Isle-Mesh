@@ -71,7 +71,7 @@ CODENAME=$( ( . /etc/os-release 2>/dev/null; n="${UBUNTU_CODENAME:-${VERSION_COD
               [[ "$n" =~ ^[a-z][a-z0-9]*$ ]] && printf '%s' "$n" ) || true )
 deps_served() { # a member asks the core, over verified TLS, whether it serves a dependency set for this release
     [ -n "$CODENAME" ] && command -v curl >/dev/null 2>&1 || return 1
-    [ "$(curl --http1.1 --silent --output /dev/null --max-time 8 --cacert "$CA" --write-out '%{http_code}' \
+    [ "$(curl --http1.1 --silent --output /dev/null --max-time 8 --cacert "$CA" --capath /nonexistent --write-out '%{http_code}' \
             "https://apt.isle/deps/$CODENAME/InRelease" 2>/dev/null || true)" = 200 ]
 }
 # <<< deps-set

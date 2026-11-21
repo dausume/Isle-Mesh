@@ -60,6 +60,7 @@ print(json.dumps({"pools": pools, "ports": dports}))
 PYEOF
 }
 
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/tls.sh"
 case "${1:-status}" in
     collect) collect ;;
     status)
@@ -82,8 +83,8 @@ for p in d["ports"]:
             "$HOST" "$HOST" "$(collect)" > "$RPT"
         # a temp FILE, not a pipe: an @- pipe drains on the first
         # (host-isolated) attempt, leaving the fallback an empty body
-        if curl -skf --max-time 8 -X POST -H "Content-Type: application/json" --data-binary @"$RPT" "$API/api/islemesh/ingest/device" >/dev/null 2>&1 \
-           || curl -skf --max-time 8 --resolve api.polari.isle:443:127.0.0.1 -X POST -H "Content-Type: application/json" --data-binary @"$RPT" "$API/api/islemesh/ingest/device" >/dev/null 2>&1; then
+        if isle_curl -sf --max-time 8 -X POST -H "Content-Type: application/json" --data-binary @"$RPT" "$API/api/islemesh/ingest/device" >/dev/null 2>&1 \
+           || isle_curl -sf --max-time 8 --resolve api.polari.isle:443:127.0.0.1 -X POST -H "Content-Type: application/json" --data-binary @"$RPT" "$API/api/islemesh/ingest/device" >/dev/null 2>&1; then
             echo -e "${G}[ OK ]${N} reported pools+ports to the isle topology"
         else
             echo -e "${Y}[WARN]${N} report skipped (api unreachable)"

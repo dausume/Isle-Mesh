@@ -45,13 +45,13 @@ fail(){ echo -e "${R}[FAIL]${N} $*"; }
 fp_of(){ openssl x509 -in "$1" -noout -fingerprint -sha256 | cut -d= -f2; }
 
 curl_trust(){ # $1 out; authenticated by CURRENT root, core-local fallbacks
-    curl --http1.1 --fail -s --max-time 6 --cacert "$CA" -o "$1" "$TRUST_URL_DEFAULT" 2>/dev/null \
-    || curl --http1.1 --fail -s --max-time 6 --cacert "$CA" --resolve apt.isle:443:127.0.0.1 -o "$1" "$TRUST_URL_DEFAULT" 2>/dev/null \
-    || curl --http1.1 --fail -s --max-time 6 --cacert "$CA" --resolve apt.isle:443:10.10.0.2 -o "$1" "$TRUST_URL_DEFAULT" 2>/dev/null
+    curl --http1.1 --fail -s --max-time 6 --cacert "$CA" --capath /nonexistent -o "$1" "$TRUST_URL_DEFAULT" 2>/dev/null \
+    || curl --http1.1 --fail -s --max-time 6 --cacert "$CA" --capath /nonexistent --resolve apt.isle:443:127.0.0.1 -o "$1" "$TRUST_URL_DEFAULT" 2>/dev/null \
+    || curl --http1.1 --fail -s --max-time 6 --cacert "$CA" --capath /nonexistent --resolve apt.isle:443:10.10.0.2 -o "$1" "$TRUST_URL_DEFAULT" 2>/dev/null
 }
 
 signed_rotation(){
-    # The transport is untrusted here; ONLY the previously installed archive
+    # first-trust: the transport is untrusted here; ONLY the previously installed archive
     # key authenticates this public certificate. Never fetch a replacement key.
     local out="$1" sig key=/usr/share/keyrings/isle-archive-keyring.gpg
     [ -s "$key" ] || return 1
@@ -151,6 +151,7 @@ fetch_root() { # first-join: no existing trust — fingerprint IS the consent
         *) shift ;;
     esac; done
     local tmp; tmp=$(mktemp)
+    # first-trust: fetched unchecked, then accepted only by its fingerprint (given, or confirmed by the person)
     curl -sk --max-time 10 -o "$tmp" "$url" || { fail "download failed: $url"; exit 1; }
     openssl x509 -in "$tmp" -noout 2>/dev/null || { fail "not a certificate: $url"; exit 1; }
     local got; got=$(fp_of "$tmp")

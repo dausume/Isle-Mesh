@@ -51,7 +51,7 @@ fi
 
 norm(){ echo "$1" | tr -d ': ' | tr '[:lower:]' '[:upper:]'; }
 
-# fetch INSECURELY (pre-trust — the CA we fetch is what gets
+# first-trust: fetch INSECURELY (pre-trust — the CA we fetch is what gets
 # fingerprint-verified); curl preferred, wget on fresh boxes
 fetch_k(){ # $1 url, $2 out
     if command -v curl >/dev/null; then
@@ -63,9 +63,12 @@ fetch_k(){ # $1 url, $2 out
 # fetch AUTHENTICATED by the isle root CA
 fetch_ca(){ # $1 url, $2 out
     if command -v curl >/dev/null; then
-        curl --http1.1 -sf --max-time 8 --cacert /etc/isle-mesh/ca/isle-root.crt -o "$2" "$1"
+        curl --http1.1 -sf --max-time 8 --cacert /etc/isle-mesh/ca/isle-root.crt --capath /nonexistent -o "$2" "$1"
     else
-        wget -q --timeout=8 --ca-certificate=/etc/isle-mesh/ca/isle-root.crt -O "$2" "$1"
+        # wget also trusts the system's certificates beside the named file, and has no option against that; the two
+        # settings make the isle's root the only thing trusted (measured, wget 1.21 built with OpenSSL)
+        SSL_CERT_DIR=/nonexistent SSL_CERT_FILE=/etc/isle-mesh/ca/isle-root.crt \
+            wget -q --timeout=8 --ca-certificate=/etc/isle-mesh/ca/isle-root.crt -O "$2" "$1"
     fi
 }
 

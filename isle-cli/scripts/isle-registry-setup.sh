@@ -73,7 +73,7 @@ registry_verify() {
         || { die "port must be 1..65535"; return 1; }
     local code attempt
     for attempt in 1 2 3; do
-        code=$(curl -sS --cacert /etc/isle-mesh/ca/isle-root.crt --max-time 5 \
+        code=$(curl -sS --cacert /etc/isle-mesh/ca/isle-root.crt --capath /nonexistent --max-time 5 \
             -o /dev/null -w '%{http_code}' "https://registry.isle:$port/v2/") || code="transport/DNS/TLS failure"
         if [ "$code" = 200 ]; then
             ok "registry.isle:$port resolves and serves the registry API with trusted TLS from this host"

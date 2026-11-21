@@ -32,6 +32,7 @@ fi
 USER_HOME="$(getent passwd "$DEPLOY_USER" | cut -d: -f6)"
 DIR="${USER_HOME:-$HOME}/polari-isle"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/tls.sh"
 G="\033[0;32m"; Y="\033[1;33m"; R="\033[0;31m"; N="\033[0m"
 ok(){ echo -e "${G}[ OK ]${N} $*"; }
 step(){ echo -e "${Y}==>${N} $*"; }
@@ -141,11 +142,11 @@ sudo systemctl enable --now polari-isle-push.timer 2>/dev/null && ok "pusher tim
 
 step "5/5 verify"
 for i in $(seq 1 25); do
-    code=$(curl -sk -o /dev/null -w "%{http_code}" --resolve api.polari.isle:443:127.0.0.1 https://api.polari.isle/api/health 2>/dev/null)
+    code=$(isle_curl -s -o /dev/null -w "%{http_code}" --resolve api.polari.isle:443:127.0.0.1 https://api.polari.isle/api/health 2>/dev/null)
     [ "$code" = 200 ] && break; sleep 12
 done
 [ "${code:-}" = 200 ] && ok "api.polari.isle/api/health -> 200" || die "backend did not become healthy (last: ${code:-none})"
-WEB=$(curl -sk -o /dev/null -w "%{http_code}" --resolve polari.isle:443:127.0.0.1 https://polari.isle/ 2>/dev/null)
+WEB=$(isle_curl -s -o /dev/null -w "%{http_code}" --resolve polari.isle:443:127.0.0.1 https://polari.isle/ 2>/dev/null)
 ok "polari.isle -> $WEB"
 bash "$DIR/push-to-polari.sh" >/dev/null 2>&1 && ok "fed the graph"
 echo

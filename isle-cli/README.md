@@ -489,6 +489,38 @@ publication is refused and the repository is unchanged. A later publication keep
 in each set that already lists it, so adding a set for one release never empties another. A package
 file that no set lists is filed under this core's own release.
 
+### Checked certificates and the pinned router key
+
+Every isle script checks who it is talking to. Two files decide how, and no script decides it for itself.
+
+**HTTPS (`scripts/lib/tls.sh`).** A shell script calls `isle_curl` in place of `curl`.
+
+| Setting | What is checked |
+|---|---|
+| nothing set | the service's certificate, against this isle's root certificate and no other (the system's certificate store where a machine has no isle root yet) |
+| `ISLE_TLS_CA=<pem file>` | the certificate, against that file and no other: the setting for a private or self-signed deployment that is not an isle |
+| `ISLE_TLS_INSECURE=1` | nothing. It is said once per run and again at every call, also when the call hides its own errors |
+
+With both set, the file wins and the ignored setting is said. `isle_curl_site` is the same for a site that is not one
+of the isle's own services (an app's own name): with nothing set it uses the system's certificate store.
+
+Some fetches happen before a machine trusts anything, so they cannot be checked by a certificate: the root
+certificate itself (accepted only by the fingerprint a person typed, or by the signature of the archive key already
+installed) and the join instructions a core prints (the file is checked by its sha256 before it is run).
+`scripts/test-unverified-calls.py` lists every one with its reason, and fails when a script adds another.
+
+**ssh to the router (`scripts/router_ssh.py`).** Every script reaches the router at the address this machine's record
+names, and only when the router shows the key that was pinned on this machine. There is no first-contact trust: a
+machine with no pinned key connects to no router, and a router that shows another key is refused.
+
+```bash
+sudo isle router key-status      # the pinned fingerprint, and whether the router shows that key now
+sudo isle router trust-key <router-address> <public-key-file> <SHA256:fingerprint>     # pin it, or pin it again
+```
+
+The public key and its fingerprint are read on the router's own console, not over the network. Pinning again
+replaces the line of that address, which is what a router that was installed again needs.
+
 ### Storage devices, partitions and roles (st-1)
 
 A machine's storage is described by three things. A **device** is a disk, named by its hardware serial and

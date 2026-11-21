@@ -2,7 +2,7 @@
 """Enroll a router public key verified out of band (for example VM console)."""
 import ipaddress,os,subprocess,sys,tempfile
 from pathlib import Path
-KNOWN=Path('/etc/isle-mesh/router/ssh/known_hosts')
+from router_ssh import KNOWN
 def main(args):
     if len(args)!=3:raise ValueError('Usage: sudo isle router trust-key <router-ip> <public-key-file> <SHA256:fingerprint>')
     if os.geteuid()!=0:raise PermissionError('Router trust enrollment requires administrator authorization')

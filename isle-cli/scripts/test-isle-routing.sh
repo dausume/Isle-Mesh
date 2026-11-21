@@ -213,7 +213,7 @@ test_domain_resolution() {
     if [[ -z "$resolved_ip" ]]; then
         log_fail "$domain does not resolve"
         log_detail "The router may not have a DNS entry for this domain yet."
-        log_detail "Check: ssh root@192.168.1.1 'cat /etc/dnsmasq.d/isle-vlan-domains.conf'"
+        log_detail "Check that this machine reaches the router: sudo isle router key-status"
         return 1
     fi
 

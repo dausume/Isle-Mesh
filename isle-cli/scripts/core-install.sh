@@ -22,6 +22,7 @@
 #      never shipped (--skip-security to defer)
 set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/tls.sh"
 G="\033[0;32m"; Y="\033[1;33m"; C="\033[0;36m"; R="\033[0;31m"; N="\033[0m"
 ok(){ echo -e "${G}[ OK ]${N} $*"; }
 warn(){ echo -e "${Y}[WARN]${N} $*"; }
@@ -141,7 +142,7 @@ rm -f "$APT_LOG"
 
 # ---- 6. verify + JOIN INFO ----
 step "6/7 verify"
-CACURL="curl -skf --max-time 8"
+CACURL="isle_curl -sf --max-time 8"
 HUB=$($CACURL -o /dev/null -w "%{http_code}" https://polari.isle/isle 2>/dev/null) || HUB=000
 [ "$HUB" = 200 ] || HUB=$($CACURL --resolve polari.isle:443:127.0.0.1 -o /dev/null -w "%{http_code}" https://polari.isle/isle 2>/dev/null) || HUB=000
 [ "$HUB" = 200 ] && ok "https://polari.isle/isle answers (the tabbed hub)" || warn "hub did not answer ($HUB)"
@@ -184,9 +185,11 @@ echo "CA fingerprint (verify on every joining device):"
 echo "  $FP"
 echo
 echo "On a fresh remote (connected to this isle's network):"
+# first-trust: the new device trusts nothing yet, so the fetch is unchecked and the file is checked by its sha256
+# from this printout before it is run (and the bootstrap itself checks the root certificate by its fingerprint)
 echo "  curl -ko isle-bootstrap.sh https://apt.isle/isle-bootstrap.sh \\"
 echo "      || curl -ko isle-bootstrap.sh --resolve apt.isle:443:$CORE_IP https://apt.isle/isle-bootstrap.sh"
-echo "  sha256sum isle-bootstrap.sh   # expect $BOOT_SHA"
+echo "  echo '$BOOT_SHA  isle-bootstrap.sh' | sha256sum --check   # go on only when it says OK"
 echo "  sudo bash isle-bootstrap.sh --fingerprint '$FP' [--core $CORE_IP] [--host]"
 echo
 echo "That one flow: CA (fingerprint-verified) → apt-on-mesh →"

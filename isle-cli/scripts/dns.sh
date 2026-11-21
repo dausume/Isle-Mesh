@@ -5,6 +5,17 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# ssh goes only to the router whose key is pinned on this machine (router_ssh.py). The pinned line is named by the
+# router's management address, so the same key is checked when the router is reached by another of its addresses.
+# When the options cannot be read, the words below make ssh refuse instead of connecting unchecked.
+router_pinned() { python3 "$SCRIPT_DIR/router_ssh.py" options 2>/dev/null || echo "-o StrictHostKeyChecking=yes -o UserKnownHostsFile=/dev/null -o GlobalKnownHostsFile=/dev/null"; }
+router_run() {   # runs on the router what arrives on stdin; says so when the router is not the pinned one
+    local key=/etc/isle-mesh/router/ssh/isle_router_key use=() status=0
+    [ -r "$key" ] && use=(-i "$key")
+    ssh ${use[@]+"${use[@]}"} $(router_pinned) "root@${ROUTER_IP}" 2>/dev/null || status=$?
+    [ "$status" -ne 255 ] || echo "The router did not answer with its pinned key. Run this command with sudo; to see the pin: sudo isle router key-status" >&2
+    return "$status"
+}
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 # Colors
@@ -191,8 +202,7 @@ case $COMMAND in
         echo ""
 
         # SSH into router and discover
-        if ! ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            root@${ROUTER_IP} << 'EOFSSH' 2>/dev/null
+        if ! router_run << 'EOFSSH'
 # Colors for router output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -265,8 +275,7 @@ EOFSSH
         echo ""
 
         # Check dnsmasq status
-        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            root@${ROUTER_IP} << 'EOFSSH' 2>/dev/null
+        router_run << 'EOFSSH'
 
 # Colors
 RED='\033[0;31m'
@@ -324,8 +333,7 @@ EOFSSH
         ROUTER_IP=$(virsh domifaddr openwrt-isle-router 2>/dev/null | grep -oP '(\d+\.){3}\d+' | head -1)
 
         # Trigger join protocol sync
-        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            root@${ROUTER_IP} << 'EOFSSH' 2>/dev/null
+        router_run << 'EOFSSH'
 
 # Kill and restart join protocol to force immediate sync
 pkill -f "join-protocol.sh" 2>/dev/null || true
@@ -360,8 +368,7 @@ EOFSSH
 
         ROUTER_IP=$(virsh domifaddr openwrt-isle-router 2>/dev/null | grep -oP '(\d+\.){3}\d+' | head -1)
 
-        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            root@${ROUTER_IP} << 'EOFSSH' 2>/dev/null
+        router_run << 'EOFSSH'
 
 if [ -f /etc/dnsmasq.d/isle-vlan-domains.conf ]; then
     echo "Domain                          IP Address"
@@ -390,8 +397,7 @@ EOFSSH
 
         ROUTER_IP=$(virsh domifaddr openwrt-isle-router 2>/dev/null | grep -oP '(\d+\.){3}\d+' | head -1)
 
-        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            root@${ROUTER_IP} << 'EOFSSH' 2>/dev/null
+        router_run << 'EOFSSH'
 
 # Colors
 GREEN='\033[0;32m'

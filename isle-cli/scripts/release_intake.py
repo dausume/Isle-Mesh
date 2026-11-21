@@ -87,7 +87,7 @@ class IntakeIO:
         except ValueError: return 'no usable address to ask at'
         argv = ['curl', '--http1.1', '--silent', '--show-error', '--fail', '--proto', '=https', '--max-redirs', '0',
                 '--connect-timeout', '8', '--max-time', str(int(max_time)), '--max-filesize', str(int(limit)),
-                '--cacert', self.ca_file, '--resolve', '%s:443:%s' % (domain, address), '--output', str(dest),
+                '--cacert', self.ca_file, '--capath', '/nonexistent', '--resolve', '%s:443:%s' % (domain, address), '--output', str(dest),
                 'https://%s/%s' % (domain, quote(path, safe='/'))]
         try: p = subprocess.run(argv, capture_output=True, text=True, timeout=max_time + 30)
         except (OSError, subprocess.SubprocessError) as exc: return str(exc)

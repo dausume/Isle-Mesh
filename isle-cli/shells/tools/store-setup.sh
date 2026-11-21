@@ -72,10 +72,30 @@ case "$VERB" in
         [ -n "$FP" ] || die "join needs --fingerprint <CA sha256> (from the core's 'isle core-install' printout)"
         [ "$TIER" = light ] && TIER=access; [ "$TIER" = host ] && TIER=member
         case "$TIER" in access|member|hardware) ;; *) die "--tier access | member | hardware" ;; esac
-        SRC="https://${CORE:-apt.isle}/isle-bootstrap.sh"; TMP=$(mktemp)
-        echo "Join — tier: $TIER. Fetching the bootstrap from your core: $SRC"
-        if [ "${DRY:-0}" = 1 ]; then echo "+ curl -fsSk $SRC -o $TMP"; else curl -fsSk "$SRC" -o "$TMP" || die "could not fetch $SRC — is this computer on the isle's network? (--core <ip> if apt.isle does not resolve yet)"; fi
-        [ -s "$TMP" ] && echo "bootstrap sha256: $(sha256sum "$TMP" | cut -d' ' -f1)   ← compare with the core's printout"
+        # What is run below as root is only ever a file fetched over a checked connection. first-trust: the isle's
+        # root certificate is fetched unchecked, compared with the fingerprint the person gave (read from the core's
+        # own printout), and only then is the bootstrap fetched, with the connection checked against that certificate.
+        SRC="https://apt.isle/isle-bootstrap.sh"; TMP=$(mktemp); ROOT=$(mktemp)
+        AT=(); [ -n "$CORE" ] && AT=(--resolve "apt.isle:443:$CORE")
+        norm(){ echo "$1" | tr -d ': ' | tr '[:lower:]' '[:upper:]'; }
+        echo "Join — tier: $TIER. Fetching the bootstrap from your core: $SRC${CORE:+ (at $CORE)}"
+        if [ "${DRY:-0}" = 1 ]; then
+            echo "+ curl -fsS --insecure ${AT[*]:-} https://apt.isle/isle-root.crt -o $ROOT   (first trust: compared with --fingerprint before anything else)"
+            echo "+ curl -fsS --cacert $ROOT --capath /nonexistent ${AT[*]:-} $SRC -o $TMP"
+        else
+            command -v openssl >/dev/null || die "openssl is needed to check the isle's root certificate"
+            curl -fsS --insecure --max-time 10 ${AT[@]+"${AT[@]}"} https://apt.isle/isle-root.crt -o "$ROOT" \
+                || die "could not fetch the isle's root certificate — is this computer on the isle's network? (--core <ip> if apt.isle does not resolve yet)"
+            GOT=$(openssl x509 -in "$ROOT" -noout -fingerprint -sha256 2>/dev/null | cut -d= -f2)
+            if [ -z "$GOT" ] || [ "$(norm "$GOT")" != "$(norm "$FP")" ]; then
+                rm -f "$ROOT" "$TMP"
+                die "the root certificate this network offers does not have the fingerprint you gave (offered: ${GOT:-not a certificate}). Nothing was fetched or run."
+            fi
+            curl -fsS --max-time 20 --cacert "$ROOT" --capath /nonexistent ${AT[@]+"${AT[@]}"} "$SRC" -o "$TMP" \
+                || { rm -f "$ROOT" "$TMP"; die "could not fetch $SRC over a connection checked against the isle's root certificate. Nothing was run."; }
+            echo "bootstrap sha256: $(sha256sum "$TMP" | cut -d' ' -f1)   (fetched over a connection checked against the root certificate you named)"
+        fi
+        rm -f "$ROOT"
         BARGS=(--fingerprint "$FP"); [ -n "$CORE" ] && BARGS+=(--core "$CORE")
         case "$TIER" in
             access) echo "access only: this computer gets the shells (launchers) and reaches the isle's apps; it hosts nothing (plain 'isle onboard')" ;;

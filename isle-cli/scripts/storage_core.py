@@ -100,14 +100,14 @@ def real_lease(root=None, device='this device'):
 
 def router_leases():
     """The isle addresses the router leased to device agents: [(host name, address)], or None when it did not answer."""
-    key = '/etc/isle-mesh/router/ssh/isle_router_key'
     try:
-        import host_network
+        import host_network, router_ssh
         router = host_network.management_gateway()          # the address this core's own record names, not one written here
     except (OSError, ValueError, AttributeError):
         return None
-    done = _run(['ssh', '-i', key, '-o', 'ConnectTimeout=8', '-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=/dev/null',
-                 'root@' + router, 'cat /tmp/dhcp.leases'], timeout=30)
+    # only to the router whose key is pinned on this core; with no pin, or another key, the router "did not answer"
+    done = _run(['ssh', '-i', str(router_ssh.KEY), '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8'] + router_ssh.options(router)
+                + ['root@' + router, 'cat /tmp/dhcp.leases'], timeout=30)
     if done.returncode != 0:
         return None
     rows = [line.split() for line in done.stdout.splitlines()]
@@ -153,7 +153,7 @@ class RealIo:
                 pass
 
     def _curl(self, url, resolve=None, to=None, timeout=20):
-        cmd = ['curl', '-sf', '--max-time', str(timeout), '--max-redirs', '0', '--cacert', CA_FILE]
+        cmd = ['curl', '-sf', '--max-time', str(timeout), '--max-redirs', '0', '--cacert', CA_FILE, '--capath', '/nonexistent']
         if resolve:
             cmd += ['--resolve', resolve]
         if to:

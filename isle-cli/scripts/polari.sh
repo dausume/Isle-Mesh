@@ -14,6 +14,7 @@
 # auto-suffixes off the isle-wide instance list (polari-2, ...).
 set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/tls.sh"
 G="\033[0;32m"; Y="\033[1;33m"; R="\033[0;31m"; C="\033[0;36m"; N="\033[0m"
 ok(){ echo -e "${G}[ OK ]${N} $*"; }
 warn(){ echo -e "${Y}[WARN]${N} $*"; }
@@ -222,12 +223,12 @@ PYRC
     step "4/4 report + verify"
     self_report
     local code
-    code=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 8 \
+    code=$(isle_curl -s -o /dev/null -w "%{http_code}" --max-time 8 \
         --resolve "$NEWDOM:443:127.0.0.1" "https://$NEWDOM/" 2>/dev/null)
     [ "$code" = 200 ] && ok "https://$NEWDOM -> 200 (references moved)" \
         || warn "https://$NEWDOM -> ${code:-none} (agent regen can lag a few seconds)"
     local oldcode
-    oldcode=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 8 \
+    oldcode=$(isle_curl -s -o /dev/null -w "%{http_code}" --max-time 8 \
         --resolve "$OLDDOM:443:127.0.0.1" "https://$OLDDOM/" 2>/dev/null)
     echo "   old URL $OLDDOM now answers: ${oldcode:-none} (404/000 = correctly retired)"
     echo
@@ -487,7 +488,7 @@ move_module(){
     [ -n "$IP2" ] && [ "$IP2" != "10.10.0.2" ] && RES_T="--resolve api.$TO.isle:443:$IP2"
     local code i
     for i in $(seq 1 8); do
-        code=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 6 $RES_T "https://api.$TO.isle/api/health" 2>/dev/null)
+        code=$(isle_curl -s -o /dev/null -w "%{http_code}" --max-time 6 $RES_T "https://api.$TO.isle/api/health" 2>/dev/null)
         [ "$code" = 200 ] && break; sleep 5
     done
     [ "$code" = 200 ] && ok "$TO healthy after gaining $MOD" \

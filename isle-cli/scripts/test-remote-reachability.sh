@@ -70,13 +70,15 @@ get_router_ip() {
     grep 'server=/.isle/' /etc/dnsmasq.d/split-dns.conf 2>/dev/null | sed 's|server=/.isle/||' || echo ""
 }
 
-get_router_mgmt_ip() {
-    echo "192.168.1.1"
+get_router_mgmt_ip() {   # the address this machine's record names (host_network.py), not one written here
+    python3 "$SCRIPT_DIR/router_ssh.py" address 2>/dev/null
 }
 
 ssh_router() {
     local ssh_key="/etc/isle-mesh/router/ssh/isle_router_key"
-    local ssh_opts="-o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes"
+    # only to the router whose key is pinned on this machine (router_ssh.py)
+    local ssh_opts
+    ssh_opts="-o ConnectTimeout=5 -o BatchMode=yes $(python3 "$SCRIPT_DIR/router_ssh.py" options 2>/dev/null)" || return 1
     local pass_file="/etc/isle-mesh/router/ssh/.cached_password"
 
     if [[ -f "$ssh_key" ]]; then
@@ -200,7 +202,7 @@ test_from_core() {
         log_fail "Cannot read router's isle domain config (SSH failed or file missing)"
         echo ""
         log_info "If the router is running, try:"
-        log_info "  ssh root@192.168.1.1 'cat /etc/dnsmasq.d/isle-vlan-domains.conf'"
+        log_info "  sudo isle router key-status"
         return
     fi
 
@@ -318,7 +320,7 @@ test_from_remote() {
     else
         log_fail "Router does not have ${our_hostname}.isle in DNS yet"
         log_info "The join-protocol scans every 30s. If avahi is publishing, wait and retry."
-        log_info "Check router: ssh root@192.168.1.1 'logread | grep isle-join-protocol | tail -5'"
+        log_info "Check that this machine reaches the router: sudo isle router key-status"
     fi
 
     # Step 4: Can we reach the router?

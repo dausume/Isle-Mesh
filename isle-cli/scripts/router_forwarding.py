@@ -2,8 +2,7 @@
 """Scoped core-management -> Isle forwarding, derived from actual router zones."""
 import ipaddress,json,re,shlex,subprocess
 from pathlib import Path
-KEY=Path('/etc/isle-mesh/router/ssh/isle_router_key')
-KNOWN=Path('/etc/isle-mesh/router/ssh/known_hosts')
+from router_ssh import KEY,KNOWN,options
 def sections(text):
     result={}
     for line in text.splitlines():
@@ -53,7 +52,7 @@ def changes(networks,firewall,gateway,subnets,source_address):
 
 def apply(plan):
     if not KEY.is_file() or not KNOWN.is_file():raise ValueError('Router key not pinned: verify its public key via VM console and use isle router trust-key')
-    ssh=['ssh','-i',str(KEY),'-o','BatchMode=yes','-o','ConnectTimeout=5','-o','StrictHostKeyChecking=yes','-o','UserKnownHostsFile='+str(KNOWN),'root@'+plan['gateway']]
+    ssh=['ssh','-i',str(KEY),'-o','BatchMode=yes','-o','ConnectTimeout=5']+options(plan['gateway'],KNOWN)+['root@'+plan['gateway']]
     def read(command):return subprocess.run(ssh+[command],check=True,capture_output=True,text=True,timeout=15).stdout
     pending=read('uci changes firewall')
     if any('firewall.isle_core_host_' not in line for line in pending.splitlines() if line):raise ValueError('Unrelated uncommitted router firewall changes; refusing to commit them')

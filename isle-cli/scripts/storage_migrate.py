@@ -94,7 +94,7 @@ class CurlHttp:
     def _argv(self, url, resolve, max_time):
         parts = check_url(url)
         argv = ['curl', '--http1.1', '--fail', '--silent', '--show-error', '--max-redirs', '0',
-                '--cacert', self.ca, '--connect-timeout', '10', '--max-time', str(int(max_time))]
+                '--cacert', self.ca, '--capath', '/nonexistent', '--connect-timeout', '10', '--max-time', str(int(max_time))]
         if resolve is not None:
             host, address = resolve
             ipaddress.ip_address(address)  # ValueError for anything that is not an address

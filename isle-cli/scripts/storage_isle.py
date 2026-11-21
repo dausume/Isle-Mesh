@@ -83,7 +83,7 @@ def read_fact(fact):
 def device_list(io):
     """The core's device list, read over TLS that is verified against the isle root.  ValueError when it cannot be read."""
     for resolve in (None, 'api.polari.isle:443:127.0.0.1'):       # the second try is the core asking itself
-        cmd = ['curl', '-sf', '--max-time', '20', '--max-redirs', '0', '--cacert', CA_FILE]
+        cmd = ['curl', '-sf', '--max-time', '20', '--max-redirs', '0', '--cacert', CA_FILE, '--capath', '/nonexistent']
         if resolve: cmd += ['--resolve', resolve]
         try: done = io.run(cmd + [API + '/api/islemesh/devices'], capture_output=True, text=True, timeout=25)
         except (OSError, subprocess.SubprocessError): continue

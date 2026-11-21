@@ -349,7 +349,10 @@ test_nginx_https_base() {
 
     log_info "Testing domain: $test_domain"
 
-    # Test HTTPS endpoint from inside agent container (with --no-check-certificate for self-signed certs)
+    # Asks only whether nginx answers inside the agent's own container. cannot-check: the wget of that container
+    # has no way to be given the isle's root certificate, so the certificate is not checked here, and that is said
+    # at every run. Whether the certificate is one a member trusts is what `isle discover` shows, from this machine.
+    log_info "The certificate is NOT checked in this one test (it runs inside the agent's container); see: isle discover"
     local response
     if response=$(docker exec isle-agent wget --no-check-certificate -q -O - "https://${test_domain}/" 2>&1); then
         if echo "$response" | grep -q "reached successfully"; then

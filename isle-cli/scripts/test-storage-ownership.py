@@ -56,6 +56,10 @@ def pending(op='op1', address=TARGET, action='cutover'):
     return {'action': action, 'digest': PLAN['digest'], 'from': 'migrated', 'to': 'cutover', 'address': address, 'operation': op}
 
 
+# what a script copied to a folder of its own asks for the router's address and its pinned key
+ROUTER_FILES = ('router_ssh.py', 'host_network.py', 'operations.py')
+
+
 class DnsRegisterFence(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -65,7 +69,7 @@ class DnsRegisterFence(unittest.TestCase):
         self.bin.mkdir()
         self.scripts = self.root / 'scripts'
         self.scripts.mkdir()
-        for name in ('storage_placement.py', 'storage_snapshot.py', 'repository_lock.py'):
+        for name in ('storage_placement.py', 'storage_snapshot.py', 'repository_lock.py') + ROUTER_FILES:
             shutil.copy(HERE / name, self.scripts / name)
         self.placement = self.root / 'placement.json'
         text = (HERE / 'dns-register.sh').read_text()
@@ -341,6 +345,8 @@ class DnsReconcile(unittest.TestCase):
         text = text.replace('/usr/local/bin/isle', str(r / 'isle'))
         self.script = r / 'dns-reconcile.sh'
         self.script.write_text(text)
+        for name in ROUTER_FILES: shutil.copy(HERE / name, r / name)
+        shutil.copytree(HERE / 'lib', r / 'lib')
         (r / 'agent-address.sh').write_text('isle_agent_address(){ echo %s; }\n' % CORE)
         fake(r, 'isle', 'echo "$@" >> "%s"' % self.log)
         fake(r, 'curl', 'echo \'%s\'' % json.dumps(self.CATALOG))

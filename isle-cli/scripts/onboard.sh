@@ -11,6 +11,7 @@
 # Idempotent, consent-first for the CA, narrates each tier.
 set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/tls.sh"
 SHELLS_DIR="/usr/share/isle-mesh/shells"
 SYS_STAGE="$SHELLS_DIR/debs"
 WANT_HOST=0
@@ -39,12 +40,12 @@ if getent hosts polari.isle >/dev/null 2>&1; then
 else
     warn "polari.isle does NOT resolve here — isle DNS not reaching this device"
 fi
-CODE=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 6 https://api.polari.isle/api/islemesh 2>/dev/null) || CODE=000
+CODE=$(isle_curl -s -o /dev/null -w "%{http_code}" --max-time 6 https://api.polari.isle/api/islemesh 2>/dev/null) || CODE=000
 # a core HOST can't reach its own agent's macvlan IP (host
 # isolation) — fall back to the local proxy, like store.sh does
 API_RESOLVE=""
 if [ "$CODE" != 200 ]; then
-    C2=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 6 --resolve api.polari.isle:443:127.0.0.1 https://api.polari.isle/api/islemesh 2>/dev/null) || C2=000
+    C2=$(isle_curl -s -o /dev/null -w "%{http_code}" --max-time 6 --resolve api.polari.isle:443:127.0.0.1 https://api.polari.isle/api/islemesh 2>/dev/null) || C2=000
     if [ "$C2" = 200 ]; then
         CODE=200; API_RESOLVE="--resolve api.polari.isle:443:127.0.0.1"
     fi
@@ -55,7 +56,7 @@ fi
 # ---- 3. register this device with polari (topology) ----
 step "3/5 register this device"
 LINKS=$(ip -br link | awk '$1!~/^(lo|veth|br-|docker|virbr|isle)/{print $1" "$2}')
-LINKS="$LINKS" python3 - "$DEVICE_NAME" <<'PYEOF' 2>/dev/null | curl -skf --max-time 8 $API_RESOLVE -X POST -H "Content-Type: application/json" --data-binary @- https://api.polari.isle/api/islemesh/ingest/device >/dev/null 2>&1 \
+LINKS="$LINKS" python3 - "$DEVICE_NAME" <<'PYEOF' 2>/dev/null | isle_curl -sf --max-time 8 $API_RESOLVE -X POST -H "Content-Type: application/json" --data-binary @- https://api.polari.isle/api/islemesh/ingest/device >/dev/null 2>&1 \
     && ok "registered in the isle topology" || warn "topology registration skipped (API unreachable)"
 import json, os, sys
 host = sys.argv[1]

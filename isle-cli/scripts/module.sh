@@ -9,7 +9,8 @@
 #   isle module list               modules the instance knows
 set -u
 API="${POLARI_ISLE_API:-https://api.polari.isle}"
-CURL="curl -skf --max-time 8"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/tls.sh"
+CURL="isle_curl -sf --max-time 8"
 INSTANCE="${POLARI_ISLE_INSTANCE:-prf-isle}"
 G="\033[0;32m"; Y="\033[1;33m"; N="\033[0m"
 ok(){ echo -e "${G}[ OK ]${N} $*"; }

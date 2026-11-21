@@ -10,15 +10,23 @@
 # self-feed pusher every 2 minutes.
 set -u
 API="https://api.polari.isle"
-CURL="curl -skf --max-time 8"
-HOSTN=$(python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"/names.py current-device 2>/dev/null) || HOSTN=$(hostname)
+HERE=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+source "$HERE/lib/tls.sh"
+CURL="isle_curl -sf --max-time 8"
+HOSTN=$(python3 "$HERE"/names.py current-device 2>/dev/null) || HOSTN=$(hostname)
 KEY=/etc/isle-mesh/router/ssh/isle_router_key
-SSH_OPTS="-i $KEY -o ConnectTimeout=8 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+# only to the router whose key is pinned on this core (router_ssh.py); with no pin, or another key, this run does nothing
+unread() { echo "dns-reconcile: the address of the router cannot be read from the record of this machine; no name was reconciled (see: sudo isle router key-status)" >&2; exit 0; }
+ROUTER=$(python3 "$HERE/router_ssh.py" address 2>/dev/null) || unread
+SSH_OPTS="-i $KEY -o ConnectTimeout=8 $(python3 "$HERE/router_ssh.py" options 2>/dev/null)" || unread
 
 CAT=$($CURL "$API/api/islemesh/catalog" 2>/dev/null) \
     || CAT=$($CURL --resolve api.polari.isle:443:127.0.0.1 "$API/api/islemesh/catalog" 2>/dev/null) \
     || exit 0
-LEASES=$(sudo -n ssh $SSH_OPTS root@192.168.1.1 "cat /tmp/dhcp.leases" 2>/dev/null) || exit 0
+LEASES=$(sudo -n ssh $SSH_OPTS "root@$ROUTER" "cat /tmp/dhcp.leases" 2>/dev/null) || {
+    # not silent: with no pinned key, or a router that shows another one, no name of a member is reconciled
+    echo "dns-reconcile: the router at $ROUTER did not answer with its pinned key; no name was reconciled (see: sudo isle router key-status)" >&2
+    exit 0; }
 
 # CAT rides the environment: a pipe would lose to the heredoc for
 # stdin (python3 - reads its SCRIPT from stdin)

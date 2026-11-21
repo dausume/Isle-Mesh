@@ -17,10 +17,14 @@
 #   isle dns managed-names list       the list the router holds now, one name per line (reads only)
 set -uo pipefail
 
-OPENWRT_IP="${OPENWRT_IP:-192.168.1.1}"; OPENWRT_USER="${OPENWRT_USER:-root}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# The router's address is the one this machine's record names (host_network.py), and ssh goes only to the router
+# whose key is pinned here (router_ssh.py). No address and no trust is written into this file.
+OPENWRT_IP="$(python3 "$SCRIPT_DIR/router_ssh.py" address)" || exit 1; OPENWRT_USER="${OPENWRT_USER:-root}"
+_PINNED="$(python3 "$SCRIPT_DIR/router_ssh.py" options)" || exit 1
 ISLE_SSH_KEY="${ISLE_SSH_KEY:-/etc/isle-mesh/router/ssh/isle_router_key}"
 _PF="/etc/isle-mesh/router/ssh/.cached_password"
-_OPTS="-o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+_OPTS="-o ConnectTimeout=10 $_PINNED"
 [[ -f "$ISLE_SSH_KEY" ]] && _OPTS="-i $ISLE_SSH_KEY $_OPTS"
 _PASS=""; [[ -f "$_PF" ]] && _PASS="$(cat "$_PF" 2>/dev/null)"; _AUTH=""
 
@@ -56,7 +60,6 @@ norm(){ local n="${1%.isle}"; printf '%s.isle' "$n"; }
 # intent JSON, ISLE_OPERATION_ID = its operation). A managed write holds placement.lock from the check through
 # uci set/commit/dnsmasq restart and re-reads the intent under it. Unmanaged names behave exactly as before.
 PLACEMENT="${ISLE_PLACEMENT:-/etc/isle-mesh/storage/placement.json}"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _fence_check(){ # $1 name $2 address ("-" never matches an intent)
   python3 "$SCRIPT_DIR/storage_placement.py" fence-check --domain "$1" --address "$2" \
       --intent "${ISLE_STORAGE_INTENT:-}" --operation "${ISLE_OPERATION_ID:-}" --placement "$PLACEMENT"
@@ -77,7 +80,7 @@ require_root(){ [[ ${EUID:-$(id -u)} -eq 0 || "${ISLE_DNS_ALLOW_NONROOT:-}" == 1
 
 ACTION="${1:-list}"; shift || true
 require_root
-_probe || { err "cannot reach OpenWRT non-interactively (router SSH key/cached password)"; exit 1; }
+_probe || { err "cannot reach the router at $OPENWRT_IP with its pinned key (see: sudo isle router key-status)"; exit 1; }
 
 case "$ACTION" in
   register)

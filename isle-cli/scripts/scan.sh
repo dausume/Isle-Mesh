@@ -70,13 +70,17 @@ command_exists() { command -v "$1" &>/dev/null; }
 # ───────────────────────────────────────────────
 # Router lease access (best effort; mirrors security.sh ssh_router)
 # ───────────────────────────────────────────────
-ssh_router() {
+ssh_router() {   # only to the router whose key is pinned on this machine (router_ssh.py); any other gets no answer
     local key="/etc/isle-mesh/router/ssh/isle_router_key"
-    local opts="-o BatchMode=yes -o ConnectTimeout=3 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+    if [[ -z "${_ROUTER_SSH_OPTS:-}" ]]; then
+        _ROUTER_ADDRESS=$(python3 "$SCRIPT_DIR/router_ssh.py" address 2>/dev/null) || return 1
+        _ROUTER_SSH_OPTS=$(python3 "$SCRIPT_DIR/router_ssh.py" options 2>/dev/null) || return 1
+    fi
+    local opts="-o BatchMode=yes -o ConnectTimeout=3 $_ROUTER_SSH_OPTS"
     if [[ -f "$key" ]]; then
-        ssh -i "$key" $opts root@192.168.1.1 "$@" 2>/dev/null
+        ssh -i "$key" $opts "root@$_ROUTER_ADDRESS" "$@" 2>/dev/null
     else
-        ssh $opts root@192.168.1.1 "$@" 2>/dev/null
+        ssh $opts "root@$_ROUTER_ADDRESS" "$@" 2>/dev/null
     fi
 }
 

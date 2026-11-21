@@ -232,10 +232,11 @@ ensure_isle_dns() {
     local changed=false
 
     # Router IP for DNS forwarding
-    # Use the management IP (192.168.1.1) because the host always has a route
+    # Use the router's management address (this machine's record, host_network.py) because the host always has a route
     # to it via br-mgmt. The isle subnet IP (10.10.0.1) is only reachable from
     # devices that have a DHCP lease on the isle network.
-    local ROUTER_ISLE_IP="${ROUTER_ISLE_IP:-192.168.1.1}"
+    local ROUTER_ISLE_IP="${ROUTER_ISLE_IP:-$(python3 "$SCRIPT_DIR/router_ssh.py" address 2>/dev/null)}"
+    [[ -n "$ROUTER_ISLE_IP" ]] || { log_error "The router's address cannot be read from this machine's record; .isle DNS forwarding is left as it is"; return 1; }
 
     # Remove any stale address=/.isle/ localhost resolution (mDNS scaffolding)
     if grep -q 'address=/.isle/' "$SPLIT_DNS" 2>/dev/null; then
