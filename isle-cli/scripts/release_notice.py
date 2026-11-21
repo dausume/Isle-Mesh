@@ -32,14 +32,16 @@ def notice(repo):
     return dict(id=digest,publishedAt=datetime.now(timezone.utc).isoformat(),packages=packages,**extras,
                 command='sudo isle update apply '+digest,
                 note='Review the package transaction before confirming. Updates run locally and preserve app data, membership and installed capability packages. Package hooks may briefly restart the local agent. Reviewed runtime images are reconciled into existing deployments while preserving their data and configuration.')
-# Runs inside prf-isle-backend: writes the notice atomically, carrying over an existing `run` key (written by `isle release run`).
+# Runs inside prf-isle-backend: writes the notice atomically, carrying over the keys other verbs wrote: `run` (`isle release run`)
+# and `intake` (the core's answers to packets its members offer, release_intake.py).
 WRITE="""import sys,os,json,tempfile
 from pathlib import Path
 p=Path(os.environ['DATABASE_PATH']).parent/'isle-release.json'
 d=json.loads(sys.stdin.read())
 try:
     old=json.loads(p.read_text())
-    if 'run' not in d and isinstance(old,dict) and 'run' in old:d['run']=old['run']
+    for k in ('run','intake'):
+        if k not in d and isinstance(old,dict) and k in old:d[k]=old[k]
 except (OSError,ValueError):pass
 f=tempfile.NamedTemporaryFile(mode='w',dir=p.parent,delete=False);f.write(json.dumps(d));f.flush();os.fsync(f.fileno());f.close();os.replace(f.name,p)
 """

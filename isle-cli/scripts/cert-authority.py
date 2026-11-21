@@ -24,6 +24,10 @@ STATE=Path('/etc/isle-mesh')
 CORE_NAMES={'polari.isle','api.polari.isle','auth.polari.isle','apt.isle',
             'trust.isle','registry.isle','certs.isle','router.isle','health.isle'}
 
+# The name under which a member offers a release packet to the core (release_offer.py PREFIX). The core reads what is
+# served there as the word of the member the name ends in, so no other device may ever hold its certificate.
+OFFER_PREFIX='release-offer-'
+
 # Storage placement (contract section 5): states in which the placement record grants the domain to its device.
 PLACEMENT_ISSUE_STATES=('authorized','migrated','cutover','hosting')
 
@@ -77,6 +81,8 @@ class Authority:
                 raise PermissionError('member credential not accepted')
             claims=self.read(self.claims);owner=claims.get(domain)
             if owner and owner!=device:raise PermissionError('service name belongs to another member')
+            if domain.startswith(OFFER_PREFIX) and domain!=OFFER_PREFIX+device+'.isle':
+                raise PermissionError('service name is kept for the release offer of the member it names')
             # A placement entry names exactly one device for a domain; recovery-needed issues nothing.
             placed=self.placed(domain)
             if placed is not None and placed.get('state') not in PLACEMENT_ISSUE_STATES:

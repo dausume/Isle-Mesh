@@ -55,6 +55,8 @@ install -m 0644 "$REPO/isle-mesh-boot.service" "$STAGE/usr/lib/systemd/system/is
 install -m 0644 "$REPO/isle-cert-authority.service" "$STAGE/usr/lib/systemd/system/"
 install -m 0644 "$REPO/isle-resource-report.service" "$REPO/isle-resource-report.timer" "$STAGE/usr/lib/systemd/system/"
 install -m 0644 "$REPO/isle-release-follow.service" "$REPO/isle-release-follow.timer" "$STAGE/usr/lib/systemd/system/"
+# The intake timer is installed but never enabled here: `isle release setting any-device` switches it on (core only).
+install -m 0644 "$REPO/isle-release-intake.service" "$REPO/isle-release-intake.timer" "$STAGE/usr/lib/systemd/system/"
 
 # ---- shell tools + icons (synced from polari-app-shell — see
 # isle-cli/shells/tools/README) staged at shells/ so
@@ -129,6 +131,8 @@ if [ "$1" = remove ]; then
     systemctl stop isle-resource-report.service >/dev/null 2>&1 || true
     systemctl disable --now isle-release-follow.timer >/dev/null 2>&1 || true
     systemctl stop isle-release-follow.service >/dev/null 2>&1 || true
+    systemctl disable --now isle-release-intake.timer >/dev/null 2>&1 || true
+    systemctl stop isle-release-intake.service >/dev/null 2>&1 || true
     SCRIPTS=/usr/share/isle-mesh/isle-cli/scripts
     # CORE CASCADE (unin-7): removing the core ends the isle for every
     # member — send the last-gasp ISLE-ENDING broadcast FIRST so member
@@ -163,7 +167,7 @@ if [ "$1" = purge ]; then
             docker run --rm -v "$v":/v:ro -v "$BK":/b alpine                 tar czf "/b/$v.tgz" -C /v . >/dev/null 2>&1                 && docker volume rm "$v" >/dev/null 2>&1                 && echo "isle-mesh-cli purge: volume $v backed up + removed"
         done
     fi
-    for unit in polari-isle-push isle-trust-update isle-host-agent isle-mesh-boot isle-watch isle-resource-report isle-release-follow isle-cert-authority; do
+    for unit in polari-isle-push isle-trust-update isle-host-agent isle-mesh-boot isle-watch isle-resource-report isle-release-follow isle-release-intake isle-cert-authority; do
         systemctl stop "$unit.timer" "$unit.service" >/dev/null 2>&1 || true
         systemctl disable "$unit.timer" "$unit.service" >/dev/null 2>&1 || true
         rm -f "/etc/systemd/system/$unit.service" "/etc/systemd/system/$unit.timer"

@@ -33,7 +33,7 @@ MODE_FILE = '/etc/isle-mesh/agent/agent.mode'
 NOTICE_READ = ("import os,sys; from pathlib import Path; "
                "p=Path(os.environ['DATABASE_PATH']).parent/'isle-release.json'; "
                "sys.stdout.write(p.read_text() if p.exists() else '{}')")
-# Read the existing notice, replace ONLY one key (`run`, `startSetting`, or `identityProvider`), write atomically (same way release_notice.py writes).
+# Read the existing notice, replace ONLY one key (`run`, `startSetting`, `identityProvider`, or `intake`), write atomically (same way release_notice.py writes).
 # It refuses when no runtime release notice exists yet: the backend serves this file to every member and
 # needs its `packages`; a file holding only `run` would turn /api/islemesh/updates into a 503 for the isle.
 NOTICE_WRITE = """import json, os, sys, tempfile
@@ -43,7 +43,7 @@ if not p.exists(): sys.exit('no runtime release notice exists on the core yet (p
 d = json.loads(p.read_text())
 if not isinstance(d, dict) or 'id' not in d or 'packages' not in d: sys.exit('the release notice on the core is not a release')
 key = sys.argv[1] if len(sys.argv) > 1 else 'run'
-if key not in ('run', 'startSetting', 'identityProvider'): sys.exit('not a key this writer may replace')
+if key not in ('run', 'startSetting', 'identityProvider', 'intake'): sys.exit('not a key this writer may replace')
 d[key] = json.load(sys.stdin)
 f = tempfile.NamedTemporaryFile(mode='w', dir=p.parent, delete=False)
 json.dump(d, f); f.flush(); os.fsync(f.fileno()); f.close(); os.replace(f.name, p)
@@ -55,17 +55,14 @@ PUBLISHED = 'published'   # update-apply releaseId meaning: the release id this 
 # The start setting: where a release run may be started. The core keeps it (START_SETTING_FILE, root-owned) and
 # enforces it; members read the core's copy in the release notice (key `startSetting`) for their wording only.
 #   core-only    the default: `isle release run` works on the core only.
-#   any-device   a member hands its packet to the core, the core re-verifies it and runs. This needs a door on the
-#                core that takes a packet from an enrolled member (large files) and a root runner behind it. No
-#                release carries that door yet, so the value is known but cannot be chosen (START_AVAILABLE).
+#   any-device   a member offers its packet (release_offer.py); the core fetches it, checks the member and the packet
+#                again, and runs it (release_intake.py). The backend takes no part.
 START_SETTING_FILE = '/etc/isle-mesh/release/start-setting.json'   # release_notice.py reads the same file
 START_SETTINGS = ('core-only', 'any-device')
-START_AVAILABLE = ('core-only',)
 START_DEFAULT = 'core-only'
 START_WORDS = {'core-only': 'a release run can be started on the core only',
                'any-device': 'a release run can be started on any device of the isle; the core checks the packet again and runs it'}
-ANY_DEVICE_MISSING = ('the core cannot take a packet from a member yet: that needs the packet intake on the core, '
-                      'which no release carries so far')
+ANY_DEVICE_MISSING = 'the core cannot take a packet from a member'
 
 class PacketError(ValueError):
     """The packet is not acceptable; nothing was changed."""
@@ -170,6 +167,12 @@ class Deps:
 
     def write_notice_setting(self, record):
         p = subprocess.run(['docker', 'exec', '-i', 'prf-isle-backend', 'python3', '-c', NOTICE_WRITE, 'startSetting'],
+                           input=json.dumps(record), text=True, capture_output=True, timeout=20)
+        if p.returncode: raise RuntimeError('cannot write the release notice: ' + p.stderr.strip())
+
+    def write_notice_intake(self, record):
+        """What the core answered to the packets its members offer (release_intake.py); members read it from the notice."""
+        p = subprocess.run(['docker', 'exec', '-i', 'prf-isle-backend', 'python3', '-c', NOTICE_WRITE, 'intake'],
                            input=json.dumps(record), text=True, capture_output=True, timeout=20)
         if p.returncode: raise RuntimeError('cannot write the release notice: ' + p.stderr.strip())
 
@@ -1116,14 +1119,14 @@ def cmd_check(deps, directory, expect=None):
 
 ROLE_WORDS = {'core': 'the core', 'remote': 'a member'}
 
-def wrong_role(deps, verb, need):
+def wrong_role(deps, verb, need, basis=None):
     """None when this device has the role verb needs, else the refusal line. Read before any root check: nobody
     should be asked for a password by a command that would then refuse on this device."""
     mode = deps.mode()
     if mode == need: return None
     here = ROLE_WORDS.get(mode, 'not set up as a core or a member (agent mode is %r)' % mode)
     if need == 'core':
-        because = start_basis(deps) if verb == 'run' and mode == 'remote' else ''
+        because = (start_basis(deps) if basis is None else basis) if verb == 'run' and mode == 'remote' else ''
         return ('REFUSED: %s on %s: %sisle release %s works on the core only; this device is %s (%s). '
                 'Run it on the core device of the isle.' % (verb, deps.device(), because, verb, deps.device(), here))
     return ('REFUSED: %s on %s: isle release %s works on a member only; this device is %s (%s). '
@@ -1135,7 +1138,7 @@ def core_start_setting(deps):
     """-> (value in force, the core's record or None). Anything but a value that can be chosen means the default."""
     record = deps.read_setting()
     value = record.get('start') if isinstance(record, dict) else None
-    return (value, record) if value in START_AVAILABLE else (START_DEFAULT, None)
+    return (value, record) if value in START_SETTINGS else (START_DEFAULT, None)
 
 def published_start_setting(deps, told=None):
     """What the core publishes to members: (value, None), or (None, why it is not known). No record = the default;
@@ -1149,15 +1152,15 @@ def published_start_setting(deps, told=None):
     if told is not None: told.append(value)
     return value, None
 
-def start_basis(deps):
-    """The opening words of a member's refusal to start a run: they follow the start setting the core publishes."""
-    value, why = published_start_setting(deps)
+def start_basis(deps, known=None):
+    """The opening words of a member's refusal to start a run: they follow the start setting the core publishes.
+    With any-device a member does not refuse: cmd_run offers the packet to the core (release_offer.cmd_submit)."""
+    value, why = known or published_start_setting(deps)
     if value is None: return 'the start setting of this isle is not known here (%s), and until it is, ' % why
-    if value == 'any-device': return ('the start setting of this isle is any-device, but this CLI release cannot hand a packet '
-                                      'to the core, so here ')
     return 'the start setting of this isle is %s, so ' % value
 
 def cmd_setting(deps, value=None):
+    import release_intake          # the any-device half; no step has run when a verb starts
     device, mode = deps.device(), deps.mode()
     if value is None:
         if mode == 'core':
@@ -1171,19 +1174,22 @@ def cmd_setting(deps, value=None):
             else: deps.say('Start setting of this isle: %s (the default; the core publishes no setting)' % now)
         else:
             deps.say('This device is not set up as a core or a member (agent mode is %r); it has no start setting.' % mode); return 1
-        for name in START_SETTINGS:
-            deps.say('  %-11s %s%s' % (name, START_WORDS[name], '' if name in START_AVAILABLE else '. Not available yet: ' + ANY_DEVICE_MISSING))
+        for name in START_SETTINGS: deps.say('  %-11s %s' % (name, START_WORDS[name]))
+        deps.say('  ' + release_intake.COST)
         deps.say('It is changed on the core only: sudo isle release setting <%s>' % '|'.join(START_SETTINGS))
         return 0
     why = wrong_role(deps, 'setting', 'core')
     if why: deps.say(why); return 1
-    if value not in START_AVAILABLE:
-        deps.say('REFUSED: setting on %s: %s cannot be chosen yet; %s. The start setting stays %s; nothing was changed.'
-                 % (device, value, ANY_DEVICE_MISSING, core_start_setting(deps)[0])); return 1
     if not deps.is_root(): deps.say('This changes the isle. Type: sudo isle release setting %s' % value); return 1
+    if value == 'any-device':                        # what the core reads to take an offer is root-only, so it is asked as root
+        missing = release_intake.setting_problem(deps)
+        if missing:
+            deps.say('REFUSED: setting on %s: %s cannot be chosen: %s: %s. The start setting stays %s; nothing was changed.'
+                     % (device, value, ANY_DEVICE_MISSING, missing, core_start_setting(deps)[0])); return 1
     record = {'start': value, 'setAt': deps.now(), 'setOn': device}
     deps.write_setting(record)
     deps.say('Start setting of this isle: %s (%s).' % (value, START_WORDS[value]))
+    release_intake.apply_setting(deps, value)
     try: deps.write_notice_setting(record); deps.say('Published to the members in the release notice of the core.')
     except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
         deps.say('Recorded on the core, but the release notice could not be updated (%s). Members read the new value after the next publication; until then they are told the default, %s.' % (exc, START_DEFAULT))
@@ -1304,11 +1310,19 @@ def run_publish(deps, receipt, e, argv, name, data=None):
         raise Refused(name, '%s failed (exit %d); a rerun resumes here' % (name, code), state='failed')
     receipt.end(e, 'done', 'published', data=data)
 
-def cmd_run(deps, directory, yes, expect=None, wait=None):
-    """wait: minutes to wait for members; 0 = do not wait; None = default."""
+def cmd_run(deps, directory, yes, expect=None, wait=None, submitted_by=None, held=False):
+    """wait: minutes to wait for members; 0 = do not wait; None = default. submitted_by: the member whose packet the
+    intake runner is running (release_intake.cmd_take), which then already holds the run lock (held)."""
     deps.preload()
     device = deps.device()
-    why = wrong_role(deps, 'run', 'core')
+    basis = None
+    if deps.mode() == 'remote':
+        known = published_start_setting(deps)
+        if known[0] == 'any-device':
+            import release_offer
+            return release_offer.cmd_submit(deps, directory, yes, expect, wait)
+        basis = start_basis(deps, known)
+    why = wrong_role(deps, 'run', 'core', basis)
     if why: deps.say(why); return 1
     if not deps.is_root(): deps.say('This changes the device. Type: sudo isle release run %s' % directory); return 1
     try: pk = load_packet(directory)
@@ -1317,7 +1331,22 @@ def cmd_run(deps, directory, yes, expect=None, wait=None):
     for line in summary_lines(pk.record, pk.run_id, pk.publications): deps.say(line)
     for line in star_lines(deps, pk.doc): deps.say(line)
     if not yes and not deps.confirm('Run this release now?'): deps.say('Not confirmed; nothing was changed.'); return 1
+    # One run at a time on the core: a run typed here and the intake runner (a member's packet) never overlap.
+    lock = None if held else deps.try_lock(Path(deps.runs_dir) / 'run.lock')
+    if lock is None and not held:
+        deps.say('REFUSED: run on %s: another release run is at work on this core; try again when it has finished (isle release status)' % device); return 1
+    try: names = run_core(deps, pk, device, submitted_by)
+    finally:
+        if lock: lock.close()
+    if not isinstance(names, list): return names
+    if wait == 0: return 0
+    return wait_for_members(deps, pk.run_id, names, deps.wait_minutes if wait is None else wait)
+
+def run_core(deps, pk, device, submitted_by=None):
+    """The core's part of one run, under the run lock. -> the approved members (a list), or the exit code of a refusal."""
     receipt = Receipt(deps, pk.run_id, device, pk.record)
+    if submitted_by and receipt.data.get('submittedBy') != submitted_by:
+        receipt.data['submittedBy'] = submitted_by; receipt.save()
     created = deps.read_json(receipt.dir / 'run.json')['createdAt']
     published, release_id = [], None
     try:
@@ -1412,8 +1441,7 @@ def cmd_run(deps, directory, yes, expect=None, wait=None):
     deps.say('Core %s is done (receipt %s).' % (device, receipt.dir / 'receipt.json'))
     names = approved_members(deps.read_json(receipt.dir / 'run.json')['approval'], device)
     for d in names: deps.say('%s follows on its own timer; to do it now type there: sudo isle release follow' % d)
-    if wait == 0: return 0
-    return wait_for_members(deps, pk.run_id, names, deps.wait_minutes if wait is None else wait)
+    return names
 
 def trigger_report(deps):
     try: deps.run(['systemctl', 'start', '--no-block', 'isle-resource-report.service'], timeout=30)
@@ -1523,7 +1551,8 @@ def cmd_status(deps, run_id=None):
     for rid in ids:
         r = deps.read_json(root / rid / 'receipt.json')
         if not r: deps.say('Run %s: no receipt on this device' % rid[:12]); continue
-        deps.say('Run %s on %s: %s%s' % (rid[:12], r['device'], r['state'], ' (HALTED, needs: %s)' % r.get('needs') if r.get('halted') else ''))
+        deps.say('Run %s on %s: %s%s%s' % (rid[:12], r['device'], r['state'], ' (HALTED, needs: %s)' % r.get('needs') if r.get('halted') else '',
+                                       ', packet offered by %s' % r['submittedBy'] if r.get('submittedBy') else ''))
         for s in r['steps']:
             deps.say('  %-8s %s%s%s' % (s['state'], s['summary'], ' [op %s]' % s['operationId'] if s.get('operationId') else '', ' - ' + s['detail'] if s.get('detail') else ''))
         for v in r.get('verify', []): deps.say('  verify %-7s %s %s' % (v['state'], v['url'], v.get('detail', '')))
@@ -1552,8 +1581,16 @@ HELP = """isle release - one reviewed release across the isle (slice 2)
   isle release status [run-id]                per step state and operation id; on the core also the member table
   sudo isle release approval-key              core: mint the approval key if needed, print its certificate details
   isle release setting                        where a run may be started: core-only (the default) or any-device
-  sudo isle release setting core-only         core: choose it; members read it from the core, and `isle release run` typed
-        on a member says so. any-device is refused for now: the core has no intake for a member's packet yet
+  sudo isle release setting <core-only|any-device>   core: choose it; members read it from the core.
+        core-only: `isle release run` typed on a member refuses and says so.
+        any-device: `sudo isle release run <packet-dir>` typed on a member offers the packet from that member; the core
+        fetches it, checks the member and the packet again, and runs it. Its cost: root on any paired member can then
+        release to the whole isle, and while a packet is offered every device on the isle can read its files.
+  isle release offer                          member: the packet this device offers to the core, and the core's answer
+  sudo isle release offer withdraw            member: take the offer down and remove its copy of the packet
+  isle release intake                         whether the core takes packets from members, and what it answered
+  sudo isle release intake run [--auto]       core: look at the members and take one offered packet now; --auto is what
+        isle-release-intake.timer runs (on while the setting is any-device; quiet when there is nothing to do)
 A packet is SHA256SUMS + release-run.json (docs/release-run.example.json) and may publish:
   {"kind":"runtime","manifest":"<file>"}   backend runtime images (isle update publish-runtime); every archive the manifest
                                            names must be in the packet and in SHA256SUMS; needs a debs entry too
@@ -1585,7 +1622,8 @@ def main(argv, deps=None):
         rest = argv[1:]
         if cmd in ('help', '-h', '--help'): deps.say(HELP); return 0
         spec = {'check': ((), ('--expect',)), 'run': (('--yes', '--no-wait'), ('--expect', '--wait')),
-                'follow': (('--yes', '--auto'), ()), 'status': ((), ()), 'approval-key': ((), ()), 'setting': ((), ())}
+                'follow': (('--yes', '--auto'), ()), 'status': ((), ()), 'approval-key': ((), ()), 'setting': ((), ()),
+                'intake': (('--auto',), ()), 'offer': ((), ())}
         if cmd in spec:
             pos, o = parse_args(rest, *spec[cmd])
             expect = o.get('--expect')
@@ -1602,6 +1640,12 @@ def main(argv, deps=None):
             if cmd == 'follow' and not pos: return cmd_follow(deps, '--yes' in o, '--auto' in o)
             if cmd == 'status' and len(pos) <= 1: return cmd_status(deps, pos[0] if pos else None)
             if cmd == 'approval-key' and not pos: return cmd_approval_key(deps)
+            if cmd == 'intake':
+                import release_intake
+                return release_intake.main(deps, pos + (['--auto'] if '--auto' in o else []))
+            if cmd == 'offer':
+                import release_offer
+                return release_offer.main(deps, pos)
             if cmd == 'setting' and not pos: return cmd_setting(deps)
             if cmd == 'setting' and len(pos) == 1:
                 if pos[0] not in START_SETTINGS: raise ValueError('the start setting is one of: ' + ', '.join(START_SETTINGS))
@@ -1613,4 +1657,5 @@ def main(argv, deps=None):
     deps.say(HELP); return 2
 
 if __name__ == '__main__':
-    sys.exit(main(sys.argv[1:]))
+    import release_run          # one copy of this module for release_intake and release_offer too (not __main__ beside release_run)
+    sys.exit(release_run.main(sys.argv[1:]))

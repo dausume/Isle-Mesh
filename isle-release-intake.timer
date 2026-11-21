@@ -1,0 +1,13 @@
+[Unit]
+Description=Look for a release packet a member offers to this core
+
+# Enabled by `sudo isle release setting any-device`, disabled by `sudo isle release setting core-only`.
+# The package never enables it by itself.
+[Timer]
+OnBootSec=3min
+OnUnitInactiveSec=1min
+RandomizedDelaySec=10s
+Unit=isle-release-intake.service
+
+[Install]
+WantedBy=timers.target

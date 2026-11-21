@@ -52,6 +52,10 @@ class Write(unittest.TestCase):
   with tempfile.TemporaryDirectory() as d:
    got,_=self.put(d,{'id':'new'},json.dumps({'id':'old','extra':1,'run':{'runId':'r'}}))
    self.assertEqual(got,{'id':'new','run':{'runId':'r'}})
+ def test_intake_answers_carried_over(self):
+  with tempfile.TemporaryDirectory() as d:
+   got,_=self.put(d,{'id':'new'},json.dumps({'id':'old','intake':{'answers':{'m':{'state':'done'}}}}))
+   self.assertEqual(got,{'id':'new','intake':{'answers':{'m':{'state':'done'}}}})
  def test_new_run_wins(self):
   with tempfile.TemporaryDirectory() as d:
    got,_=self.put(d,{'id':'n','run':{'runId':'b'}},json.dumps({'id':'o','run':{'runId':'a'}}))

@@ -26,6 +26,15 @@ class AuthorityTest(unittest.TestCase):
   self.authority.issue('member',self.token,'board.isle',self.csr.read_text())
   other=self.work/'other';self.authority.authorize('other',other)
   with self.assertRaises(PermissionError):self.authority.issue('other',json.loads(other.read_text())['token'],'board.isle',self.csr.read_text())
+ def test_a_release_offer_name_goes_to_the_member_it_names_only(self):
+  self.assertIn("PREFIX = '%s'"%authority.OFFER_PREFIX,Path(__file__).with_name('release_offer.py').read_text())
+  other=self.work/'other';self.authority.authorize('other',other)
+  for name in ('release-offer-member.isle','release-offer-nobody.isle','release-offer-other-x.isle'):
+   with self.assertRaisesRegex(PermissionError,'release offer'):self.authority.issue('other',json.loads(other.read_text())['token'],name,self.csr.read_text())
+   self.assertNotIn(name,self.authority.read(self.authority.claims))
+  csr=self.work/'offer.csr';self.member.request('release-offer-member.isle',csr)
+  self.assertIn('CERTIFICATE',self.authority.issue('member',self.token,'release-offer-member.isle',csr.read_text()))
+  self.assertEqual(self.authority.read(self.authority.claims)['release-offer-member.isle'],'member')
  def test_core_leaf_reserved_and_revocation(self):
   with self.assertRaises(PermissionError):self.authority.issue('member',self.token,'auth.polari.isle',self.csr.read_text())
   self.core.certs.mkdir(parents=True);(self.core.certs/'board.isle.crt').write_text('reserved')

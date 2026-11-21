@@ -213,7 +213,7 @@ for c in $(docker ps -a --format '{{.Names}}' 2>/dev/null \
     docker rm -f "$c" >/dev/null 2>&1 || true
 done
 # self-feed + trust timers stop firing the moment the mesh goes
-for t in polari-isle-push.timer isle-trust-update.timer isle-resource-report.timer isle-release-follow.timer; do
+for t in polari-isle-push.timer isle-trust-update.timer isle-resource-report.timer isle-release-follow.timer isle-release-intake.timer; do
     sudo systemctl stop "$t" 2>/dev/null || true
     sudo systemctl disable "$t" 2>/dev/null || true
 done
@@ -390,7 +390,7 @@ if [ "$PURGE" = true ]; then
     echo -e "${BLUE}  → removed DNS split config${NC}"
 
     # Self-feed/trust timer unit files, .isle hosts pins, on-mesh apt source
-    for unit in polari-isle-push isle-trust-update isle-resource-report isle-release-follow; do
+    for unit in polari-isle-push isle-trust-update isle-resource-report isle-release-follow isle-release-intake; do
         sudo rm -f "/etc/systemd/system/${unit}.service" "/etc/systemd/system/${unit}.timer" 2>/dev/null || true
     done
     sudo systemctl daemon-reload 2>/dev/null || true

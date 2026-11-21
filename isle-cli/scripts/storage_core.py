@@ -98,6 +98,26 @@ def real_lease(root=None, device='this device'):
     return lease
 
 
+def router_leases():
+    """The isle addresses the router leased to device agents: [(host name, address)], or None when it did not answer."""
+    key = '/etc/isle-mesh/router/ssh/isle_router_key'
+    done = _run(['ssh', '-i', key, '-o', 'ConnectTimeout=8', '-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=/dev/null',
+                 'root@192.168.1.1', 'cat /tmp/dhcp.leases'], timeout=30)
+    if done.returncode != 0:
+        return None
+    rows = [line.split() for line in done.stdout.splitlines()]
+    return [(row[3].lower(), row[2]) for row in rows if len(row) >= 4 and row[1].lower().startswith('02:00:00:00')]
+
+
+def lease_of(leases, device):
+    """The address leased to the agent of `device`, or None."""
+    want = ''.join(c if c.isalnum() or c == '-' else '-' for c in device.lower())[:63]
+    for name, address in leases or ():
+        if name == want:
+            return address
+    return None
+
+
 class RealIo:
     """The production effects.  Each is a thin wrapper over a tool that already exists."""
 
@@ -195,17 +215,7 @@ class RealIo:
         return done.stdout.split()[0] if done.returncode == 0 and done.stdout.split() else None
 
     def lease_address(self, device):
-        key = '/etc/isle-mesh/router/ssh/isle_router_key'
-        done = _run(['ssh', '-i', key, '-o', 'ConnectTimeout=8', '-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=/dev/null',
-                     'root@192.168.1.1', 'cat /tmp/dhcp.leases'], timeout=30)
-        if done.returncode != 0:
-            return None
-        want = ''.join(c if c.isalnum() or c == '-' else '-' for c in device.lower())[:63]
-        for line in done.stdout.splitlines():
-            row = line.split()
-            if len(row) >= 4 and row[1].lower().startswith('02:00:00:00') and row[3].lower() == want:
-                return row[2]
-        return None
+        return lease_of(router_leases(), device)
 
     def core_address(self):
         done = _run(['bash', '-c', 'source "%s/agent-address.sh"; isle_agent_address' % SCRIPTS])

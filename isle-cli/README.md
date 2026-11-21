@@ -312,6 +312,25 @@ archive per item and `device-backup.json`.
 - Nothing is encrypted and nothing is sent anywhere.
 - `isle release run` takes one as a device step: `{"verb": "backup"}`. The run stops there if it is not complete.
 
+### Starting a release run from a member (start setting `any-device`)
+
+By default a release run is started on the core only. The core can allow members to start one:
+
+    sudo isle release setting any-device     core: allow it (prints the cost, switches the core's timer on)
+    sudo isle release setting core-only      core: the default again
+    sudo isle release run <packet-dir>       member: check the packet, offer it, wait for the core's answer
+    isle release offer                       member: what this device offers and what the core answered
+    sudo isle release offer withdraw         member: take the offer down and remove its copy
+    isle release intake                      whether the core takes packets from members, and its answers
+
+- The member serves a checked copy of the packet as the isle app `release-offer-<its paired name>`, from the agent
+  image it already runs. Nothing is pulled.
+- The core fetches only from a name the certificate authority issued to that very member, over TLS checked against
+  the isle's root, checks the packet again and runs it as if it had been typed on the core. The receipt names the
+  offering member.
+- Cost: root on any paired member can then release to the whole isle, and every device on the isle can read an
+  offered packet while it is offered.
+
 ### Shared local operations
 
 `sudo isle store install <catalog-name> --yes` and the native Install button

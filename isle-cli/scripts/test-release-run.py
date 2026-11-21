@@ -5,6 +5,28 @@ from datetime import datetime, timezone
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import release_run as rr
+import release_intake as ri
+import release_offer as ro
+
+class NoIntake(ri.IntakeIO):
+    """A core that cannot read its certificate authority or its router. Nothing here reaches a network, docker or
+    systemd. (test-release-intake.py puts a fixture isle behind the same methods.)"""
+    def members(self): return None
+    def claims(self): return None
+    def leases(self): return None
+    def lease_of(self, leases, device): return None
+    def fetch(self, domain, address, path, dest, limit, max_time=60): return 'no network in this test'
+    def timer(self, on): return False
+    def sleep(self, seconds): pass
+
+class NoOffer(ro.OfferIO):
+    """A member that is not paired and runs no agent. Nothing here reaches docker or a script."""
+    def enrolled_device(self): return None
+    def agent_image(self): return None
+    def serving(self, name): return False
+    def deploy(self, name, domain, compose_file): return 1, 'no docker in this test'
+    def undeploy(self, name): return 0, ''
+    def sleep(self, seconds): pass
 
 
 
@@ -127,6 +149,8 @@ class Fake(rr.Deps):
         self.inspect_image, self.publish_rc = IMG, 0
         self.t0 = self.clock
         self.wait_limit, self.poll_interval, self.modules_limit = 900, 15, 300
+        self.intake_io, self.offer_io = NoIntake(), NoOffer()
+        self.intake_io.dir, self.offer_io.home = Path(root) / 'intake', Path(root) / 'offer'
 
     def say(self, line=''): self.said.append(line)
     def time(self): return self.clock
@@ -144,6 +168,9 @@ class Fake(rr.Deps):
     def write_notice_setting(self, record):
         if self.notice_setting_fails: raise RuntimeError('backend container is restarting')
         self.events.append('notice-setting'); self.notice['startSetting'] = copy.deepcopy(record)
+    def write_notice_intake(self, record):
+        if getattr(self, 'notice_intake_fails', 0) > 0: self.notice_intake_fails -= 1; raise RuntimeError('backend container is restarting')
+        self.notice['intake'] = copy.deepcopy(record)
     def journal_allows(self, args): return self.allow_module
     def free_bytes(self, path): return self.free
     def read_text(self, path): return self.texts.get(str(path))
@@ -249,7 +276,7 @@ class Fake(rr.Deps):
         if url in self.missing_urls: return 404, b''
         if url.startswith('https://apt.isle/') and (url.endswith('.deb') or '/runtime/' in url): return (200 if age >= self.assets_after else 404), b''
         if url.endswith('/api/islemesh/updates'):
-            extra = {'startSetting': self.notice['startSetting']} if 'startSetting' in self.notice else {}
+            extra = {k: self.notice[k] for k in ('startSetting', 'intake') if k in self.notice}
             return 200, json.dumps({'ok': True, 'release': {'id': 'r', **extra, **({'run': self.updates_body} if self.updates_body else {})}}).encode()
         if url == 'https://board-engines.isle/capability': return 200, b'{}'
         if url == 'https://twin.board-engines.isle/health': return 200, b'{"ok": true, "x": 1}'
@@ -1423,8 +1450,15 @@ def nothing_is_imported_lazily_after_a_step_has_run():
     src = Path(rr.__file__).read_text().splitlines()
     inner = [(i, l.strip()) for i, l in enumerate(src) if _re.match(r'\s+(import|from \S+ import) ', l)]
     allowed = {'import names', 'import operations', 'import names, operations   # noqa: F401'}
-    # the only function-level imports are in Deps.device / journal_allows / preload, all reached before the first step
-    assert all(l.split('#')[0].strip() in {'import names', 'import operations', 'import names, operations'} for _, l in inner), inner
+    # the only function-level imports are in Deps.device / journal_allows / preload, all reached before the first step;
+    # release_intake and release_offer are imported where a verb starts (setting, a member's run, intake, offer), never
+    # after a step, and release_run only by the __main__ block
+    assert all(l.split('#')[0].strip() in {'import names', 'import operations', 'import names, operations', 'import release_intake',
+                                           'import release_offer', 'import release_run'} for _, l in inner), inner
+    for i, l in inner:
+        if l.startswith(('import release_intake', 'import release_offer')):
+            before = '\n'.join(src[max(0, i - 12):i])
+            assert any(mark in before for mark in ('def cmd_setting', 'def cmd_run', "if cmd == 'intake'", "if cmd == 'offer'")), (i, l)
     assert 'def preload' in '\n'.join(src)
 
 @test
@@ -1505,7 +1539,7 @@ def the_start_setting_defaults_to_core_only_and_is_changed_on_the_core_alone():
         f = Fake(t)
         assert rr.main(['setting'], f) == 0 and f.said[0] == 'Start setting of this isle: core-only (the default, never set)', f.said
         text = '\n'.join(f.said)
-        assert 'any-device' in text and 'Not available yet' in text and 'sudo isle release setting' in text, text
+        assert 'any-device' in text and 'root on any paired member can release to the whole isle' in text and 'sudo isle release setting' in text, text
         assert not f.setting_file.exists() and not f.events                       # showing it writes nothing
         f = Fake(t); f.root_user = False                                           # the right device without root: the sudo line
         assert rr.main(['setting', 'core-only'], f) == 1 and f.said == ['This changes the isle. Type: sudo isle release setting core-only']
@@ -1520,16 +1554,21 @@ def the_start_setting_defaults_to_core_only_and_is_changed_on_the_core_alone():
         assert rr.main(['setting'], f) == 0 and f.said[0] == 'Start setting of this isle: core-only (set %s on core1)' % record['setAt'], f.said
 
 @test
-def any_device_cannot_be_chosen_while_the_core_has_no_packet_intake():
+def any_device_cannot_be_chosen_while_the_core_cannot_read_what_it_needs_to_take_an_offer():
     with tmp() as t:
-        for root in (False, True):                                                 # refused before anyone is asked for a password
-            f = Fake(t); f.root_user = root
-            assert rr.main(['setting', 'any-device'], f) == 1 and len(f.said) == 1 and not f.events, f.said
-            line = f.said[0]
-            assert line.startswith('REFUSED: setting on core1: any-device cannot be chosen yet') and 'packet intake' in line, line
-            assert 'stays core-only; nothing was changed' in line and 'sudo' not in line and not f.setting_file.exists(), line
-        f = Fake(t)                                                                # a hand-written record cannot switch it on either
+        f = Fake(t); f.root_user = False                                           # what the core reads for it is root-only: sudo first
+        assert rr.main(['setting', 'any-device'], f) == 1 and f.said == ['This changes the isle. Type: sudo isle release setting any-device']
+        assert not f.events and not f.setting_file.exists()
+        f = Fake(t)
+        assert rr.main(['setting', 'any-device'], f) == 1 and len(f.said) == 1 and not f.events, f.said
+        line = f.said[0]
+        assert line.startswith('REFUSED: setting on core1: any-device cannot be chosen: the core cannot take a packet from a member: '
+                               'the member list of the certificate authority cannot be read on this core'), line
+        assert 'stays core-only; nothing was changed' in line and not f.setting_file.exists(), line
+        f = Fake(t)                                                                # the root-owned record is what the core goes by
         f.setting_file.parent.mkdir(parents=True); f.setting_file.write_text(json.dumps({'start': 'any-device'}))
+        assert rr.core_start_setting(f)[0] == 'any-device'
+        f.setting_file.write_text(json.dumps({'start': 'everywhere'}))             # a value nobody knows = the default
         assert rr.core_start_setting(f) == ('core-only', None)
         assert rr.main(['setting'], f) == 0 and f.said[0].startswith('Start setting of this isle: core-only'), f.said
         f = Fake(t)
@@ -1568,9 +1607,12 @@ def a_member_reads_the_start_setting_from_the_core_and_its_refusal_follows_it():
         assert 'sudo' not in f.said[0]
         f.said = []
         assert rr.main(['setting'], f) == 0 and f.said[0] == 'Start setting of this isle: not known on member1 (the core did not answer). The default is core-only.', f.said
-        f = member(); f.notice['startSetting'] = {'start': 'any-device'}          # a later core: this CLI still cannot submit, and says so
+        f = member(); f.notice['startSetting'] = {'start': 'any-device'}          # any-device published: the member offers, which needs root
         assert rr.main(['run', str(d)], f) == 1 and len(f.said) == 1 and not f.events, f.said
-        assert 'any-device, but this CLI release cannot hand a packet to the core, so here isle release run works on the core only' in f.said[0], f.said[0]
+        assert f.said[0] == 'This offers the packet to the core, which runs it across the isle. Type: sudo isle release run %s' % d, f.said[0]
+        f = member(root_user=True); f.notice['startSetting'] = {'start': 'any-device'}     # ...and a pairing the core can name
+        assert rr.main(['run', str(d)], f) == 1 and len(f.said) == 1 and not f.events, f.said
+        assert f.said[0].startswith('REFUSED: run on member1: the pairing of this device with the core cannot be read'), f.said[0]
         for root in (False, True):                                                 # a member cannot change it, and is not asked for a password
             f = member(); f.root_user = root
             assert rr.main(['setting', 'core-only'], f) == 1 and len(f.said) == 1 and not f.events, f.said
@@ -1592,7 +1634,9 @@ def the_notice_writer_replaces_the_start_setting_and_keeps_the_run():
         p = write(['run'], '{"runId": "y"}'); assert p.returncode == 0, p.stderr
         assert json.loads(notice.read_text())['startSetting'] == {'start': 'core-only'} and json.loads(notice.read_text())['run'] == {'runId': 'y'}
         before = notice.read_text()
-        assert write(['packages'], '[]').returncode != 0 and notice.read_text() == before      # only run and startSetting may be replaced
+        assert write(['packages'], '[]').returncode != 0 and notice.read_text() == before      # only the named keys may be replaced
+        p = write(['intake'], '{"answers": {}}'); assert p.returncode == 0, p.stderr           # the core's answers to offered packets
+        assert json.loads(notice.read_text())['intake'] == {'answers': {}} and json.loads(notice.read_text())['run'] == {'runId': 'y'}
 
 failed = [n for n, e in RESULTS if e]
 print('\n%d passed, %d failed' % (len(RESULTS) - len(failed), len(failed)))

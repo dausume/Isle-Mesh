@@ -1,0 +1,12 @@
+[Unit]
+Description=Fetch a release packet a member offers to this core and run it (start setting any-device)
+After=network-online.target docker.service
+ConditionPathExists=/etc/isle-mesh/agent/agent.mode
+
+[Service]
+Type=oneshot
+User=root
+ExecCondition=/bin/sh -c 'test "$(cat /etc/isle-mesh/agent/agent.mode)" = core'
+ExecStart=/usr/bin/python3 /usr/share/isle-mesh/isle-cli/scripts/release_run.py intake run --auto
+# No CPU/memory caps: this publishes packages and installs them on the core (isle release run).
+TimeoutStartSec=3h
