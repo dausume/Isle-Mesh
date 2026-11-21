@@ -168,7 +168,7 @@ class Main(unittest.TestCase):
     def test_refusals_read_nothing(self):
         for argv, text in [(('device',), 'Usage'), (('device', 'list', 'extra'), 'Usage'), (('volume', 'list'), 'Usage'),
                            (('device', 'register'), 'not a listing'), (('partition', 'assign'), 'not a listing'),
-                           (('partition', 'check'), 'not a listing'), (('device', 'health'), 'not in this CLI'),
+                           (('partition', 'check'), 'not a listing'), (('device', 'health'), 'not a listing'),
                            (('partition', 'create'), 'not in this CLI'), (('device', 'wipe'), 'Unknown verb')]:
             code, lines, calls = self.call(*argv)
             data = json.loads(lines[0])

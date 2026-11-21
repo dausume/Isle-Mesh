@@ -46,6 +46,7 @@ USAGE = ('Usage: isle storage device list [--table] | isle storage partition lis
          '       isle storage partition check [--table]\n'
          '       sudo isle storage partition retire <filesystem-identifier> --role <role>[,<role>...] [--record-only] [--leave-data]\n'
          '       sudo isle storage device retire <serial>\n'
+         '       sudo isle storage device health <serial> [--table]\n'
          '       isle storage role list [--table] | isle storage role show <role> [--table]\n'
          '       isle storage role list --isle [--table] | isle storage role show <role> --isle [--table]\n'
          'Roles: %s') % ('|'.join(CLASSES), ', '.join(ROLES))
@@ -262,8 +263,9 @@ def register(io, serial, device_class):
             io.say('This changes the storage records of this machine. Type: sudo isle storage device register %s --class %s' % (shlex.quote(serial), device_class)); return 1
         with locked(io):
             records = read_records(io.records)
-            records['devices'][serial] = dict({'class': device_class}, model=device['model'], sizeBytes=device['sizeBytes'],
-                                              registeredAt=io.now())
+            # a class change keeps what else is recorded for the device (its last health reading)
+            records['devices'][serial] = dict(records['devices'].get(serial) or {}, **{'class': device_class}, model=device['model'],
+                                              sizeBytes=device['sizeBytes'], registeredAt=io.now())
             atomic(Path(io.records), records)
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as exc:
         return _refuse(io, what, str(exc) or exc.__class__.__name__)
@@ -428,6 +430,9 @@ def main(argv=None, io=None):
     if words[:2] in (['partition', 'retire'], ['device', 'retire']):
         import storage_retire
         return storage_retire.main(io, argv)
+    if words[:2] == ['device', 'health']:
+        import storage_health
+        return storage_health.main(io, argv)
     if words[:1] in (['device'], ['partition']) and (len(words) < 2 or words[1] not in storage_devices.RECORD_VERBS[words[0]]):
         return storage_devices.main(argv, run=io.run, root=io.root, usage=io.usage, out=io.say, records=from_records(io))
     if len(words) == 5 and words[:2] == ['device', 'register'] and words[3] == '--class' and '--table' not in argv:

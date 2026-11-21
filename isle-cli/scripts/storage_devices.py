@@ -17,9 +17,9 @@ COLUMNS = 'NAME,TYPE,SIZE,ROTA,TRAN,RM,HOTPLUG,RO,SERIAL,MODEL,FSTYPE,UUID,PARTU
 SYSTEM_MOUNTS = ('/', '/boot', '/boot/efi', '/usr', '/var', '/home', '[SWAP]')
 NOT_A_FILESYSTEM = ('crypto_LUKS', 'LVM2_member', 'linux_raid_member', 'swap')
 VERBS = {'device': ('list',), 'partition': ('list',)}
-LATER = {'device': ('health',), 'partition': ('create',)}
+LATER = {'device': (), 'partition': ('create',)}
 #: verbs of the same two words that storage_roles.py answers
-RECORD_VERBS = {'device': ('register', 'retire'), 'partition': ('assign', 'check', 'retire')}
+RECORD_VERBS = {'device': ('register', 'retire', 'health'), 'partition': ('assign', 'check', 'retire')}
 
 
 def read_tree(run=subprocess.run):

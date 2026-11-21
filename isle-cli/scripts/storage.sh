@@ -10,6 +10,7 @@
 #     every machine reported to the core's device list), units check;
 #   this machine's storage records (root, under the records' own lock; no dataset, so not journaled):
 #     device register|retire, partition assign|retire;
+#   device health <serial>: root; reads the disk's own health report (smartctl) and keeps the result in those records;
 #   units apply --dataset D: root, journaled (rewrites the dataset's systemd units on the hosting device).
 #   units prove --dataset D: root; starts the sync unit now (the sync it starts is the journaled operation).
 #   (reconcile.sh runs storage_units.py after-update itself; it is not a verb here.)

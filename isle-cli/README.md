@@ -657,6 +657,7 @@ sudo isle storage partition assign <filesystem-identifier> --role <role>[,<role>
 isle storage partition check --table
 sudo isle storage partition retire <filesystem-identifier> --role <role>[,<role>...] [--record-only] [--leave-data]
 sudo isle storage device retire <serial>
+sudo isle storage device health <serial> [--table]
 isle storage role list --table
 isle storage role show <role> --table
 isle storage role list --isle --table
@@ -717,6 +718,17 @@ does not carry changes nothing and is not an error.
 gone can be retired. It refuses while the record holds a partition with a role on that device, and prints the
 `partition retire` command for each.
 
+`device health` asks one disk for its own health report (SMART, through `smartctl`) and says what it found: the
+disk's verdict, the hours it has been powered on, its temperature, and each count that should be zero and is not
+(sectors replaced, sectors waiting to be read again, sectors that cannot be read, read errors that could not be
+corrected; for an NVMe disk its critical warning, errors on the medium, spare space and wear). It exits 0 only
+when the verdict is "passed" and no such count is above zero. It reads the report and starts no test on the disk.
+A disk behind a USB bridge that does not answer is asked once more as a SATA disk; one that answers neither way
+is a refusal with the tool's own words. When the device is registered the result (time, verdict, what needs
+attention, hours) is kept in this machine's storage record under the device; a class change keeps it and
+`device retire` drops it. It needs `smartctl` (package `smartmontools`), which the offline package list does not
+name: on a machine without it the verb is a refusal that says so.
+
 These records describe one machine, and each machine keeps its own. With `--isle`, `role list` and `role show`
 print what every machine of the isle reported, side by side, from any machine: each machine adds its partitions
 that carry a role (role, filesystem identifier, class, size, free space, state, datasets; no hardware serial) to
@@ -727,8 +739,8 @@ cannot read. It is a report, not a check: whether a partition is really there is
 `partition check`. Polari reads the same device list; there is no second store.
 
 The roles are not yet part of the core's placement record, and no verb reads a role to decide where data goes.
-Not built: `device health`, `partition create`.
-Tests: `python3 isle-cli/scripts/test-storage-roles.py`, `test-storage-retire.py`, `test-storage-isle.py` and
+Not built: `partition create`.
+Tests: `python3 isle-cli/scripts/test-storage-roles.py`, `test-storage-retire.py`, `test-storage-health.py`, `test-storage-isle.py` and
 `test-storage-devices.py` (fixtures only).
 
 ### Storage migration contract (stm-1)
