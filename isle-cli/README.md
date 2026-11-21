@@ -658,6 +658,10 @@ isle storage partition check --table
 sudo isle storage partition retire <filesystem-identifier> --role <role>[,<role>...] [--record-only] [--leave-data]
 sudo isle storage device retire <serial>
 sudo isle storage device health <serial> [--table]
+isle storage partition create <serial>
+isle storage partition create <serial> --partition <partition-identifier> --role <role>[,<role>...] [--label <label>]
+isle storage partition create <serial> --whole --role <role>[,<role>...] [--label <label>]
+sudo isle storage partition create <serial> --partition ...|--whole --role ... --expect <plan-id>
 isle storage role list --table
 isle storage role show <role> --table
 isle storage role list --isle --table
@@ -669,7 +673,7 @@ are run without root, after every check has passed.
 
 `partition assign` adopts a filesystem that already exists and is mounted. It writes one file, the marker
 `isle-partition.json` at the root of the partition, and one entry in this machine's record
-(`/etc/isle-mesh/storage/device-records.json`). It creates, erases, formats, mounts and moves nothing, and it
+(`/etc/isle-mesh/storage/device-records.json`). It makes, erases, formats, mounts and moves nothing, and it
 leaves every other file on the partition alone. The marker travels with the disk, so a partition marked on one
 machine is recognised on another: `partition check` shows it as `not recorded here`, and `assign` with the same
 roles records it without rewriting the marker. A link at the marker's name is never followed.
@@ -729,6 +733,43 @@ attention, hours) is kept in this machine's storage record under the device; a c
 `device retire` drops it. It needs `smartctl` (package `smartmontools`), which the offline package list does not
 name: on a machine without it the verb is a refusal that says so.
 
+`partition create` makes a new filesystem (ext4, 1% kept in reserve) with the marker of its roles at its root
+from the first moment, and records it on this machine. It is the one storage verb that erases. With the serial
+alone it says what the device holds and which of its two ways fits:
+
+- `--partition <partition-identifier>` takes one partition of the device that has no filesystem. The partition
+  is named by its partition identifier (the `PARTUUID` of the partition table), because a partition with no
+  filesystem has no filesystem identifier yet.
+- `--whole` takes a device that has no partition table and no filesystem. It first gets a GPT partition table
+  with one partition over the whole device, then the filesystem. A disk filled with a test pattern can make the
+  system show partitions that are not there (they have no partition identifier); such a device counts as bare,
+  and the plan says how many it shows.
+
+It works in two steps, and only the second writes. Without `--expect` it reads the machine and prints the plan
+(what is made, what is lost) and a plan id, with the command to type. With `sudo` and `--expect <plan-id>` it
+reads the machine again, under the storage lock, and goes on only when the plan is still the same one: the
+device's serial, model, size and class, the layout, the roles and the label all count. Then it asks the disk
+itself (`blkid --probe`) at the device, at every partition the system shows, and at the new partition, and
+stops when anything is recognised there that the machine did not report. The partition table is written with
+`sfdisk` after a rehearsal that writes nothing, and with wiping switched off, so a filesystem from before that
+begins where the new partition begins stays readable and stops the verb instead of being overwritten.
+
+It refuses, and writes nothing, when: the device is not registered, is away, carries the running system or is
+read-only; two devices report the serial; the partition (or, with `--whole`, the device or anything shown under
+it) holds a filesystem, has something stacked on it, is in use or is read-only; with `--whole`, the device has
+a partition table (adding a partition to a table is not built); two partitions report the partition identifier;
+a role is typed twice; the label is not 1 to 16 letters, digits, dots, dashes or underscores; `sfdisk`,
+`blkid` or `mkfs.ext4` is missing; or the plan id is not the one of the plan as it reads now. There is no
+option to force any of these.
+
+Once the first write has started a failure is no longer "nothing was changed": the verb prints `FAILED:` and
+says what the device holds at that point (a partition table that may be partly written; a table with one
+partition and no filesystem, with the `--partition` command that goes on from there; a filesystem that may be
+partly made; or a finished filesystem that this machine does not record yet, with the `partition assign`
+command that records it). It does not mount: the new filesystem shows in `partition check` as recorded and not
+mounted. It needs `sfdisk` (package `fdisk`), `blkid` (`util-linux`) and `mkfs.ext4` (`e2fsprogs`); the offline
+package list names none of them, and the three machines of the isle have them.
+
 These records describe one machine, and each machine keeps its own. With `--isle`, `role list` and `role show`
 print what every machine of the isle reported, side by side, from any machine: each machine adds its partitions
 that carry a role (role, filesystem identifier, class, size, free space, state, datasets; no hardware serial) to
@@ -739,9 +780,10 @@ cannot read. It is a report, not a check: whether a partition is really there is
 `partition check`. Polari reads the same device list; there is no second store.
 
 The roles are not yet part of the core's placement record, and no verb reads a role to decide where data goes.
-Not built: `partition create`.
-Tests: `python3 isle-cli/scripts/test-storage-roles.py`, `test-storage-retire.py`, `test-storage-health.py`, `test-storage-isle.py` and
-`test-storage-devices.py` (fixtures only).
+Not built: a verb that mounts a partition, and adding a partition to a partition table that is there.
+Tests: `python3 isle-cli/scripts/test-storage-roles.py`, `test-storage-retire.py`, `test-storage-health.py`, `test-storage-create.py`,
+`test-storage-isle.py` and `test-storage-devices.py` (fixtures; `test-storage-create.py` also runs the real `sfdisk`, `blkid` and
+`mkfs.ext4` on image files it makes in a temporary folder, and never on a device).
 
 ### Storage migration contract (stm-1)
 

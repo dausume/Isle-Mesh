@@ -169,7 +169,7 @@ class Main(unittest.TestCase):
         for argv, text in [(('device',), 'Usage'), (('device', 'list', 'extra'), 'Usage'), (('volume', 'list'), 'Usage'),
                            (('device', 'register'), 'not a listing'), (('partition', 'assign'), 'not a listing'),
                            (('partition', 'check'), 'not a listing'), (('device', 'health'), 'not a listing'),
-                           (('partition', 'create'), 'not in this CLI'), (('device', 'wipe'), 'Unknown verb')]:
+                           (('partition', 'create'), 'not a listing'), (('device', 'wipe'), 'Unknown verb')]:
             code, lines, calls = self.call(*argv)
             data = json.loads(lines[0])
             self.assertEqual((code, data['ok'], calls), (1, False, []), argv)
@@ -190,8 +190,8 @@ class Main(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual([d['name'] for d in json.loads(result.stdout)['result']['devices']], ['sda', 'sdb', 'sdc', 'sdd', 'nvme0n1'])
             result = subprocess.run(['node', str(ENTRY), 'storage', 'partition', 'create'], env=env, capture_output=True, text=True, timeout=20)
-            self.assertEqual(result.returncode, 1)
-            self.assertFalse(json.loads(result.stdout)['ok'])
+            self.assertEqual(result.returncode, 2)                       # the verb is built: without a serial it is the usage text
+            self.assertIn('isle storage partition create <serial>', result.stdout)
 
 
 if __name__ == '__main__':

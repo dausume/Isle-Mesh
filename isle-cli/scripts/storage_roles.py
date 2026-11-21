@@ -21,6 +21,7 @@ import shlex
 import stat
 import subprocess
 import sys
+import time
 import uuid as uuid_module
 
 from operations import atomic
@@ -47,6 +48,8 @@ USAGE = ('Usage: isle storage device list [--table] | isle storage partition lis
          '       sudo isle storage partition retire <filesystem-identifier> --role <role>[,<role>...] [--record-only] [--leave-data]\n'
          '       sudo isle storage device retire <serial>\n'
          '       sudo isle storage device health <serial> [--table]\n'
+         '       isle storage partition create <serial> [--partition <partition-identifier>|--whole --role <role>[,<role>...] [--label <label>]]\n'
+         '       sudo isle storage partition create <serial> --partition ...|--whole --role ... --expect <plan-id>      (erases that partition or device)\n'
          '       isle storage role list [--table] | isle storage role show <role> [--table]\n'
          '       isle storage role list --isle [--table] | isle storage role show <role> --isle [--table]\n'
          'Roles: %s') % ('|'.join(CLASSES), ', '.join(ROLES))
@@ -64,6 +67,8 @@ class Io:
     def usage(self, path): return storage_devices._usage(path)
     def is_root(self): return os.geteuid() == 0
     def is_mount(self, path): return os.path.ismount(path)
+    def node(self, name): return '/dev/' + name
+    def sleep(self, seconds): time.sleep(seconds)
     def now(self): return datetime.now(timezone.utc).isoformat()
     def say(self, line=''): print(line)
 
@@ -430,6 +435,9 @@ def main(argv=None, io=None):
     if words[:2] in (['partition', 'retire'], ['device', 'retire']):
         import storage_retire
         return storage_retire.main(io, argv)
+    if words[:2] == ['partition', 'create']:
+        import storage_create
+        return storage_create.main(io, argv)
     if words[:2] == ['device', 'health']:
         import storage_health
         return storage_health.main(io, argv)

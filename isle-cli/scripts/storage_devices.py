@@ -13,13 +13,13 @@ import sys
 
 from storage_cli import LOCAL_ROOT, read_copies
 
-COLUMNS = 'NAME,TYPE,SIZE,ROTA,TRAN,RM,HOTPLUG,RO,SERIAL,MODEL,FSTYPE,UUID,PARTUUID,LABEL,MOUNTPOINTS'
+COLUMNS = 'NAME,TYPE,SIZE,ROTA,TRAN,RM,HOTPLUG,RO,SERIAL,MODEL,FSTYPE,UUID,PARTUUID,PTTYPE,LABEL,MOUNTPOINTS'
 SYSTEM_MOUNTS = ('/', '/boot', '/boot/efi', '/usr', '/var', '/home', '[SWAP]')
 NOT_A_FILESYSTEM = ('crypto_LUKS', 'LVM2_member', 'linux_raid_member', 'swap')
 VERBS = {'device': ('list',), 'partition': ('list',)}
-LATER = {'device': (), 'partition': ('create',)}
+LATER = {'device': (), 'partition': ()}
 #: verbs of the same two words that storage_roles.py answers
-RECORD_VERBS = {'device': ('register', 'retire', 'health'), 'partition': ('assign', 'check', 'retire')}
+RECORD_VERBS = {'device': ('register', 'retire', 'health'), 'partition': ('assign', 'check', 'retire', 'create')}
 
 
 def read_tree(run=subprocess.run):
