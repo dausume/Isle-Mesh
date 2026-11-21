@@ -122,13 +122,21 @@ replacement origin exists.  Every core verb (authorize, mark-migrated, cutover, 
  "undo": "sudo isle storage rollback --dataset apt-public-repo --generation <G>   (EMERGENCY ONLY)"}   // plus the §1.2 common fields
 ```
 **Common fields** (every action, listed once): `kind`, `id`, `device`, `dataset`, `planId`, `revision`, `itemId`, `digest`, `dependsOn`, `status`, `statusWords`, `placementState`, `epoch`, `execute` (always null), `operatorCommand`, `undo`, `chain`.  Kind strings are identical everywhere: `isle.storage.{authorize,migrate,cutover,witness,accept,reconcile-address}` (witness and accept are chain steps, reconcile-address is system-initiated and never planned).  The GET door is one thin lock-free call into `islemesh_storage_plan.planned_actions`.
-`operatorCommand` of cutover is null; the App fills `--generation` at click time from the live placement view (below).  The migrate action's `operatorCommand` is the §2.1 argv.
+`operatorCommand` of cutover is null; the App fills `--generation` at click time from the live placement view (below).  The migrate action's `operatorCommand` is the §2.1 argv, or the resume of a stopped attempt (status derivation below).
 Each action also carries `chain[]`, display-only steps with status and no approval: `isle.storage.witness` (third device) and
 `isle.storage.accept` (core).
 
 **Status derivation** (from journal when known, else from receipts and placement; never from the plan revision): `planned` (dependencies satisfied,
 nothing recorded) · `blocked` (a `dependsOn` is not `succeeded`) · `running` · `succeeded` · `failed` · `interrupted`.  `succeeded` for migrate needs
-a stored receipt with `ok`, `contentVerified`, `stagedDeploy`, `readinessVerified` and a digest equal to the stored plan's.  `placementState` is shown
+a stored receipt with `ok`, `contentVerified`, `stagedDeploy`, `readinessVerified` and a digest equal to the stored plan's.  The backend holds no
+journal, so for migrate it says what its stored receipts say: **`failed`** when receipts of this action and digest are stored and none proves a
+finished migrate - `statusWords` names the highest attempt and the stage it stopped at, and `operatorCommand` is the resume, `sudo isle operation
+retry <id>` with the operation id of that receipt (the migrate argv when the receipt carries no well-formed id); **`interrupted`** with the words
+"receipt not delivered" when the placement already shows `migrated`, `cutover` or `hosting` for this digest and no finished receipt is stored at
+the door (cutover then stays `blocked` and says the same).  Only an attempt number, a stage label and an operation id of the expected shape are
+ever copied from a receipt into these texts: a receipt is unverified.  A migrate that is `planned` has no receipt stored at all: not run
+yet, or run with a receipt that never arrived - the backend cannot tell these apart and its words say so; typing the migrate command on the
+target settles it either way (§2.2).  `placementState` is shown
 beside it, so "succeeded, awaiting cutover" and "accepted, hosting" are different on screen.  **The App never matches on epoch** (§5, Epoch arithmetic): it matches receipts to actions by `actionId` + `digest`, displays `placement.generation` live from the placement view, fills cutover's `--generation` at click time from that view, and treats "generation moved, re-read" as a normal refusal.
 
 ### 1.3 Manifest binding and immutable source objects (`repo/snapshot/`)
