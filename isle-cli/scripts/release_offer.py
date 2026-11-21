@@ -22,6 +22,7 @@ import json, os, re, secrets, shutil, subprocess, sys, time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import identity_provider
 import names
 import release_run as rr
 
@@ -238,6 +239,13 @@ def _refuse(deps, step, why):
 
 def _indent(text): return '\n'.join('    ' + line for line in str(text).splitlines()[-12:])
 
+def signin_published(deps):
+    """Whether the core publishes that releases need sign-in. Not known counts as no here: the core decides, from its
+    own record, when it looks at the offer; this only saves a member an offer the core would refuse."""
+    record = identity_provider.published_record(deps.http, rr.API)[0]
+    return bool(record and 'releases' in record['requiredFor'])
+
+
 def cmd_submit(deps, directory, yes, expect=None, wait=None):
     """`isle release run` typed on a member while the core publishes any-device. Exit 0 the core finished its part,
     1 refused or failed, 3 offered but not finished inside the wait."""
@@ -245,6 +253,7 @@ def cmd_submit(deps, directory, yes, expect=None, wait=None):
     try: pk = rr.load_packet(directory)
     except rr.PacketError as exc: return _refuse(deps, 'check', exc)
     if not rr.check_expect(deps, pk, expect, 'run', device): return 1
+    if signin_published(deps): return _refuse(deps, 'run', identity_provider.RELEASES_NEED_SIGN_IN + '. Nothing was offered.')
     if not deps.is_root(): deps.say('This offers the packet to the core, which runs it across the isle. Type: sudo isle release run %s' % directory); return 1
     member = io.enrolled_device()
     if not member: return _refuse(deps, 'run', 'the pairing of this device with the core cannot be read, so the core would not know whose packet this is; pair this device again')

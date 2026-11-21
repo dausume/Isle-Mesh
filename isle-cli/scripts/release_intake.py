@@ -36,6 +36,7 @@ from urllib.parse import quote
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import release_run as rr
 import release_offer as offer_of
+import identity_provider
 
 TIMER = 'isle-release-intake.timer'
 ATTEMPTS = 3                     # an interrupted take is tried again this often, then the offer is answered `failed`
@@ -54,6 +55,7 @@ class IntakeIO:
     poll_seconds = 10
 
     def time(self): return time.time()
+    def signin_required(self): return identity_provider.requirement()       # (what needs sign-in, None) | (None, why unknown)
     def sleep(self, seconds): time.sleep(seconds)
 
     def _names(self, path, missing=None):
@@ -118,6 +120,15 @@ def reported_addresses(deps):
         except ValueError: continue
     return found
 
+def signin_block(io):
+    """None when sign-in does not stand in the way of taking a member's packet, else why the core takes none.
+    The core reads its own record (root-only to write); a record it cannot read counts as required."""
+    required, unread = io.signin_required()
+    if required is None:
+        return ('whether this isle requires sign-in for releases cannot be read on the core (%s); until it can, the core '
+                'takes no packet from a member. Start the release on the core: sudo isle release run <packet-dir>' % unread)
+    return identity_provider.RELEASES_NEED_SIGN_IN if 'releases' in required else None
+
 def setting_problem(deps):
     """None when this core can take a member's offer, else why any-device cannot be chosen. Asked as root."""
     io = io_of(deps)
@@ -135,7 +146,10 @@ def apply_setting(deps, value):
         deps.say('%s is %s.' % (TIMER, 'on: the core looks at its members about once a minute' if value == 'any-device' else 'off'))
     elif value == 'any-device':
         deps.say('%s could not be switched on; until it is, an offered packet waits for: sudo isle release intake run' % TIMER)
-    if value == 'any-device': deps.say(COST)
+    if value == 'any-device':
+        deps.say(COST)
+        block = signin_block(io)
+        if block: deps.say('Until that changes no offer is taken: %s.' % block)
 
 
 # ---------------------------------------------------------------- the core's answers
@@ -264,6 +278,10 @@ def _take_locked(deps, io, auto):
 def _take_one(deps, io, answers, member, doc, address):
     """Under the intake lock and the run lock: fetch one offered packet, check it and run it."""
     run, sizes, domain = doc['runId'], doc['files'], offer_of.offer_domain(member)
+    block = signin_block(io)
+    if block:                # before anything is fetched or kept: the offer is answered, and that is all
+        _answer(deps, io, answers, member, doc, 'refused', block)
+        deps.say('REFUSED: packet %s offered by %s: %s' % (run[:12], member, block)); return 1
     home = Path(io.dir) / run
     home.mkdir(mode=0o700, parents=True, exist_ok=True); os.chmod(home, 0o700)
     try: note = json.loads((home / 'intake.json').read_text())
@@ -318,13 +336,16 @@ def cmd_show(deps):
     io, mode = io_of(deps), deps.mode()
     if mode == 'core':
         setting, answers = rr.core_start_setting(deps)[0], read_answers(io)
+        block = signin_block(io)
     else:
+        block = identity_provider.RELEASES_NEED_SIGN_IN if offer_of.signin_published(deps) else None
         setting, why = rr.published_start_setting(deps)
         if setting is None: deps.say('What the core takes is not known here (%s).' % why); return 1
         status, body = deps.http(rr.API + '/api/islemesh/updates')
         try: answers = (json.loads(body)['release'].get(offer_of.NOTICE_KEY) or {}).get('answers') or {}
         except (ValueError, KeyError, AttributeError, TypeError): answers = {}
     deps.say('The core takes release packets its members offer: %s' % ('yes (start setting any-device)' if setting == 'any-device' else 'no (start setting core-only)'))
+    if setting == 'any-device' and block: deps.say('But no offer is taken now: %s.' % block)
     rows = sorted((a.get('at') or '', d, a) for d, a in answers.items() if isinstance(a, dict)) if isinstance(answers, dict) else []
     if not rows: deps.say('It has answered no offer.')
     for _, device, a in rows:

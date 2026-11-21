@@ -239,6 +239,20 @@ sign-in token at the next `sudo isle reconcile` (which restarts it once); a back
 instance is deployed or updated. And `enable` and `require` below write the address into the
 frontend's file. With none named, everything an isle does without sign-in works as before.
 
+What on the isle needs a signed-in person is a list in the same record, changed on the core:
+
+```
+sudo isle polari security provider require releases
+sudo isle polari security provider unrequire releases
+```
+
+`releases` is the one thing that can be named today: a release packet a member offers to the core (start
+setting `any-device`). Nothing is required until it is named, and it cannot be named before a Keycloak is.
+`provider none` is refused while the list is not empty. An offered packet cannot carry a sign-in yet, so
+while `releases` is required the core answers every offer `refused` before it fetches anything, and a member
+is told so before it offers. A release typed on the core itself is not asked for a sign-in: sudo on the core
+is what allows it. A record the core cannot read counts as required.
+
 On the device hosting a Polari frontend, manage its deployment-owned setting:
 
 ```
@@ -332,6 +346,9 @@ By default a release run is started on the core only. The core can allow members
   router leased to it. The address only says where to ask; the certificate is what proves the member.
 - Cost: root on any paired member can then release to the whole isle, and every device on the isle can read an
   offered packet while it is offered.
+- An isle that requires sign-in for releases (`sudo isle polari security provider require releases`) takes no
+  offer at all until an offer can carry a sign-in: the core refuses it before fetching, and the release is
+  started on the core.
 
 ### Shared local operations
 

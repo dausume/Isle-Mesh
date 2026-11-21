@@ -18,7 +18,8 @@ import identity_provider as ip
 
 ISSUER = 'https://auth.example.isle/realms/Polari'
 KEYS = ISSUER + '/protocol/openid-connect/certs'
-RECORD = dict(issuer=ISSUER, realm='Polari', jwksUri=KEYS, clientId='polari-frontend', setAt='t0', setOn='core-one')
+RECORD = dict(issuer=ISSUER, realm='Polari', jwksUri=KEYS, clientId='polari-frontend', setAt='t0', setOn='core-one', requiredFor=[])
+NEEDED = dict(RECORD, requiredFor=['releases'])
 
 
 def load(name):
@@ -113,7 +114,9 @@ class Records(unittest.TestCase):
 
     def test_malformed_is_none(self):
         for bad in (None, [], {}, dict(RECORD, issuer='http://a/realms/b'), dict(RECORD, jwksUri='https://other.example/certs'),
-                    dict(RECORD, jwksUri=None), dict(RECORD, clientId='a b'), dict(RECORD, clientId=None)):
+                    dict(RECORD, jwksUri=None), dict(RECORD, clientId='a b'), dict(RECORD, clientId=None),
+                    dict(RECORD, requiredFor='releases'), dict(RECORD, requiredFor=['Releases']), dict(RECORD, requiredFor=[1]),
+                    dict(RECORD, requiredFor=None)):
             with self.subTest(bad=bad):
                 self.assertIsNone(ip.valid(bad))
 
@@ -242,6 +245,124 @@ class Clear(Case):
         self.assertEqual(ip.main(['none'], d), 1)
         self.assertIn('Type: sudo isle polari security provider none', d.said)
         self.assertEqual(d.stored(), RECORD)
+
+
+class Required(Case):
+    """What needs sign-in on the isle: a list in the core's Keycloak record."""
+
+    def core(self, record=RECORD, **kwargs):
+        d = self.device(**kwargs)
+        if record: d.write(record)
+        return d
+
+    def test_a_record_written_before_the_list_existed_requires_nothing(self):
+        old = {k: v for k, v in RECORD.items() if k != 'requiredFor'}
+        self.assertEqual(ip.valid(old), RECORD)
+        self.assertEqual(ip.valid(dict(RECORD, requiredFor=['releases', 'releases'])), NEEDED)
+
+    def test_what_the_core_reads(self):
+        d = self.device()
+        self.assertEqual(ip.requirement(d.setting_file), ([], None))               # no record: nothing is required
+        d.write(NEEDED)
+        self.assertEqual(ip.requirement(d.setting_file), (['releases'], None))
+        for broken in ('{', '[]', json.dumps(dict(RECORD, requiredFor='releases')), json.dumps({'requiredFor': ['releases']})):
+            Path(d.setting_file).write_text(broken)
+            required, why = ip.requirement(d.setting_file)
+            self.assertIsNone(required, broken)                                     # there but unreadable: not "nothing"
+            self.assertIn('is not a record this isle CLI can read', why)
+
+    def test_require_writes_publishes_and_says_what_it_does(self):
+        d = self.core()
+        self.assertEqual(ip.main(['require', 'releases'], d), 0)
+        self.assertEqual((d.stored(), d.published), (NEEDED, [NEEDED]))
+        self.assertIn('Sign-in is required for: releases.', d.said)
+        self.assertIn('the core takes no packet from a member', d.said)
+        self.assertIn('sudo isle release run <packet-dir>', d.said)
+        self.assertIn('A release started on the core is not asked for a sign-in', d.said)
+        d.lines.clear()
+        self.assertEqual(ip.main(['require', 'releases'], d), 0)                    # typed again: nothing to do
+        self.assertIn('already required', d.said)
+        self.assertEqual(len(d.published), 1)
+
+    def test_unrequire(self):
+        d = self.core(NEEDED)
+        self.assertEqual(ip.main(['unrequire', 'releases'], d), 0)
+        self.assertEqual((d.stored(), d.published), (RECORD, [RECORD]))
+        self.assertIn('Sign-in is required for: nothing.', d.said)
+        self.assertIn('isle release setting', d.said)
+        self.assertEqual(ip.main(['unrequire', 'releases'], d), 0)
+        self.assertEqual(len(d.published), 1)
+        bare = self.core(None)
+        bare.remove()                                                               # the same folder as above
+        self.assertEqual(ip.main(['unrequire', 'releases'], bare), 0)
+        self.assertIn('no Keycloak is named', bare.said)
+
+    def test_require_needs_a_named_keycloak(self):
+        d = self.core(None)
+        self.assertEqual(ip.main(['require', 'releases'], d), 1)
+        self.assertIn('no Keycloak is named for this isle, and sign-in needs one', d.said)
+        self.assertIn('sudo isle polari security provider <https://host/realms/name>', d.said)
+        self.assertEqual((d.stored(), d.published), (None, []))
+
+    def test_only_what_is_known_can_be_named(self):
+        d = self.core()
+        self.assertEqual(ip.main(['require', 'everything'], d), 1)
+        self.assertIn("'everything' is not something this isle can require sign-in for", d.said)
+        self.assertIn('releases', d.said.split('What can be named:')[1])
+        self.assertEqual(d.stored(), RECORD)
+        for argv in (['require'], ['unrequire'], ['require', 'releases', 'more']):
+            self.assertEqual(ip.main(argv, d), 2, argv)
+        self.assertEqual((d.stored(), d.asked), (RECORD, []))                       # and never read as an address
+
+    def test_member_and_no_root(self):
+        member = self.device(mode='remote')
+        for verb in ('require', 'unrequire'):
+            self.assertEqual(ip.main([verb, 'releases'], member), 1)
+        self.assertIn('named on the core only', member.said)
+        d = self.core(root=False)
+        self.assertEqual(ip.main(['require', 'releases'], d), 1)
+        self.assertIn('Type: sudo isle polari security provider require releases', d.said)
+        self.assertEqual((d.stored(), d.published), (RECORD, []))
+
+    def test_none_is_refused_while_something_is_required(self):
+        d = self.core(NEEDED)
+        self.assertEqual(ip.main(['none'], d), 1)
+        self.assertIn('this isle requires sign-in for releases, and sign-in needs a Keycloak', d.said)
+        self.assertIn('First: sudo isle polari security provider unrequire releases', d.said)
+        self.assertEqual((d.stored(), d.published), (NEEDED, []))
+
+    def test_naming_another_keycloak_keeps_what_is_required(self):
+        d = self.core(NEEDED)
+        self.assertEqual(ip.main([ISSUER, '--client', 'isle-app'], d), 0)
+        self.assertEqual(d.stored(), dict(NEEDED, clientId='isle-app', setAt='t1'))
+        self.assertIn('Sign-in is required for: releases (kept).', d.said)
+
+    def test_a_record_that_cannot_be_read_is_never_taken_as_nothing_required(self):
+        d = self.core()
+        Path(d.setting_file).write_text(json.dumps(dict(RECORD, requiredFor='releases')))
+        for argv in (['require', 'releases'], ['unrequire', 'releases'], [ISSUER]):
+            d.lines.clear()
+            self.assertEqual(ip.main(argv, d), 1, argv)
+            self.assertIn('is not a record this isle CLI can read', d.said)
+            self.assertIn('Nothing was changed', d.said)
+        self.assertEqual(d.published, [])
+        d.lines.clear()
+        self.assertEqual(ip.main([], d), 0)
+        self.assertIn('What needs sign-in is not known', d.said)
+        self.assertEqual(ip.main(['none'], d), 0)                                   # the way out: start again
+        self.assertFalse(os.path.exists(d.setting_file))
+
+    def test_shown_on_the_core_and_on_a_member(self):
+        d = self.core(NEEDED)
+        self.assertEqual(ip.main([], d), 0)
+        self.assertIn('Sign-in is required for: releases', d.said)
+        self.assertIn('require|unrequire <releases>', d.said)
+        d = self.core()
+        ip.main([], d)
+        self.assertIn('Sign-in is required for: nothing', d.said)
+        member = self.device(mode='remote', http=lambda url: (200, json.dumps({'release': {ip.NOTICE_KEY: NEEDED}}).encode()))
+        self.assertEqual(ip.main([], member), 0)
+        self.assertIn('Sign-in is required for: releases', member.said)
 
 
 class NoticeWriter(Case):

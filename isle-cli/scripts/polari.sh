@@ -549,5 +549,5 @@ case "${1:-help}" in
             *) echo "usage: isle polari app [plan <app>|ensure <app> [--yes]]" ;;
         esac ;;
     instances) instances ;;
-    *) echo "usage: isle polari [security status|enable|disable|require|release --config FILE [--feature NAME]|security provider [<issuer-address> [--client ID]|none]|instance deploy|instance verify <n>|instance rebase|instance undeploy <n>|module move <m> --from A --to B|instances]" ;;
+    *) echo "usage: isle polari [security status|enable|disable|require|release --config FILE [--feature NAME]|security provider [<issuer-address> [--client ID]|none|require <what>|unrequire <what>]|instance deploy|instance verify <n>|instance rebase|instance undeploy <n>|module move <m> --from A --to B|instances]" ;;
 esac

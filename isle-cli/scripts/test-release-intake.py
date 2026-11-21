@@ -31,7 +31,9 @@ class CoreIO(ri.IntakeIO):
     def __init__(self, root, net):
         self.dir, self.net, self.timers, self.timer_ok, self.clock, self.slept, self.on_fetch = Path(root) / 'core-intake', net, [], True, time.time(), 0, None
         self.asked_router = 0
+        self.required = ([], None)             # what the core's Keycloak record says needs sign-in
     def time(self): return self.clock
+    def signin_required(self): return self.required
     def sleep(self, seconds): self.clock += seconds; self.slept += 1
     def members(self): return None if self.net.members is None else dict(self.net.members)
     def claims(self): return None if self.net.claims is None else dict(self.net.claims)
@@ -473,6 +475,96 @@ def the_real_io_reads_no_credential_and_asks_only_over_verified_tls():
             calls.clear()
             assert core_io.fetch(NAME1, 'core.isle', 'offer.json', '/x/out', 5) == 'no usable address to ask at' and not calls
         finally: ro.subprocess.run = real
+
+
+# ---------------------------------------------------------------- releases that need sign-in
+
+SIGN_IN = 'this isle requires sign-in for releases, and an offered packet cannot carry a sign-in yet'
+PROVIDER = {'issuer': 'https://auth.example.isle/realms/Polari', 'realm': 'Polari', 'clientId': 'polari-frontend',
+            'jwksUri': 'https://auth.example.isle/realms/Polari/protocol/openid-connect/certs', 'setAt': 't0', 'setOn': 'core', 'requiredFor': ['releases']}
+
+@test
+def the_core_takes_no_offer_while_releases_need_sign_in():
+    with tmp() as t:
+        core, member, net, d = isle(t)
+        state = offer(member, d)
+        core.intake_io.required = (['releases'], None)
+        assert take(core) == 1 and SIGN_IN in text(core) and 'sudo isle release run <packet-dir>' in text(core), core.said
+        a = answer(core)
+        assert a['state'] == 'refused' and a['offer'] == state['offer'] and SIGN_IN in a['words'], a
+        assert not [p for _, p in net.fetched if p.startswith(ro.PACKET + '/')], net.fetched        # no file of the packet was fetched
+        assert not (core.intake_io.dir / state['runId']).exists() and core.events == []          # nothing kept, nothing run
+        member.said = []
+        assert rr.main(['intake'], member) == 0 and any('refused' in l for l in member.said), member.said
+        core.intake_io.required = ([], None)                       # no longer required: the answered offer is not taken behind the member's back
+        assert take(core) == 0 and answer(core)['state'] == 'refused', core.said
+        again = offer(member, d)                                   # the member offers again, and now the core runs it
+        assert again['offer'] != state['offer']
+        assert take(core) == 0 and answer(core)['state'] == 'done' and core.events == ['publish', 'install', 'notice'], core.said
+
+@test
+def a_record_the_core_cannot_read_counts_as_required():
+    with tmp() as t:
+        core, member, net, d = isle(t); offer(member, d)
+        core.intake_io.required = (None, 'provider.json is not a record this isle CLI can read')
+        assert take(core) == 1 and answer(core)['state'] == 'refused', core.said
+        assert 'whether this isle requires sign-in for releases cannot be read on the core (provider.json is not a record' in answer(core)['words']
+        assert 'the core takes no packet from a member' in text(core) and core.events == []
+        assert not [p for _, p in net.fetched if p.startswith(ro.PACKET + '/')]
+
+@test
+def the_real_reader_is_the_cores_own_record():
+    import identity_provider as ip
+    with tmp() as t:
+        real, path = ip.SETTING_FILE, Path(t) / 'provider.json'
+        ip.SETTING_FILE = str(path)
+        try:
+            io = ri.IntakeIO()
+            assert io.signin_required() == ([], None) and ri.signin_block(io) is None           # no Keycloak named: nothing is required
+            path.write_text(json.dumps(PROVIDER))
+            assert io.signin_required() == (['releases'], None) and ri.signin_block(io) == ip.RELEASES_NEED_SIGN_IN
+            path.write_text(json.dumps(dict(PROVIDER, requiredFor=[])))
+            assert ri.signin_block(io) is None
+            path.write_text('{')
+            assert io.signin_required()[0] is None and 'cannot be read on the core' in ri.signin_block(io)
+        finally: ip.SETTING_FILE = real
+
+@test
+def the_setting_and_the_show_say_that_no_offer_is_taken():
+    with tmp() as t:
+        core, member, net, d = isle(t, setting=None)
+        core.intake_io.required = (['releases'], None)
+        assert rr.main(['setting', 'any-device'], core) == 0, core.said          # the setting itself is not refused
+        assert 'Until that changes no offer is taken: ' + SIGN_IN in text(core), core.said
+        core.said = []
+        assert rr.main(['intake'], core) == 0 and 'But no offer is taken now: ' + SIGN_IN in text(core), core.said
+        core.intake_io.required = ([], None); core.said = []
+        assert rr.main(['intake'], core) == 0 and 'no offer is taken' not in text(core), core.said
+
+@test
+def a_member_does_not_offer_what_the_core_would_refuse():
+    with tmp() as t:
+        core, member, net, d = isle(t)
+        core.notice['identityProvider'] = dict(PROVIDER)
+        offer(member, d, code=1)
+        assert SIGN_IN in text(member) and 'Nothing was offered.' in text(member), member.said
+        assert ro.read_state(member.offer_io) is None and member.offer_io.deploys == [] and not net.served
+        member.said = []
+        assert rr.main(['intake'], member) == 0 and 'But no offer is taken now: ' + SIGN_IN in text(member), member.said
+        core.notice['identityProvider'] = dict(PROVIDER, requiredFor=[])          # a Keycloak is named, nothing is required
+        assert offer(member, d) is not None
+        del core.notice['identityProvider']                                        # and an isle that names none
+        assert take(core) == 0 and answer(core)['state'] == 'done', core.said
+
+@test
+def a_run_typed_on_the_core_is_not_asked_for_a_sign_in():
+    with tmp() as t:
+        core, member, net, d = isle(t)
+        core.intake_io.required = (['releases'], None)
+        core.notice['identityProvider'] = dict(PROVIDER)
+        own = make_packet(Path(t) / 'core-packet')
+        assert rr.main(['run', str(own), '--yes'], core) == 0, core.said
+        assert core.events == ['publish', 'install', 'notice'] and 'sign-in' not in text(core), core.said
 
 
 failed = [n for n, e in RESULTS if e]

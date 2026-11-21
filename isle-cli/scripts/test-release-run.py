@@ -276,7 +276,7 @@ class Fake(rr.Deps):
         if url in self.missing_urls: return 404, b''
         if url.startswith('https://apt.isle/') and (url.endswith('.deb') or '/runtime/' in url): return (200 if age >= self.assets_after else 404), b''
         if url.endswith('/api/islemesh/updates'):
-            extra = {k: self.notice[k] for k in ('startSetting', 'intake') if k in self.notice}
+            extra = {k: self.notice[k] for k in ('startSetting', 'intake', 'identityProvider') if k in self.notice}
             return 200, json.dumps({'ok': True, 'release': {'id': 'r', **extra, **({'run': self.updates_body} if self.updates_body else {})}}).encode()
         if url == 'https://board-engines.isle/capability': return 200, b'{}'
         if url == 'https://twin.board-engines.isle/health': return 200, b'{"ok": true, "x": 1}'
