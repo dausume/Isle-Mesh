@@ -73,7 +73,7 @@ const commands = {
   // Diagnostics / status
   names: { script: 'names.sh', desc: 'Memorable device-name suggestions and instance-name planning' },
   capabilities: { script: 'capabilities.sh', desc: 'Read-only timestamped device observations (status --json; explicit --publish)' },
-  os: { script: 'os.sh', desc: 'Supported operating systems: list (the record), check (this machine), devices (every machine of the isle)' },
+  os: { script: 'os.sh', desc: 'Supported operating systems: list (the record), check (this machine), devices (every machine of the isle), dependencies build|check (the packages one system needs offline)' },
   storage: { script: 'storage.sh', desc: 'Disk inventory, device and partition roles, placement preflight and dataset migration' },
   status:    { script: 'status.sh',    desc: 'Comprehensive system status (all components)' },
   diagnose:  { script: 'diagnose.sh',  desc: 'Mesh-expansion hardware capacity diagnostic', aliases: ['capacity'] },

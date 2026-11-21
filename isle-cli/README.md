@@ -539,10 +539,50 @@ keeping a list of their own. A system the record does not have is refused with t
 ```sh
 python3 scripts/supported_os.py base-image ubuntu-22.04            # the image that system's packages are resolved in
 python3 scripts/supported_os.py package-names ubuntu-22.04 <list>  # a list of package names, with the names that system uses
+python3 scripts/supported_os.py offline-packages ubuntu-22.04 install      # the offline dependency list, with that system's names
+python3 scripts/supported_os.py offline-packages ubuntu-22.04 cache-only   # its second part
 ```
 
 The dependency lists are written once, with the names of the newest system; `package-names` replaces
 only whole names that the record lists for the asked system and leaves every other character as it is.
+
+The operating system packages an isle needs when it is installed with no internet are one list,
+`apt/offline-packages.json`, beside the record. It has two parts: `install` (packages an offline
+install puts on the machine) and `cacheOnly` (packages that are only carried, for a later step that
+installs them). An entry `a | b` means either package serves. The builder of an offline medium and
+`isle os dependencies build` both read this one list.
+
+#### Building a dependency set
+
+```sh
+isle os dependencies build <out-dir> --system <system id> --packages <dir> [--bundle-builder <file>] [--cache <dir>]
+isle os dependencies check <set dir>
+```
+
+`build` is run without sudo and changes nothing on the isle: it publishes nothing. It makes the
+folder that `isle release build <out-dir> --dependencies <set dir>` takes, for one supported system:
+
+- `--packages` is a folder of the isle's own packages (the folder `members` that a release build
+  leaves). The set is resolved from what those packages declare and from the offline list above, in
+  a fresh container of that system's image, so nothing installed on the building machine decides it.
+- The resolving and fetching is done by the suite's `build-offline-bundle.sh` (found beside the
+  checkout, or named with `--bundle-builder`). Every file is checked against the size and sha256
+  that the signed package index of the system's archive names.
+- `--cache` names a folder of package files kept between builds. A file from it is used only when
+  it has that size and sha256; what is fetched is added to it. Without it everything is fetched,
+  about 500 MiB for one system.
+- The set holds the package files the resolve names and nothing else, the three `CLOSURE_*` lists
+  of the resolve, `<system id>.txt` and `SHA256SUMS`. No `isle-*` or `polari-*` package is in it.
+
+It is refused, before anything is fetched or written, when run as root, when `<out-dir>` exists and
+is not empty, when the system is not in the record, when `--packages` holds no package or a package
+that is not the isle's, or when the builder is not found. If the builder stops, its last lines and
+the place of its log are printed and `<out-dir>` is not written; the work folder beside it
+(`<out-dir>.work`) is removed by the next build.
+
+`check` reads a set and changes nothing: it has to name one system, hold no package of the isle, and
+every package file has to be the one its `SHA256SUMS` lists and the one the resolve's list
+(`CLOSURE_METADATA.json`) names by size and sha256, with none missing and none added.
 
 The isle package repository has two kinds of index. The main index holds only `isle-*` and `polari-*`
 packages and is what a device's own apt reads. The operating system packages those need offline are

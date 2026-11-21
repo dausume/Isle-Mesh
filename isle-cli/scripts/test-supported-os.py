@@ -294,6 +294,59 @@ class ForTheBuilders(Base):
             self.assertIn('usage: supported_os.py base-image', done.stderr)
 
 
+
+class TheOfflineList(Base):
+    """apt/offline-packages.json: what a dependency set is resolved from, beside what the isle's packages declare."""
+    def entry(self, system): return so.system_of(so.load(), system)
+
+    def written(self, doc):
+        path = Path(self.tmp.name) / 'offline-packages.json'
+        path.write_text(doc if isinstance(doc, str) else json.dumps(doc))
+        return path
+
+    def test_the_shipped_list_is_read_for_every_supported_system(self):
+        doc = json.loads(so.OFFLINE.read_text())
+        self.assertEqual(sorted(k for k in doc if k != 'about'), ['cacheOnly', 'install', 'schemaVersion'])
+        for system in so.load():
+            for part, key in so.PARTS.items():
+                text = so.offline_packages(system, part)
+                self.assertEqual(len(text.split(',')), len(doc[key]))
+                self.assertEqual(text, so.package_names(system, ','.join(doc[key])))
+        newest, older = so.offline_packages(self.entry('ubuntu-24.04'), 'install'), so.offline_packages(self.entry('ubuntu-22.04'), 'install')
+        self.assertEqual(newest, ','.join(doc['install']))                # written with the names of the newest system
+        self.assertIn('libgtk-3-0t64', newest); self.assertIn('libgtk-3-0,', older); self.assertNotIn('t64', older)
+        self.assertIn('docker.io | docker-ce', older)                     # an either-or entry stays one entry
+        self.assertEqual(so.offline_packages(self.entry('ubuntu-22.04'), 'cache-only'), ','.join(doc['cacheOnly']))
+
+    def test_a_list_this_version_does_not_read_is_refused(self):
+        good = {'schemaVersion': 1, 'install': ['a', 'b | c'], 'cacheOnly': ['d']}
+        entry = self.entry('ubuntu-22.04')
+        self.assertEqual(so.offline_packages(entry, 'install', self.written(good)), 'a,b | c')
+        for change in ({'schemaVersion': 2}, {'install': []}, {'cacheOnly': 'd'}, {'install': ['a', 7]}, {'install': ['a', '']},
+                       {'install': ['a', ' b']}, {'install': ['a,b']}, {'install': ['a', 'a']}, {'cacheOnly': ['a']}):
+            with self.assertRaises(ValueError) as caught: so.offline_packages(entry, 'install', self.written(dict(good, **change)))
+            self.assertIn('is not one this version of the isle CLI reads', str(caught.exception))
+        for missing in ('schemaVersion', 'install', 'cacheOnly'):
+            with self.assertRaises(ValueError): so.offline_packages(entry, 'install', self.written({k: v for k, v in good.items() if k != missing}))
+        for text in ('{', '[]', '"x"'):
+            with self.assertRaises(ValueError): so.offline_packages(entry, 'install', self.written(text))
+        with self.assertRaises(ValueError) as caught: so.offline_packages(entry, 'install', Path(self.tmp.name) / 'nowhere.json')
+        self.assertIn('cannot be read', str(caught.exception))
+        with self.assertRaises(ValueError) as caught: so.offline_packages(entry, 'all', self.written(good))
+        self.assertEqual(str(caught.exception), 'The offline dependency list has the parts install and cache-only, not all.')
+
+    def test_the_command_form_the_builders_use(self):
+        def run(*words): return subprocess.run([sys.executable, str(SCRIPTS / 'supported_os.py')] + list(words), capture_output=True, text=True)
+        for system in so.load():
+            for part in so.PARTS:
+                done = run('offline-packages', system['id'], part)
+                self.assertEqual((done.returncode, done.stdout), (0, so.offline_packages(system, part) + '\n'))
+        done = run('offline-packages', 'ubuntu-22.04', 'all')
+        self.assertEqual(done.returncode, 1); self.assertIn('has the parts install and cache-only, not all', done.stderr)
+        done = run('offline-packages', 'ubuntu-20.04', 'install')
+        self.assertEqual(done.returncode, 1); self.assertIn('ubuntu-20.04 is not in the record', done.stderr)
+        self.assertEqual(run('offline-packages', 'ubuntu-22.04').returncode, 1)
+
 class DeviceReport(unittest.TestCase):
     def collect(self, answer):
         sys.modules['storage_isle'] = None            # the storage fact would read this machine's real disks

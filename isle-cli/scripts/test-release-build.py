@@ -391,6 +391,8 @@ class Build(unittest.TestCase):
                     status = self.only(folder) if alone else self.build('--dependencies', str(folder))
                     self.assertEqual(status, 1, self.io.text())
                     self.assertIn('REFUSED', self.io.text()); self.assertIn(words, self.io.text())
+                    named = '%s/broken.deb' % folder if words == 'cannot be read as a package' else '--dependencies %s' % folder
+                    self.assertIn('REFUSED: release build: ' + named, self.io.text())               # the option that named the set
                     self.assertEqual(sorted(p.as_posix() for p in self.tmp.rglob('*')), before, 'a refusal wrote something')
                     self.assertFalse([argv for argv, _ in self.io.calls if argv[0] in ('git', 'bash', 'tar')], 'a refusal started something')
 

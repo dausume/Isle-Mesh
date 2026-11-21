@@ -6,6 +6,7 @@
   isle os check [--table]      this machine: its system, whether the record has it, and whether the core serves
                                a dependency set for its release.  Exit 0 = in the record, 1 = not
   isle os devices [--table]    what every machine of the isle last reported as its system (from the core's device list)
+  isle os dependencies build | check   the operating system packages one system needs offline (dependency_set.py)
 
 The record is the file apt/supported-os.json of this CLI.  It is data, not code: a system is added by adding its
 entry there, after it has been proven.  `isle apt-repo publish` reads the same record to decide under which release
@@ -14,6 +15,9 @@ name a dependency set is filed (dependency_release below).  Every verb here only
 For the scripts that build and prove an offline medium (they name a system by its id, as in --target):
   python3 supported_os.py base-image <system id>             the container image that system's packages are resolved in
   python3 supported_os.py package-names <system id> <list>   a list of package names, with the names that system uses
+  python3 supported_os.py offline-packages <system id> install|cache-only
+                                                             one part of the offline dependency list
+                                                             (apt/offline-packages.json), with that system's names
 An id the record does not have is exit 1 with the ids it has, so no builder keeps a list of its own.
 """
 from datetime import datetime, timezone
@@ -26,6 +30,8 @@ import subprocess
 import sys
 
 RECORD = Path(__file__).resolve().parent.parent / 'apt' / 'supported-os.json'
+OFFLINE = RECORD.parent / 'offline-packages.json'
+PARTS = {'install': 'install', 'cache-only': 'cacheOnly'}
 OS_RELEASE = '/etc/os-release'
 MODE_FILE = '/etc/isle-mesh/agent/agent.mode'
 REPO = '/etc/isle-mesh/apt/repo'
@@ -35,7 +41,7 @@ CODENAME = re.compile(r'[a-z][a-z0-9]*\Z')
 MARKER = re.compile(r'([a-z][a-z0-9]*-[0-9]+(?:\.[0-9]+)*)\.txt\Z')
 PROOFS = ('live-verified', 'source-tested', 'not proven')
 FACTS = ('host.os_release', 'host.os_codename')
-USAGE = 'usage: isle os list [--table] | check [--table] | devices [--table]'
+USAGE = 'usage: isle os list [--table] | check [--table] | devices [--table] | dependencies build|check (isle os dependencies help)'
 ROLES = {'core': 'core', 'remote': 'member'}
 
 
@@ -83,6 +89,22 @@ def package_names(entry, listing):
     if not names: return listing
     whole = r'(?<![a-z0-9+.-])(%s)(?![a-z0-9+.-])' % '|'.join(re.escape(old) for old in sorted(names))
     return re.sub(whole, lambda found: names[found.group(1)], listing)
+
+
+def offline_packages(entry, part, path=OFFLINE):
+    """One part of the offline dependency list (install | cache-only) -> the text the builders take: the entries
+    joined by commas, with the names this system uses.  ValueError when the list is not one this version reads."""
+    if part not in PARTS: raise ValueError('The offline dependency list has the parts %s, not %s.' % (' and '.join(PARTS), part))
+    try: doc = json.loads(Path(path).read_text())
+    except (OSError, ValueError) as exc: raise ValueError('The offline dependency list cannot be read: %s' % exc)
+    try:
+        assert doc['schemaVersion'] == 1
+        parts = [doc[key] for key in PARTS.values()]
+        assert all(isinstance(names, list) and names and all(isinstance(n, str) and n.strip() == n and n and ',' not in n for n in names) for names in parts)
+        assert len({n for names in parts for n in names}) == sum(len(names) for names in parts)
+    except (AssertionError, KeyError, TypeError):
+        raise ValueError('The offline dependency list (%s) is not one this version of the isle CLI reads.' % path)
+    return package_names(entry, ','.join(doc[PARTS[part]]))
 
 
 def read_os_release(path=OS_RELEASE):
@@ -255,12 +277,13 @@ if __name__ == '__main__':
         try: print('%s\t%s' % dependency_release(sys.argv[2], sys.argv[4] if len(sys.argv) > 4 else '', sys.argv[3], load()))
         except (ValueError, OSError) as error: sys.exit(str(error))
         sys.exit(0)
-    if len(sys.argv) > 1 and sys.argv[1] in ('base-image', 'package-names'):     # for the builders of an offline medium
+    if len(sys.argv) > 1 and sys.argv[1] in ('base-image', 'package-names', 'offline-packages'):     # for the builders of an offline medium
         if len(sys.argv) != (3 if sys.argv[1] == 'base-image' else 4):
-            sys.exit('usage: supported_os.py base-image <system id> | package-names <system id> <list>')
+            sys.exit('usage: supported_os.py base-image <system id> | package-names <system id> <list> | offline-packages <system id> install|cache-only')
         try:
             entry = system_of(load(), sys.argv[2])
-            print(entry['baseImage'] if sys.argv[1] == 'base-image' else package_names(entry, sys.argv[3]))
+            print(entry['baseImage'] if sys.argv[1] == 'base-image' else package_names(entry, sys.argv[3]) if sys.argv[1] == 'package-names'
+                  else offline_packages(entry, sys.argv[3]))
         except ValueError as error: sys.exit(str(error))
         sys.exit(0)
     sys.exit(main(Io(), sys.argv[1:]))

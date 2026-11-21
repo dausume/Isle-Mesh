@@ -116,9 +116,9 @@ def previous_members(io, directory):
     return found
 
 
-def chosen_set(io, folder):
+def chosen_set(io, folder, where=None):
     """A dependency set, read before anything is written: the system it names, its files, how much it is."""
-    where = '--dependencies %s' % folder
+    where = where or '--dependencies %s' % folder
     if not folder.is_dir(): raise Refused('%s is not a folder' % where)
     names = sorted(os.listdir(folder))
     for name in names:
