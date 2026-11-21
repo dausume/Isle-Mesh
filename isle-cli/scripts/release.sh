@@ -2,6 +2,7 @@
 # release.sh - isle release: one reviewed release across the isle (slices 1-2).
 #   isle release build <out-dir> --previous <dir>         no sudo: the packet of the next CLI release, built from one
 #                                         commit of the isle repository (release_build.py); nothing is published
+#   isle release build <out-dir> --dependencies <set dir> no sudo: a packet that holds one dependency set and nothing else
 #   isle release check <packet-dir> [--expect <run-id>]   read-only validation and summary
 #   sudo isle release run <packet-dir> [--expect <run-id>] [--wait <min>|--no-wait]
 #                                         core: publish, wait until served, own steps, sign the approval, announce,
@@ -19,8 +20,8 @@
 #   sudo isle release intake run [--auto] core: fetch one offered packet and run it now (isle-release-intake.timer does this)
 # With any-device, `sudo isle release run <packet-dir>` typed on a member offers the packet there (release_offer.py);
 # the core fetches it from that member and runs it (release_intake.py).
-# Packet kinds: publish runtime (update publish-runtime), debs (apt-repo publish --from), catalog (store publish), in that fixed
-# order, from a root-owned copy of the packet; update-apply may name "published". Steps: update-apply, store-install, module-add,
+# Packet kinds: publish dependencies (apt-repo publish --only-dependencies), runtime (update publish-runtime), debs (apt-repo
+# publish --from), catalog (store publish), in that fixed order, from a root-owned copy of the packet; update-apply may name "published". Steps: update-apply, store-install, module-add,
 # hotfix {name} (isle hotfix apply <name> --yes on that device; the device's own CLI decides whether it knows the name).
 set -u
 DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)

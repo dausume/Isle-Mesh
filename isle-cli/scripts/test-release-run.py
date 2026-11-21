@@ -111,6 +111,16 @@ def add_runtime(doc, d, manifest=None, entry=True):
     (d / 'runtime' / 'manifest.json').write_text(json.dumps(manifest or runtime_doc()))
     if entry: doc['publish'].append({'kind': 'runtime', 'manifest': 'runtime/manifest.json'})
 
+DEPS = {'libfoo_1_amd64.deb': b'foo-bytes', 'libbar_2%3a1_all.deb': b'bar-bytes'}     # a real set has names with an encoded colon
+DEPS_DIR = 'dependencies/ubuntu-22.04'
+def add_deps(doc, d, system='ubuntu-22.04', entry=True):
+    """A dependency set as the suite's offline builder leaves one: the packages, the file that names the system, and notes."""
+    full = d / DEPS_DIR; full.mkdir(parents=True, exist_ok=True)
+    for n, b in DEPS.items(): (full / n).write_bytes(b)
+    (full / 'CLOSURE_URIS.txt').write_text('where the packages came from\n')
+    for name in ([system] if isinstance(system, str) else system): (full / (name + '.txt')).write_text(name + '\n')
+    if entry: doc['publish'].append({'kind': 'dependencies', 'dir': DEPS_DIR})
+
 def full_packet(t, **kw):
     """catalog + runtime + debs, listed in the WRONG order on purpose; core and member1 both update to "published"."""
     d = Path(t) / 'packet'
@@ -147,6 +157,7 @@ class Fake(rr.Deps):
         self.status_state, self.notice_fail_until, self.instance = 'failed', 0, None
         self.modules_ok_after, self.updates_body, self.http_log = 0, None, []
         self.inspect_image, self.publish_rc = IMG, 0
+        self.deps_rc, self.deps_published, self.deps_after, self.deps_unlisted, self.deps_wrong, self.deps_others = 0, None, 0, set(), {}, []
         self.t0 = self.clock
         self.wait_limit, self.poll_interval, self.modules_limit = 900, 15, 300
         self.intake_io, self.offer_io = NoIntake(), NoOffer()
@@ -196,6 +207,14 @@ class Fake(rr.Deps):
             self.runtime_published = rows
             if self.on_publish: self.on_publish('runtime')
             return 0, 'Runtime artifacts published.\n'
+        if argv[0] == 'bash' and argv[1].endswith('apt-repo.sh') and argv[2:5] == ['publish', '--only-dependencies', '--dependencies-from']:
+            self.events.append('publish-dependencies'); self.publish_argv = getattr(self, 'publish_argv', []) + [argv]
+            if self.deps_rc: return self.deps_rc, 'boom'
+            if self.on_publish: self.on_publish('dependencies')
+            folder = Path(argv[5]); names = sorted(os.listdir(folder))          # the release the core announces is left as it is
+            self.deps_published = {n: rr.sha256_file(folder / n) for n in names if n.endswith('.deb')}
+            self.deps_others = [n for n in names if not n.endswith('.deb')]
+            return 0, 'ok\n'
         if argv[0] == 'bash' and argv[1].endswith('apt-repo.sh') and argv[2] == 'publish':
             self.events.append('publish-debs'); self.publish_argv = getattr(self, 'publish_argv', []) + [argv]
             if self.apt_rc: return self.apt_rc, 'boom'
@@ -268,6 +287,11 @@ class Fake(rr.Deps):
                         {'runId': self.fact_run or rid, 'serial': 1, 'state': st, 'step': 'step text', 'updatedAt': 'x'})}}}
                 out.append(e)
             return 200, json.dumps({'ok': True, 'devices': out}).encode()
+        if url == 'https://apt.isle/deps/jammy/InRelease': return (404 if self.deps_published is None else 200), b''
+        if url.startswith('https://apt.isle/deps/'):
+            if url != 'https://apt.isle/deps/jammy/Packages' or self.deps_published is None or age < self.deps_after: return 404, b''
+            return 200, ''.join('Package: p\nFilename: ./%s\nSHA256: %s\nDescription: one line\n and: another\n\n' % (n, self.deps_wrong.get(n, sha))
+                                for n, sha in self.deps_published.items() if n not in self.deps_unlisted).encode()
         if url.endswith('/api/modules/status'): return 200, json.dumps({'ok': age >= self.modules_ok_after}).encode()
         if url.endswith('/api/islemesh/updates') and self.notice.get('packages') and self.notice['packages'] != [1]:
             n = copy.deepcopy(self.notice)
@@ -1169,8 +1193,8 @@ def packet_refuses_missing_or_unlisted_runtime_archives_and_bad_manifests():
 
 @test
 def packet_refuses_two_entries_runtime_without_debs_and_unbound_published():
-    with tmp() as t: check_refusal(t, 'at most one runtime and one debs', mutate=lambda doc: doc['publish'].append({'kind': 'debs', 'dir': 'debs'}))
-    with tmp() as t: check_refusal(t, 'at most one runtime and one debs', mutate=lambda doc: doc['publish'].append({'kind': 'runtime', 'manifest': 'runtime/manifest.json'}))
+    with tmp() as t: check_refusal(t, 'at most one runtime, one debs and one dependencies', mutate=lambda doc: doc['publish'].append({'kind': 'debs', 'dir': 'debs'}))
+    with tmp() as t: check_refusal(t, 'at most one runtime, one debs and one dependencies', mutate=lambda doc: doc['publish'].append({'kind': 'runtime', 'manifest': 'runtime/manifest.json'}))
     with tmp() as t:
         check_refusal(t, 'needs the debs entry too', mutate=lambda doc: doc.update(publish=[p for p in doc['publish'] if p['kind'] != 'debs']))
     with tmp() as t:        # "published" with no runtime/debs publication at all, and with only a catalog one
@@ -1271,6 +1295,167 @@ def publication_failure_resumes_where_it_stopped_and_reuses_the_copy():
     with tmp() as t:        # a runtime publication that fails stops before any package is published
         d = full_packet(t); f = Fake(t); f.runtime_rc = 1
         assert rr.main(['run', str(d), '--yes'], f) == 1 and 'publish-debs' not in f.events
+
+# ---- a dependency set in a packet
+def deps_packet(t, **kw):
+    """The full packet plus a dependency set, the set listed last on purpose."""
+    more, own = kw.pop('mutate', None), {k: kw.pop(k) for k in ('system', 'entry') if k in kw}
+    def mutate(doc):
+        add_deps(doc, Path(t) / 'packet', **own)
+        if more: more(doc)
+    return full_packet(t, mutate=mutate, **kw)
+
+DEPS_ORDER = ['publish-dependencies', 'publish-runtime', 'publish-debs', 'publish', 'install', 'update', 'notice']
+
+@test
+def a_dependency_set_checks_and_the_record_holds_one_line_for_its_folder():
+    with tmp() as t:
+        d = deps_packet(t); f = Fake(t)
+        assert rr.main(['check', str(d)], f) == 0, f.said
+        text = '\n'.join(f.said)
+        assert 'the dependency set of ubuntu-22.04: 2 package file(s) from %s, served under deps/jammy' % DEPS_DIR in text
+        assert text.index('the dependency set of') < text.index('runtime images from') < text.index('package file(s) from debs')
+        pk = rr.load_packet(d)
+        assert [p['kind'] for p in pk.publications] == ['dependencies', 'runtime', 'debs', 'catalog']
+        assert [k for k in pk.files if k.startswith('dependencies')] == [DEPS_DIR + '/']               # one line, not one per file
+        listed = len((d / 'SHA256SUMS').read_text().splitlines())
+        assert pk.checked == listed == len(pk.files) + 3 and 'Packet is valid: %d file(s) match SHA256SUMS' % listed in text
+        assert pk.publications[0] == {'kind': 'dependencies', 'dir': DEPS_DIR, 'system': 'ubuntu-22.04', 'release': 'jammy',
+                                      'files': {n: rr.sha256_bytes(b) for n, b in DEPS.items()}}
+        assert rr.record_problem(pk.record) is None                                                    # a member reads the same record
+        ids = {pk.run_id}
+        for name, data in (('libfoo_1_amd64.deb', b'other'), ('CLOSURE_URIS.txt', b'other'), ('ubuntu-22.04.txt', b'other')):
+            (d / DEPS_DIR / name).write_bytes(data); write_sums(d); ids.add(rr.load_packet(d).run_id)   # every byte of the folder is in the run id
+        assert len(ids) == 4
+        (d / DEPS_DIR / 'libfoo_1_amd64.deb').rename(d / DEPS_DIR / 'libfoo_2_amd64.deb'); write_sums(d)
+        assert rr.load_packet(d).run_id not in ids                                                      # and so is every name
+
+@test
+def a_dependency_set_is_refused_when_it_does_not_say_one_known_system_or_holds_an_unlisted_file():
+    marker = DEPS_DIR + '/ubuntu-22.04.txt'
+    with tmp() as t:
+        d = deps_packet(t, mutate=lambda doc: doc['publish'].append({'kind': 'dependencies', 'dir': DEPS_DIR})); f = Fake(t)
+        assert rr.main(['check', str(d)], f) == 1 and 'at most one runtime, one debs and one dependencies entry' in ' '.join(f.said)
+    for system, words in (([], 'with one file <system id>.txt (it has: none)'),
+                          (['ubuntu-22.04', 'ubuntu-24.04'], '(it has: ubuntu-22.04.txt, ubuntu-24.04.txt)'),
+                          ('ubuntu-18.04', 'is built for a system this CLI does not know')):
+        with tmp() as t:
+            d = deps_packet(t, system=system); f = Fake(t)
+            assert rr.main(['check', str(d)], f) == 1 and words in ' '.join(f.said), (system, f.said)
+    with tmp() as t:        # the file that names the system is not listed: the copy the core publishes from would not hold it
+        d = deps_packet(t, sums_skip=(marker,)); f = Fake(t)
+        assert rr.main(['check', str(d)], f) == 1 and 'not listed in SHA256SUMS' in ' '.join(f.said) and marker in ' '.join(f.said), f.said
+    with tmp() as t:
+        d = deps_packet(t, sums_skip=(DEPS_DIR + '/CLOSURE_URIS.txt',)); f = Fake(t)
+        assert rr.main(['check', str(d)], f) == 1 and 'not listed in SHA256SUMS' in ' '.join(f.said)
+    for label, spoil, words in (
+            ('link', lambda d: os.symlink('libfoo_1_amd64.deb', d / DEPS_DIR / 'alias.deb'), 'not a regular file'),
+            ('folder', lambda d: (d / DEPS_DIR / 'nested').mkdir(), 'not a regular file'),
+            ('changed', lambda d: (d / DEPS_DIR / 'libfoo_1_amd64.deb').write_bytes(b'changed'), 'checksum mismatch'),
+            ('gone', lambda d: (d / DEPS_DIR / 'ubuntu-22.04.txt').unlink(), 'it has: none')):
+        with tmp() as t:
+            d = deps_packet(t); spoil(d); f = Fake(t)
+            assert rr.main(['check', str(d)], f) == 1 and words in ' '.join(f.said), (label, f.said)
+    with tmp() as t:
+        d = deps_packet(t)
+        for n in DEPS: (d / DEPS_DIR / n).unlink()
+        write_sums(d); f = Fake(t)
+        assert rr.main(['check', str(d)], f) == 1 and 'no .deb files in ' + DEPS_DIR in ' '.join(f.said), f.said
+    with tmp() as t: check_refusal(t, 'leaves the packet', mutate=lambda doc: doc['publish'].append({'kind': 'dependencies', 'dir': '../elsewhere'}))
+    with tmp() as t: check_refusal(t, 'not a directory inside the packet', mutate=lambda doc: doc['publish'].append({'kind': 'dependencies', 'dir': 'absent'}))
+    with tmp() as t: check_refusal(t, 'unknown key', mutate=lambda doc: doc['publish'].append({'kind': 'dependencies', 'dir': 'debs', 'release': 'jammy'}))
+
+@test
+def a_dependency_set_is_published_first_and_alone_and_waited_for():
+    with tmp() as t:
+        d = deps_packet(t); f = Fake(t); f.update_rcs = [0]; f.deps_after = 40
+        assert rr.main(['run', str(d), '--yes'], f) == 0, f.said
+        assert f.events == DEPS_ORDER, f.events
+        pk = rr.load_packet(d); copy = f.runs_dir / pk.run_id / 'packet'
+        assert f.publish_argv[0] == ['bash', str(f.scripts / 'apt-repo.sh'), 'publish', '--only-dependencies', '--dependencies-from', str(copy / DEPS_DIR)]
+        assert f.deps_others == ['CLOSURE_URIS.txt', 'ubuntu-22.04.txt']                 # the copy held the file that names the system
+        assert f.deps_published == pk.publications[0]['files'] and not copy.exists()
+        receipt = json.loads((f.runs_dir / pk.run_id / 'receipt.json').read_text())
+        assert [s['verb'] for s in receipt['steps']][:4] == ['publish-dependencies', 'wait-served', 'publish-runtime', 'publish-debs'], receipt['steps']
+        waits = [l for l in f.said if l.startswith('wait-served dependencies') and 'still missing' in l]
+        assert waits and 'https://apt.isle/deps/jammy/Packages answers 404' in waits[0], f.said
+        heads = [u for u, head in f.http_log if head]
+        assert 'https://apt.isle/libfoo_1_amd64.deb' in heads and 'https://apt.isle/libbar_2%253a1_all.deb' in heads, heads
+        first_runtime = next(i for i, a in enumerate(f.argv) if a[:1] == ['bash'] and a[2] == 'publish-runtime')
+        index_read = max(i for i, (u, head) in enumerate(f.http_log) if u.endswith('/deps/jammy/Packages'))
+        assert f.http_log.index(('https://apt.isle/libfoo_1_amd64.deb', True)) > index_read
+        assert f.argv.index(f.publish_argv[0]) < first_runtime
+        assert json.loads(f.notice['run']['approval']['payload'])['releaseId'] == 'ab' * 32           # the release id is the packages' one, as before
+
+@test
+def a_dependency_set_that_is_not_served_stops_the_run_before_anything_else_is_published():
+    cases = (('unlisted', lambda f: setattr(f, 'deps_unlisted', {'libfoo_1_amd64.deb'}), 'lists 1 of the 2 package files of the set with their checksums (first one it does not: libfoo_1_amd64.deb)'),
+             ('other bytes', lambda f: setattr(f, 'deps_wrong', {'libbar_2%3a1_all.deb': 'e' * 64}), 'first one it does not: libbar_2%3a1_all.deb'),
+             ('no index', lambda f: setattr(f, 'deps_after', 10 ** 9), 'https://apt.isle/deps/jammy/Packages answers 404'),
+             ('no file', lambda f: setattr(f, 'missing_urls', {'https://apt.isle/libbar_2%253a1_all.deb'}), 'https://apt.isle/libbar_2%3a1_all.deb answers 404'))
+    for label, spoil, words in cases:
+        with tmp() as t:
+            d = deps_packet(t); f = Fake(t); spoil(f)
+            assert rr.main(['run', str(d), '--yes'], f) == 1, (label, f.said)
+            assert 'wait-served dependencies' in refused(f)[0] and words in refused(f)[0], (label, refused(f))
+            assert f.events == ['publish-dependencies'], (label, f.events)
+            assert (f.runs_dir / rr.load_packet(d).run_id / 'packet').is_dir()               # failure keeps the copy
+            if label == 'unlisted': assert not [u for u, head in f.http_log if head and u.endswith('.deb')]   # no file is asked for before the index lists them all
+
+@test
+def a_dependency_set_publication_resumes_where_it_stopped():
+    with tmp() as t:        # the set itself failed: nothing else ran, and the second run starts with it
+        d = deps_packet(t); f = Fake(t); f.deps_rc = 1
+        assert rr.main(['run', str(d), '--yes'], f) == 1 and 'publish-dependencies' in refused(f)[0] and f.events == ['publish-dependencies'], f.said
+        f2 = Fake(t); f2.update_rcs = [0]
+        assert rr.main(['run', str(d), '--yes'], f2) == 0 and f2.events == DEPS_ORDER, f2.events
+    with tmp() as t:        # the packages failed after the set was served: the set is not published a second time
+        d = deps_packet(t); f = Fake(t); f.apt_rc = 1
+        assert rr.main(['run', str(d), '--yes'], f) == 1 and f.events == DEPS_ORDER[:3], f.events
+        f2 = Fake(t); f2.update_rcs = [0]; f2.runtime_published = f.runtime_published; f2.deps_published = f.deps_published
+        assert rr.main(['run', str(d), '--yes'], f2) == 0 and f2.events == DEPS_ORDER[2:], f2.events
+        assert not [u for u, head in f2.http_log if '/deps/' in u]
+
+@test
+def a_packet_may_hold_a_dependency_set_and_nothing_else_to_publish():
+    with tmp() as t:
+        d = make_packet(t, devices={'core1': []}, verify=[], publish=False, mutate=lambda doc: add_deps(doc, Path(t) / 'packet')); f = Fake(t)
+        assert rr.main(['check', str(d)], f) == 0, f.said
+        before = copy.deepcopy(f.notice)
+        assert rr.main(['run', str(d), '--yes'], f) == 0, f.said
+        assert f.events == ['publish-dependencies', 'notice'], f.events
+        assert f.notice['id'] == before['id'] and f.notice['packages'] == before['packages']           # the release the core announces is the one it was
+        assert not [a for a in f.argv if a[:1] == ['bash'] and a[2:4] == ['publish', '--from']]
+    with tmp() as t:        # "published" names the release id of packages; a set has none
+        d = make_packet(t, devices={'member1': [{'verb': 'update-apply', 'releaseId': 'published'}]}, publish=False, mutate=lambda doc: add_deps(doc, Path(t) / 'packet')); f = Fake(t)
+        assert rr.main(['check', str(d)], f) == 1 and '"published" needs a runtime or debs publication' in ' '.join(f.said), f.said
+
+@test
+def a_set_alone_is_checked_by_the_devices_a_check_names_though_they_have_no_step():
+    served = 'https://apt.isle/deps/jammy/InRelease'
+    def packet(t, verify):
+        return make_packet(t, devices={'core1': [], 'member1': []}, verify=verify, publish=False, mutate=lambda doc: add_deps(doc, Path(t) / 'packet'))
+    with tmp() as t:
+        d = packet(t, [{'url': served, 'device': 'core1'}, {'url': served, 'device': 'member1'}]); f = Fake(t)
+        assert rr.main(['run', str(d), '--yes'], f) == 0, f.said
+        assert [u for u, _ in f.http_log].count(served) == 1 and 'verify %s: ok' % served in f.said, f.said
+        m = Fake(t, 'remote', 'member1'); m.runs_dir = Path(t) / 'mruns'; m.updates_body = copy.deepcopy(f.notice['run']); m.deps_published = f.deps_published
+        assert rr.main(['follow', '--yes'], m) == 0, m.said
+        assert [u for u, _ in m.http_log].count(served) == 1 and 'verify %s: ok' % served in m.said, m.said
+    with tmp() as t:        # a check that names no device is asked of a device with steps, and here no device has one
+        d = packet(t, [{'url': served}]); f = Fake(t)
+        assert rr.main(['run', str(d), '--yes'], f) == 0, f.said
+        assert served not in [u for u, _ in f.http_log], f.http_log
+
+@test
+def a_member_follows_a_run_whose_packet_held_a_dependency_set():
+    with tmp() as t:
+        d = deps_packet(t); f = Fake(t); f.update_rcs = [0]
+        assert rr.main(['run', str(d), '--yes'], f) == 0, f.said
+        m = Fake(t, 'remote', 'member1'); m.runs_dir = Path(t) / 'mruns'; m.updates_body = copy.deepcopy(f.notice['run'])
+        assert rr.main(['follow', '--yes'], m) == 0, m.said
+        assert m.events == ['confirm', 'update'] or m.events == ['update'], m.events
+        assert 'publish-dependencies' not in m.events and not [a for a in m.argv if 'apt-repo.sh' in ' '.join(a)]
 
 # ---- packet copy
 @test

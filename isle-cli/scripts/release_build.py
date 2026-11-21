@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """isle release build: from one commit of the isle repository to a packet that `isle release run` takes.
 
-  isle release build <out-dir> --previous <dir> [--source <checkout>] [--commit <ref>]
-                     [--combined-builder <file>] [--device <name>]... [--verify <url>]... [--backup]
+  isle release build <out-dir> --previous <dir> [--source <checkout>] [--commit <ref>] [--combined-builder <file>]
+                     [--dependencies <set dir>] [--device <name>]... [--verify <url>]... [--backup]
+  isle release build <out-dir> --dependencies <set dir> [--device <name>]... [--verify <url>]...
 
   <out-dir>            made by this command; it must not exist yet, or be empty
   --previous <dir>     the folder `members` of the build before this one.  Its packages give the next version
@@ -12,9 +13,15 @@
                        disk: a change that is not committed is not in the packet, and that is said
   --combined-builder   the script that merges the member packages into the one package a core installs
                        (default: build-polari-complete-deb.sh in the folder that holds the checkout)
+  --dependencies <dir> a dependency set: the operating system packages of ONE system of the record (`isle os list`),
+                       in one folder that names the system with the file <system id>.txt.  The packet carries the
+                       whole folder, and the core adds it under deps/<release name> before anything else.
+                       Without --previous the packet holds the set and nothing else: no package of the isle is
+                       built, and the release the core announces stays the one it is
   --device <name>      a device the packet names.  Without any, the packet says "every device": the core and
                        the members the core heard from in the last 24 hours, decided when the run starts
-  --verify <url>       one more address that must answer 200 on every device after its steps
+  --verify <url>       one more address that must answer 200 on every device after its steps.  A packet that holds
+                       only a set gives no device a step: there each named device asks, and --verify needs --device
   --backup             every device takes a device-backup before it changes anything (the run stops on a
                        device whose backup is not complete)
 
@@ -24,6 +31,7 @@ It leaves in <out-dir>:
   source/      the files of the commit, as they were built
   build.json   what was built from what: the commit, the versions, every checksum
   build.log    what the builders printed
+(a packet that holds only a dependency set: packet/ and build.json)
 Nothing is installed, published or sent, and nothing needs sudo.  A core is not asked anything.
 """
 from datetime import datetime, timezone
@@ -32,6 +40,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import stat
 import subprocess
 import sys
 
@@ -51,7 +60,9 @@ LEFT_OUT = re.compile(r'(^|/)(node_modules|__pycache__|\.git)(/|$)|router-setup/
 VERIFY = (rr.API + '/api/islemesh/updates', 'https://apt.isle/InRelease', rr.API + '/api/health')
 BUILD_ENV = {'DPKG_DEB_THREADS_MAX': '1', 'DPKG_DEB_COMPRESSOR_TYPE': 'zstd', 'DPKG_DEB_COMPRESSOR_LEVEL': '3'}
 USAGE = ('usage: isle release build <out-dir> --previous <dir> [--source <checkout>] [--commit <ref>] '
-         '[--combined-builder <file>] [--device <name>]... [--verify <url>]... [--backup]')
+         '[--combined-builder <file>] [--dependencies <set dir>] [--device <name>]... [--verify <url>]... [--backup]\n'
+         '       isle release build <out-dir> --dependencies <set dir> [--device <name>]... [--verify <url>]...')
+FIRST_PARTY = re.compile(r'(?:isle|polari)-')     # the packages the core's release is read from; never part of a set
 
 
 class Refused(Exception): pass
@@ -105,12 +116,85 @@ def previous_members(io, directory):
     return found
 
 
-def plan(io, out, previous, source, commit, builder, devices, verify, backup):
-    """Everything that can refuse, before anything is written.  Returns what the build does."""
+def chosen_set(io, folder):
+    """A dependency set, read before anything is written: the system it names, its files, how much it is."""
+    where = '--dependencies %s' % folder
+    if not folder.is_dir(): raise Refused('%s is not a folder' % where)
+    names = sorted(os.listdir(folder))
+    for name in names:
+        if not stat.S_ISREG(os.lstat(folder / name).st_mode): raise Refused('%s: %s is not a regular file; a set is one folder of files' % (where, name))
+    marks = [name[:-len('.txt')] for name in names if rr.SET_MARKER.match(name)]
+    if len(marks) != 1:
+        raise Refused('%s has to say the one system it is built for, with one file <system id>.txt (it has: %s)'
+                      % (where, ', '.join(m + '.txt' for m in marks) or 'none'))
+    try: entry = rr.system_of(rr.supported_systems(), marks[0])
+    except ValueError as exc: raise Refused('%s: %s' % (where, exc))
+    debs = [name for name in names if name.endswith('.deb')]
+    if not debs: raise Refused('%s holds no .deb file' % where)
+    for name in debs:
+        if FIRST_PARTY.match(field(io, folder / name, 'Package')):
+            raise Refused('%s holds %s, a package of the isle itself. A set is operating system packages only, and the '
+                          'core refuses one that is not' % (where, name))
+    if 'SHA256SUMS' in names:      # the list the set was built with: the folder still has to be that set
+        try: listed = rr.parse_sums((folder / 'SHA256SUMS').read_text())
+        except rr.PacketError as exc: raise Refused('%s: its own %s' % (where, exc))
+        for name, sha in sorted(listed.items()):
+            if name not in names or rr.sha256_file(folder / name) != sha:
+                raise Refused('%s: %s is not the file the SHA256SUMS of the set lists; the set changed after it was built' % (where, name))
+        for name in debs:
+            if name not in listed:
+                raise Refused('%s: the SHA256SUMS of the set does not list %s; the set changed after it was built' % (where, name))
+    return {'folder': folder, 'system': marks[0], 'release': entry['codename'], 'names': names, 'packages': len(debs),
+            'bytes': sum(os.lstat(folder / name).st_size for name in names), 'dir': 'dependencies/' + marks[0]}
+
+
+def writable(io, out, devices):
     if io.is_root():
         raise Refused('a build is run without sudo: it installs nothing, and what root builds the next build cannot write over')
     if out.exists() and (not out.is_dir() or any(out.iterdir())):
         raise Refused('%s exists and is not empty; a build never writes over another one' % out)
+    for name in devices:
+        if not rr.NAME.fullmatch(name): raise Refused('%r is not a device name' % name)
+
+
+def checks(urls, more):
+    return [{'url': url, 'expectStatus': 200} for url in list(urls) + [u for u in more if u not in urls]]
+
+
+def set_plan(chosen, devices, verify):
+    """A packet that holds a dependency set and nothing else.  No device has a step, and the runner asks a check
+    without a device only of a device that has steps, so every check here names its device.  The proof that the set
+    is served is the core's own wait after it added the set."""
+    if verify and not devices:
+        raise Refused('--verify needs --device for a set alone: no device has a step in such a packet, so a check is asked '
+                      'only of a device the packet names')
+    asked = checks(('https://apt.isle/deps/%s/InRelease' % chosen['release'],), verify)
+    doc = {'schemaVersion': 1, 'name': 'dependencies-' + chosen['system'], 'publish': [{'kind': 'dependencies', 'dir': chosen['dir']}],
+           'devices': {name: [] for name in (devices or ['*'])},
+           'verify': [dict(check, device=name) for name in devices for check in asked]}
+    rr.validate_doc(doc)
+    return doc
+
+
+def pack(packet, doc, chosen):
+    """release-run.json, the set (when the packet carries one) and SHA256SUMS over everything that is in the packet."""
+    listed = ['release-run.json'] + (sorted('debs/' + deb.name for deb in (packet / 'debs').iterdir()) if (packet / 'debs').is_dir() else [])
+    if chosen:
+        (packet / chosen['dir']).mkdir(parents=True)
+        for name in chosen['names']: shutil.copy2(chosen['folder'] / name, packet / chosen['dir'] / name)
+        listed += ['%s/%s' % (chosen['dir'], name) for name in chosen['names']]
+    (packet / 'release-run.json').write_text(json.dumps(doc, indent=1) + '\n')
+    (packet / 'SHA256SUMS').write_text(''.join('%s  %s\n' % (rr.sha256_file(packet / rel), rel) for rel in listed))
+    return rr.load_packet(packet)
+
+
+def set_record(pk, chosen):
+    return {'system': chosen['system'], 'release': chosen['release'], 'packages': chosen['packages'], 'files': len(chosen['names']),
+            'bytes': chosen['bytes'], 'sha256': pk.files[chosen['dir'] + '/']}
+
+
+def plan(io, previous, source, commit, builder, devices, verify, backup, chosen=None):
+    """Everything that can refuse, before anything is written.  Returns what the build does."""
     members = previous_members(io, previous)
     cli, number = next_version(field(io, members[CLI], 'Version'), CLI)
     store, store_number = next_version(field(io, members[STORE], 'Version'), STORE)
@@ -126,14 +210,13 @@ def plan(io, out, previous, source, commit, builder, devices, verify, backup):
     if not os.access(io.root_ca, os.R_OK):
         raise Refused('the root certificate of the isle (%s) cannot be read here. The store package carries it, so a '
                       'release is built on a machine of the isle it is for' % io.root_ca)
-    for name in devices:
-        if not rr.NAME.fullmatch(name): raise Refused('%r is not a device name' % name)
     steps = ([{'verb': 'backup'}] if backup else []) + [{'verb': 'update-apply', 'releaseId': rr.PUBLISHED}]
-    doc = {'schemaVersion': 1, 'name': 'cli-release-%d' % number, 'publish': [{'kind': 'debs', 'dir': 'debs'}],
-           'devices': {name: steps for name in (devices or ['*'])},
-           'verify': [{'url': url, 'expectStatus': 200} for url in list(VERIFY) + [u for u in verify if u not in VERIFY]]}
+    served = VERIFY + (('https://apt.isle/deps/%s/InRelease' % chosen['release'],) if chosen else ())
+    doc = {'schemaVersion': 1, 'name': 'cli-release-%d' % number,
+           'publish': [{'kind': 'debs', 'dir': 'debs'}] + ([{'kind': 'dependencies', 'dir': chosen['dir']}] if chosen else []),
+           'devices': {name: steps for name in (devices or ['*'])}, 'verify': checks(served, verify)}
     rr.validate_doc(doc)
-    return {'number': number, 'cli': cli, 'store': store, 'commit': sha.strip(), 'members': members, 'doc': doc,
+    return {'number': number, 'cli': cli, 'store': store, 'commit': sha.strip(), 'members': members, 'doc': doc, 'set': chosen,
             'uncommitted': len([line for line in changed.splitlines() if line.strip()]) if status == 0 else None}
 
 
@@ -191,11 +274,10 @@ def build(io, out, source, builder, p):
         if wrong: raise Refused('%s does not hold the commit: %d of %d files differ or are missing (first: %s)'
                                 % (built[name][0].name, len(wrong), len(names), wrong[0]))
     for name in (CLI, STORE, COMBINED): shutil.copy2(built[name][0], packet / 'debs' / built[name][0].name)
-    (packet / 'release-run.json').write_text(json.dumps(p['doc'], indent=1) + '\n')
-    listed = ['release-run.json'] + sorted('debs/' + deb.name for deb in (packet / 'debs').iterdir())
-    (packet / 'SHA256SUMS').write_text(''.join('%s  %s\n' % (rr.sha256_file(packet / rel), rel) for rel in listed))
-    pk = rr.load_packet(packet)
+    if p['set']: io.say('  the dependency set of %s, as it is in %s' % (p['set']['system'], p['set']['folder']))
+    pk = pack(packet, p['doc'], p['set'])
     record = {'schemaVersion': 1, 'release': p['number'], 'runId': pk.run_id, 'builtAt': io.now(),
+              **({'dependencySet': set_record(pk, p['set'])} if p['set'] else {}),
               'source': {'commit': p['commit'], 'uncommittedFilesLeftOut': p['uncommitted'], 'comparedFiles': len(names)},
               'combinedBuilder': {'file': builder.name, 'sha256': rr.sha256_file(builder)},
               'packages': [{'name': name, 'version': field(io, deb, 'Version'), 'file': deb.name, 'sha256': rr.sha256_file(deb),
@@ -206,7 +288,7 @@ def build(io, out, source, builder, p):
 
 
 def parse(argv):
-    one = {'--previous': None, '--source': None, '--commit': 'HEAD', '--combined-builder': None}
+    one = {'--previous': None, '--source': None, '--commit': None, '--combined-builder': None, '--dependencies': None}
     many = {'--device': [], '--verify': []}
     flags, rest, i = set(), [], 0
     while i < len(argv):
@@ -220,7 +302,12 @@ def parse(argv):
         elif word.startswith('-'): raise ValueError('unknown option %s' % word)
         else: rest.append(word)
         i += 1
-    if len(rest) != 1 or not one['--previous']: raise ValueError('one <out-dir> and --previous <dir> are needed')
+    if len(rest) != 1 or not (one['--previous'] or one['--dependencies']):
+        raise ValueError('one <out-dir> is needed, and --previous <dir> (a release) or --dependencies <set dir> (a set alone)')
+    if not one['--previous']:
+        said = sorted(flags | {word for word in ('--source', '--commit', '--combined-builder') if one[word]})
+        if said: raise ValueError('%s is for a release, which needs --previous <dir>; a packet that holds only a dependency '
+                                  'set builds no package and has no step for a device' % ', '.join(said))
     return rest[0], one, many, flags
 
 
@@ -234,8 +321,14 @@ def main(argv, io=None):
     source = Path(os.path.abspath(one['--source'])) if one['--source'] else SCRIPTS.parent.parent
     builder = Path(os.path.abspath(one['--combined-builder'])) if one['--combined-builder'] else source.parent / 'build-polari-complete-deb.sh'
     try:
-        p = plan(io, out, Path(os.path.abspath(one['--previous'])), source, one['--commit'], builder,
-                 many['--device'], many['--verify'], '--backup' in flags)
+        writable(io, out, many['--device'])
+        chosen = chosen_set(io, Path(os.path.abspath(one['--dependencies']))) if one['--dependencies'] else None
+        if not one['--previous']:
+            doc = set_plan(chosen, many['--device'], many['--verify'])
+            started = True
+            return only_a_set(io, out, chosen, doc, many['--device'])
+        p = plan(io, Path(os.path.abspath(one['--previous'])), source, one['--commit'] or 'HEAD', builder,
+                 many['--device'], many['--verify'], '--backup' in flags, chosen)
         io.say('Release %d from the commit %s:' % (p['number'], p['commit'][:12]))
         if p['uncommitted']:
             io.say('  NOT in this build: %d changed or new files in the checkout that are not committed.' % p['uncommitted'])
@@ -255,9 +348,37 @@ def main(argv, io=None):
         io.say('The packet names no device: it is for the core and every member the core heard from in the last 24 hours.')
     if '--backup' not in flags:
         io.say('No device takes a device-backup in this run (build with --backup to have each one take it first).')
+    if p['set']: set_words(io, p['set'])
     io.say('It is built only: nothing is published or installed. To run it, on the core:')
     io.say('  sudo isle release run <the folder packet, copied there> --expect %s' % pk.run_id)
     io.say('The next build: isle release build <out-dir> --previous %s' % (out / 'members'))
+    return 0
+
+
+def set_words(io, chosen):
+    io.say('The packet carries the dependency set of %s: %d package files, %d MiB. The core that runs it needs that much '
+           'and %d MiB more free where it keeps its runs,' % (chosen['system'], chosen['packages'], chosen['bytes'] >> 20, rr.Deps.copy_reserve >> 20))
+    io.say('and a CLI that reads a dependency set in a packet: `isle release check <packet>` on the core says so (an older one '
+           'refuses the packet as a whole, and changes nothing).')
+
+
+def only_a_set(io, out, chosen, doc, named):
+    """The second form: no commit, no builder, no package of the isle.  Raises what main reports."""
+    io.say('The dependency set of %s, as it is in %s:' % (chosen['system'], chosen['folder']))
+    (out / 'packet').mkdir(parents=True)
+    pk = pack(out / 'packet', doc, chosen)
+    (out / 'build.json').write_text(json.dumps({'schemaVersion': 1, 'runId': pk.run_id, 'builtAt': io.now(),
+                                                 'dependencySet': set_record(pk, chosen)}, indent=1) + '\n')
+    io.say('Packet: %s' % (out / 'packet'))
+    for line in rr.summary_lines(pk.record, pk.run_id, pk.publications): io.say('  ' + line)
+    set_words(io, chosen)
+    io.say('No package of the isle is in it, so no device installs anything and no device has a step. The core itself waits until '
+           'its index lists every package file and every file is served; the run stops there if that does not happen.')
+    if named: io.say('Each device the packet names then asks for the index of the set from where it is.')
+    if not named:
+        io.say('The packet names no device: it is for the core and every member the core heard from in the last 24 hours.')
+    io.say('It is built only: nothing is published or installed. To run it, on the core:')
+    io.say('  sudo isle release run <the folder packet, copied there> --expect %s' % pk.run_id)
     return 0
 
 

@@ -9,6 +9,10 @@
 #   isle apt-repo publish [--from <dir>] [--dependencies-from <dir> [--dependencies-release <release name>]]
 #                                      (core) collect platform + dependency debs,
 #                                          sign, (re)serve at apt.isle
+#   isle apt-repo publish --only-dependencies --dependencies-from <dir> [--dependencies-release <release name>]
+#                                      (core) add one dependency set and nothing else: no isle or
+#                                          polari package is looked for, so the release the core
+#                                          announces stays the one it was
 #   isle apt-repo enable                   (client) trust the repo key +
 #                                          add the apt source here
 #   isle apt-repo pin [check|apply]        (client) the apt pin: only isle-* and
@@ -165,20 +169,25 @@ publish() {
     # then the from-code build output (.generated/debs of a suite
     # checkout) — the normal fresh-box world after build-polari-isle-deb
     local UH; UH="$(getent passwd "${SUDO_USER:-$USER}" | cut -d: -f6)"
-    local FROM="" DEPENDENCIES_FROM="" DEPS_RELEASE="" DEPS_WHY=""
+    local FROM="" DEPENDENCIES_FROM="" DEPS_RELEASE="" DEPS_WHY="" ONLY_DEPENDENCIES=""
     while [ $# -gt 0 ]; do case "$1" in
         --from) [ $# -ge 2 ] || die "--from needs a directory"; FROM="$2"; shift 2 ;;
         --dependencies-from) [ $# -ge 2 ] || die "--dependencies-from needs a directory"; DEPENDENCIES_FROM="$2"; shift 2 ;;
         --dependencies-release) [ $# -ge 2 ] || die "--dependencies-release needs a release name (isle os list --table)"; DEPS_RELEASE="$2"; shift 2 ;;
+        --only-dependencies) ONLY_DEPENDENCIES=1; shift ;;
         *) die "unknown publish argument: $1" ;;
     esac; done
-    if [ -z "$FROM" ]; then
+    if [ -n "$ONLY_DEPENDENCIES" ]; then
+        # Said, never guessed: without this word a publish with no --from goes looking for packages in the home folder.
+        [ -z "$FROM" ] || die "--only-dependencies adds a dependency set and nothing else; it does not go with --from; repository unchanged"
+        [ -n "$DEPENDENCIES_FROM" ] || die "--only-dependencies needs the set: --dependencies-from <dir>; repository unchanged"
+    elif [ -z "$FROM" ]; then
         for c in "$UH/polari-shells" "$UH/polari-suite/.generated/debs" \
                  "$HOME/polari-shells"; do
             ls "$c"/*.deb >/dev/null 2>&1 && { FROM="$c"; break; }
         done
     fi
-    [ -n "$FROM" ] && [ -d "$FROM" ] || die "no deb source dir found (looked: ~/polari-shells, ~/polari-suite/.generated/debs; or pass --from <dir>)"
+    [ -n "$ONLY_DEPENDENCIES" ] || { [ -n "$FROM" ] && [ -d "$FROM" ]; } || die "no deb source dir found (looked: ~/polari-shells, ~/polari-suite/.generated/debs; or pass --from <dir>)"
     # The operating system packages in this repository are indexed under this core's Ubuntu release name.
     local CODENAME; CODENAME=$(os_codename || true)
     [ -n "$CODENAME" ] || die "cannot read this core's Ubuntu release name from /etc/os-release; repository unchanged"
@@ -210,11 +219,11 @@ publish() {
     # Debian-version policy. Validate every input before changing the repo.
     local COPY_PLAN
     COPY_PLAN=$(mktemp) || die "cannot create publication plan"
-    if ! python3 - "$FROM" "$DEPENDENCIES_FROM" "$REPO" > "$COPY_PLAN" <<'PYPACKAGES'
+    if ! python3 - "$FROM" "$DEPENDENCIES_FROM" "$REPO" "$ONLY_DEPENDENCIES" > "$COPY_PLAN" <<'PYPACKAGES'
 import hashlib,pathlib,re,subprocess,sys
-platform,dependencies,repository=sys.argv[1:]
+platform,dependencies,repository,alone=sys.argv[1:]
 by_filename={};by_identity={};copy=[]
-def inspect(directory,required=False,existing=False):
+def inspect(directory,required=False,existing=False,third_party=False):
     root=pathlib.Path(directory)
     if not root.is_dir():
         if required:raise ValueError('package directory missing: '+directory)
@@ -231,6 +240,9 @@ def inspect(directory,required=False,existing=False):
         package,version,arch=identity
         if not re.fullmatch(r'[a-z0-9][a-z0-9+.-]+',package) or not version or not re.fullmatch(r'[a-z0-9][a-z0-9-]*',arch):
             raise ValueError('invalid package identity: '+str(path))
+        # A set added alone must leave the release the core announces as it is, and that release is read from these packages.
+        if third_party and re.match(r'(?:isle|polari)-',package):
+            raise ValueError('--only-dependencies adds operating system packages only, and this set holds '+path.name)
         if subprocess.run(['dpkg','--validate-version',version],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode:
             raise ValueError('invalid Debian version: '+version)
         digest=hashlib.sha256()
@@ -246,8 +258,8 @@ def inspect(directory,required=False,existing=False):
         if first and not existing:copy.append(path.resolve())
 try:
     inspect(repository,existing=True)
-    inspect(platform,required=True)
-    if dependencies:inspect(dependencies,required=True)
+    if platform:inspect(platform,required=True)
+    if dependencies:inspect(dependencies,required=True,third_party=bool(alone))
     for path in copy:sys.stdout.buffer.write(str(path).encode()+b'\0')
 except (ValueError,OSError,subprocess.SubprocessError) as error:
     print('package publication refused: '+str(error),file=sys.stderr);sys.exit(1)
@@ -519,5 +531,5 @@ case "${1:-help}" in
     enable)  enable_client ;;
     pin)     shift; pin "$@" ;;
     status)  status ;;
-    *) echo "usage: isle apt-repo [publish [--from <dir>] [--dependencies-from <dir> [--dependencies-release <release name>]]|snapshot|enable|pin [check|apply]|status]" ;;
+    *) echo "usage: isle apt-repo [publish [--from <dir>] [--dependencies-from <dir> [--dependencies-release <release name>]]|publish --only-dependencies --dependencies-from <dir>|snapshot|enable|pin [check|apply]|status]" ;;
 esac

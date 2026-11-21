@@ -300,10 +300,123 @@ class Build(unittest.TestCase):
                 self.assertIn('usage: isle release build', io.text())
                 self.assertFalse(io.calls)
 
+    # ---- a dependency set
+    SET_DIR = 'dependencies/ubuntu-22.04'
+    SET_URL = 'https://apt.isle/deps/jammy/InRelease'
+
+    def a_set(self, system=('ubuntu-22.04',), sums=True):
+        folder = self.tmp / 'set'; folder.mkdir()
+        package(folder / 'libfoo_1_amd64.deb', 'libfoo', '1'); package(folder / 'libbar_2%3a1_all.deb', 'libbar', '2:1')
+        (folder / 'CLOSURE_URIS.txt').write_text('where the packages came from\n')
+        for name in system: (folder / (name + '.txt')).write_text(name + '\n')
+        if sums: (folder / 'SHA256SUMS').write_text(''.join('%s  %s\n' % (rr.sha256_file(deb), deb.name) for deb in sorted(folder.glob('*.deb'))))
+        return folder
+
+    def only(self, folder, *more): return rb.main([str(self.out), '--dependencies', str(folder)] + list(more), self.io)
+
+    def test_a_set_alone_becomes_a_packet_that_holds_no_package_of_the_isle(self):
+        folder = self.a_set(); os.unlink(self.io.root_ca)             # the isle's root is for the store package; a set needs none
+        self.assertEqual(self.only(folder), 0, self.io.text())
+        pk = rr.load_packet(self.out / 'packet')
+        self.assertEqual(pk.doc, {'schemaVersion': 1, 'name': 'dependencies-ubuntu-22.04', 'publish': [{'kind': 'dependencies', 'dir': self.SET_DIR}],
+                                  'devices': {'*': []}, 'verify': []})
+        self.assertEqual(sorted(os.listdir(self.out)), ['build.json', 'packet'])
+        self.assertEqual(sorted(os.listdir(self.out / 'packet')), ['SHA256SUMS', 'dependencies', 'release-run.json'])
+        self.assertEqual(sorted(os.listdir(self.out / 'packet' / self.SET_DIR)), sorted(os.listdir(folder)))
+        for name in os.listdir(folder): self.assertEqual((self.out / 'packet' / self.SET_DIR / name).read_bytes(), (folder / name).read_bytes())
+        self.assertEqual(pk.checked, 6)                                # the five files of the set and release-run.json
+        self.assertFalse([argv for argv, _ in self.io.calls if argv[0] in ('git', 'bash', 'tar')], 'a set alone builds nothing')
+        record = json.loads((self.out / 'build.json').read_text())
+        self.assertEqual(record['runId'], pk.run_id); self.assertNotIn('release', record)
+        self.assertEqual(record['dependencySet'], {'system': 'ubuntu-22.04', 'release': 'jammy', 'packages': 2, 'files': 5,
+                                                   'bytes': sum((folder / n).stat().st_size for n in os.listdir(folder)), 'sha256': pk.files[self.SET_DIR + '/']})
+        text = self.io.text()
+        for words in ('the dependency set of ubuntu-22.04: 2 package file(s)', '--expect ' + pk.run_id, 'isle release check <packet>',
+                      'names no device', 'nothing is published or installed', 'no device installs anything'): self.assertIn(words, text)
+
+    def test_a_set_alone_can_name_devices_and_more_checks(self):
+        self.assertEqual(self.only(self.a_set(sums=False), '--device', 'member-two', '--verify', 'https://apt.isle/InRelease', '--verify', self.SET_URL), 0, self.io.text())
+        doc = rr.load_packet(self.out / 'packet').doc
+        self.assertEqual(doc['devices'], {'member-two': []})
+        self.assertEqual(doc['verify'], [{'url': url, 'expectStatus': 200, 'device': 'member-two'} for url in (self.SET_URL, 'https://apt.isle/InRelease')])
+        self.assertNotIn('names no device', self.io.text())
+        self.assertIn('Each device the packet names then asks for the index of the set', self.io.text())
+
+    def test_a_set_alone_asks_every_named_device_and_a_check_needs_one(self):
+        folder = self.a_set()
+        self.assertEqual(self.only(folder, '--device', 'core-one', '--device', 'member-two'), 0, self.io.text())
+        self.assertEqual(rr.load_packet(self.out / 'packet').doc['verify'],
+                         [{'url': self.SET_URL, 'expectStatus': 200, 'device': name} for name in ('core-one', 'member-two')])
+        self.io = Fake(self.tmp); out = self.tmp / 'second'
+        self.assertEqual(rb.main([str(out), '--dependencies', str(folder), '--verify', 'https://apt.isle/InRelease'], self.io), 1, self.io.text())
+        self.assertIn('--verify needs --device for a set alone', self.io.text()); self.assertFalse(out.exists())
+
+    def test_a_release_can_carry_a_set(self):
+        folder = self.a_set()
+        self.assertEqual(self.build('--dependencies', str(folder)), 0, self.io.text())
+        pk = rr.load_packet(self.out / 'packet')
+        self.assertEqual(pk.doc['publish'], [{'kind': 'debs', 'dir': 'debs'}, {'kind': 'dependencies', 'dir': self.SET_DIR}])
+        self.assertEqual([p['kind'] for p in pk.publications], ['dependencies', 'debs'])           # the runner adds the set first
+        self.assertEqual([c['url'] for c in pk.doc['verify']], list(rb.VERIFY) + [self.SET_URL])
+        self.assertEqual(sorted(os.listdir(self.out / 'packet' / self.SET_DIR)), sorted(os.listdir(folder)))
+        record = json.loads((self.out / 'build.json').read_text())
+        self.assertEqual((record['release'], record['dependencySet']['packages'], record['dependencySet']['sha256']), (91, 2, pk.files[self.SET_DIR + '/']))
+        self.assertIn('The packet carries the dependency set of ubuntu-22.04: 2 package files', self.io.text())
+        self.assertIn('isle release check <packet>', self.io.text())
+
+    def test_a_set_is_refused_before_anything_is_written(self):
+        cases = []
+        def case(words, make, change=lambda folder: None): cases.append((words, make, change))
+        case('is not a folder', lambda: self.tmp / 'nowhere')
+        case('with one file <system id>.txt (it has: none)', lambda: self.a_set(system=()))
+        case('(it has: ubuntu-22.04.txt, ubuntu-24.04.txt)', lambda: self.a_set(system=('ubuntu-22.04', 'ubuntu-24.04')))
+        case('ubuntu-18.04', lambda: self.a_set(system=('ubuntu-18.04',)))
+        case('holds no .deb file', self.a_set, lambda folder: [deb.unlink() for deb in folder.glob('*.deb')] and (folder / 'SHA256SUMS').unlink())
+        case('a package of the isle itself', self.a_set, lambda folder: package(folder / 'isle-mesh-cli_9_all.deb', rb.CLI, '9'))
+        case('a package of the isle itself', self.a_set, lambda folder: package(folder / 'shell_9_all.deb', 'polari-shell-core', '9'))
+        case('cannot be read as a package', self.a_set, lambda folder: (folder / 'broken.deb').write_text('not a package'))
+        case('nested is not a regular file', self.a_set, lambda folder: (folder / 'nested').mkdir())
+        case('alias.deb is not a regular file', self.a_set, lambda folder: os.symlink('libfoo_1_amd64.deb', folder / 'alias.deb'))
+        case('the set changed after it was built', self.a_set, lambda folder: (folder / 'libfoo_1_amd64.deb').write_text(json.dumps({'Package': 'libfoo', 'Version': '2'})))
+        case('the set changed after it was built', self.a_set, lambda folder: (folder / 'libfoo_1_amd64.deb').rename(folder / 'libfoo_3_amd64.deb'))
+        case('libbar_2%3a1_all.deb is not the file the SHA256SUMS of the set lists', self.a_set, lambda folder: (folder / 'libbar_2%3a1_all.deb').unlink())
+        case('the SHA256SUMS of the set does not list libnew_1_all.deb', self.a_set, lambda folder: package(folder / 'libnew_1_all.deb', 'libnew', '1'))
+        case('its own SHA256SUMS line 1', self.a_set, lambda folder: (folder / 'SHA256SUMS').write_text('not a list\n'))
+        for alone in (True, False):
+            for words, make, change in cases:
+                with self.subTest(words=words, alone=alone):
+                    self.holder.cleanup(); self.setUp()
+                    folder = make(); change(folder)
+                    before = sorted(p.as_posix() for p in self.tmp.rglob('*'))
+                    status = self.only(folder) if alone else self.build('--dependencies', str(folder))
+                    self.assertEqual(status, 1, self.io.text())
+                    self.assertIn('REFUSED', self.io.text()); self.assertIn(words, self.io.text())
+                    self.assertEqual(sorted(p.as_posix() for p in self.tmp.rglob('*')), before, 'a refusal wrote something')
+                    self.assertFalse([argv for argv, _ in self.io.calls if argv[0] in ('git', 'bash', 'tar')], 'a refusal started something')
+
+    def test_a_set_alone_refuses_what_a_build_refuses_and_the_words_of_a_release(self):
+        folder = self.a_set()
+        for words, change, more in (('a build is run without sudo', lambda: setattr(self.io, 'root', True), ()),
+                                    ('exists and is not empty', lambda: (self.out.mkdir(), (self.out / 'kept').write_text('x')), ()),
+                                    ('is not a device name', lambda: None, ('--device', 'not a name')),
+                                    ('must be an https:// URL on a .isle host', lambda: None, ('--device', 'core-one', '--verify', 'https://example.org/x'))):
+            with self.subTest(words):
+                self.io = Fake(self.tmp); change()
+                self.assertEqual(self.only(folder, *more), 1, self.io.text()); self.assertIn(words, self.io.text())
+                self.assertFalse((self.out / 'packet').exists())
+                if self.out.exists(): (self.out / 'kept').unlink(); self.out.rmdir()
+        for more in (['--backup'], ['--commit', 'some-branch'], ['--source', str(self.source)], ['--combined-builder', str(self.builder)]):
+            with self.subTest(more[0]):
+                self.io = Fake(self.tmp)
+                self.assertEqual(self.only(folder, *more), 2, self.io.text())
+                self.assertIn(more[0] + ' is for a release, which needs --previous <dir>', self.io.text())
+                self.assertFalse(self.io.calls); self.assertFalse(self.out.exists())
+
     def test_help_and_the_release_verb_reach_it(self):
         io = Fake(self.tmp)
         self.assertEqual(rb.main(['help'], io), 0)
         self.assertIn('--previous <dir>', io.text())
+        self.assertIn('isle release build <out-dir> --dependencies <set dir>', io.text())
         said = []
         deps = type('D', (), {'say': lambda self, line='': said.append(line)})()
         self.assertEqual(rr.main(['help'], deps), 0)

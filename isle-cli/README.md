@@ -332,6 +332,7 @@ One command turns one commit of this repository into the folder `isle release ru
 core anything, and publishes and installs nothing:
 
     isle release build <out-dir> --previous <dir>
+    isle release build <out-dir> --dependencies <set dir>
     isle release build help                  every option
 
 - `--previous` is the folder `members` of the build before. The next version numbers are read from its packages
@@ -349,6 +350,26 @@ core anything, and publishes and installs nothing:
 - It leaves `packet/` (copy this to where the run is typed), `members/` (the `--previous` of the next build),
   `source/`, `build.log`, and `build.json`: the commit, the versions and every checksum.
 - A folder that already holds something is never written over.
+
+The second form builds a packet that holds one dependency set and no package of the isle. Nothing is built for
+it: the set is checked and copied into the packet. `--dependencies <set dir>` can also be added to the first form,
+and the release then carries the set with it.
+
+- A set is a folder of operating system packages with one file `<system id>.txt` that says the system it is built
+  for (see "Supported operating systems and dependency sets" below). It is refused before anything is written when
+  it says no system or more than one, says a system the record does not list, holds no package, holds an `isle-*`
+  or `polari-*` package, holds anything that is not a regular file, or differs from its own `SHA256SUMS`.
+- Every file of the set is listed in the packet's `SHA256SUMS`, so the run id names every byte of it.
+- In the run, the core adds the set first, with `isle apt-repo publish --only-dependencies`, and waits until its
+  index lists every package file and every file is served. Only then is anything else of the packet published. The
+  release the core announces stays the one it is.
+- A packet with a set alone gives the devices no step: no device installs anything. The core's own wait is the
+  proof that the set is served. With `--device`, each named device also asks for the index of the set from where
+  it is; `--verify` adds a check for those devices and is refused without `--device`.
+- The core's installed CLI has to know this kind of packet. A core whose CLI is older refuses the packet and
+  changes nothing, so a set cannot travel in the same packet as the CLI release that teaches the core the kind.
+- The core copies a packet before it runs it, so it needs the size of the set and 256 MiB more free where it keeps
+  its runs. `isle release check <packet>` on the core says so.
 
 ### Starting a release run from a member (start setting `any-device`)
 
@@ -531,7 +552,13 @@ package files of all sets lie together in the repository; an index only lists th
 
 ```sh
 sudo isle apt-repo publish --dependencies-from <directory> [--dependencies-release <release name>]
+sudo isle apt-repo publish --only-dependencies --dependencies-from <directory> [--dependencies-release <release name>]
 ```
+
+The first form publishes the isle's own packages as well, as every `publish` does. With `--only-dependencies`
+no isle package is looked for and the set is added alone: it is refused with `--from`, refused without a set, and
+refused when the set holds an `isle-*` or `polari-*` package, so the release the core announces cannot change. This
+is the form a release run uses for a set a packet carries.
 
 The release a set is filed under is decided before anything is changed, in this order: the release
 typed with `--dependencies-release`; the marker file an offline medium writes beside its packages

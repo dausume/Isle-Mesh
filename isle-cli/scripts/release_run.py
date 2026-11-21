@@ -14,10 +14,11 @@ directly and nothing here skips TLS verification.
 import base64, fcntl, hashlib, json, os, posixpath, re, secrets, shutil, stat, subprocess, sys, tempfile, time
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from operations import NAME, atomic   # the app-name pattern and the journal's atomic writer
+from supported_os import MARKER as SET_MARKER, load as supported_systems, system_of
 
 SCRIPTS = Path(__file__).resolve().parent
 API = 'https://api.polari.isle'
@@ -283,7 +284,7 @@ def validate_doc(doc):
     if not isinstance(publish, list): raise PacketError('publish must be a list')
     for i, item in enumerate(publish):
         where = 'publish[%d]' % i
-        if not isinstance(item, dict) or item.get('kind') not in ('catalog', 'runtime', 'debs'):
+        if not isinstance(item, dict) or item.get('kind') not in ('catalog', 'runtime', 'debs', 'dependencies'):
             raise PacketError('%s: unknown kind' % where)
         if item['kind'] == 'catalog':
             _closed(item, {'kind', 'release'}, {'kind', 'release'}, where)
@@ -295,7 +296,8 @@ def validate_doc(doc):
             _closed(item, {'kind', 'dir'}, {'kind', 'dir'}, where)
             safe_relpath(item['dir'], where)
     kinds = [i['kind'] for i in publish]
-    if kinds.count('runtime') > 1 or kinds.count('debs') > 1: raise PacketError('publish may hold at most one runtime and one debs entry')
+    if any(kinds.count(kind) > 1 for kind in ('runtime', 'debs', 'dependencies')):
+        raise PacketError('publish may hold at most one runtime, one debs and one dependencies entry')
     if 'runtime' in kinds and 'debs' not in kinds:
         # apt-repo.sh is the only thing that rebuilds the release notice (and its id), and `apt-repo publish` refuses an empty --from.
         raise PacketError('a runtime publication needs the debs entry too (only apt-repo publish rebuilds the release notice that members read)')
@@ -368,20 +370,45 @@ def runtime_archives(manifest_rel, manifest):
     if not found: raise PacketError('%s names no runtime image' % manifest_rel)
     return found
 
-def deb_files(directory, sums, rel_dir, where):
-    """Names of the .deb files in a packet directory; every entry must be a regular .deb listed in SHA256SUMS and matching."""
+def folder_files(directory, rel_dir, where):
+    """The names in a packet directory, in order; the directory is inside the packet and holds regular files only."""
     full = directory / rel_dir
     root = Path(os.path.realpath(directory))
     if not full.is_dir() or full.is_symlink() or (root != Path(os.path.realpath(full)) and root not in Path(os.path.realpath(full)).parents):
         raise PacketError('%s: not a directory inside the packet: %s' % (where, rel_dir))
     names = sorted(os.listdir(full))
     for n in names:
-        st = os.lstat(full / n)
-        if not stat.S_ISREG(st.st_mode): raise PacketError('%s: %s/%s is not a regular file' % (where, rel_dir, n))
+        if not stat.S_ISREG(os.lstat(full / n).st_mode): raise PacketError('%s: %s/%s is not a regular file' % (where, rel_dir, n))
+    return names
+
+def deb_files(directory, sums, rel_dir, where):
+    """Names of the .deb files in a packet directory; every entry must be a regular .deb listed in SHA256SUMS and matching."""
+    names = folder_files(directory, rel_dir, where)
+    for n in names:
         if not n.endswith('.deb'): raise PacketError('%s: %s/%s is not a .deb (the debs directory holds only packages)' % (where, rel_dir, n))
         hashed_file(directory, sums, rel_dir.rstrip('/') + '/' + n, where)
     if not names: raise PacketError('%s: no .deb files in %s' % (where, rel_dir))
     return names
+
+def dependency_set(directory, sums, rel_dir, where):
+    """A dependency set a packet carries: the operating system packages of ONE system of the record
+    (apt/supported-os.json), which the folder names with the file <system id>.txt, as an offline medium does.
+    Every file of the folder has to be listed in SHA256SUMS and match: the core publishes from a copy that holds
+    only listed files, and a set that lost its marker on the way would be filed under the core's own release.
+    -> (system id, its release name, {package file: sha256}, one sha256 over every file of the folder)"""
+    base, debs, marks, listing = rel_dir.rstrip('/'), {}, [], []
+    for n in folder_files(directory, rel_dir, where):
+        sha = hashed_file(directory, sums, base + '/' + n, where)
+        listing.append('%s  %s\n' % (sha, n))
+        if n.endswith('.deb'): debs[n] = sha
+        elif SET_MARKER.match(n): marks.append(n[:-len('.txt')])
+    if not debs: raise PacketError('%s: no .deb files in %s' % (where, rel_dir))
+    if len(marks) != 1:
+        raise PacketError('%s: %s has to say the one system it is built for, with one file <system id>.txt (it has: %s)'
+                          % (where, rel_dir, ', '.join(m + '.txt' for m in marks) or 'none'))
+    try: entry = system_of(supported_systems(), marks[0])
+    except ValueError as exc: raise PacketError('%s: %s is built for a system this CLI does not know. %s' % (where, rel_dir, exc))
+    return marks[0], entry['codename'], debs, sha256_bytes(''.join(listing).encode())
 
 def release_sources(release):
     """Relative source files a catalog release.json asks the publisher to copy."""
@@ -395,8 +422,9 @@ def release_sources(release):
     return found
 
 class Packet:
-    def __init__(self, directory, doc, files, publications):
+    def __init__(self, directory, doc, files, publications, checked=None):
         self.directory, self.doc, self.files, self.publications = directory, doc, files, publications
+        self.checked = len(files) if checked is None else checked     # how many files were compared with SHA256SUMS
         self.record = {'packet': doc, 'files': files}
         self.run_id = sha256_bytes(canonical(self.record).encode())
 
@@ -411,9 +439,17 @@ def load_packet(path):
     except ValueError as exc:
         raise PacketError('release-run.json is not valid JSON: %s' % exc)
     validate_doc(doc)
-    publications, catalogs = [], []
+    publications, catalogs, folded = [], [], 0
     for i, item in enumerate(doc.get('publish', [])):
         where = 'publish[%d]' % i
+        if item['kind'] == 'dependencies':
+            system, release, debs, digest = dependency_set(directory, sums, item['dir'], where)
+            # One line of the record stands for the whole folder (its name ends in "/"): a set is hundreds of
+            # files, and the record is read by every member with the core's release notice.
+            files[item['dir'].rstrip('/') + '/'] = digest
+            folded += len(os.listdir(directory / item['dir'])) - 1
+            publications.append({'kind': 'dependencies', 'dir': item['dir'], 'system': system, 'release': release, 'files': debs})
+            continue
         if item['kind'] == 'runtime':
             rel = item['manifest']
             files[rel] = hashed_file(directory, sums, rel, where)
@@ -440,9 +476,11 @@ def load_packet(path):
             if not isinstance(source, str): raise PacketError('%s has an invalid source' % rel)
             files[source] = hashed_file(directory, sums, source, rel + ' source')
         catalogs.append({'kind': 'catalog', 'app': release['name'], 'version': release['version'], 'path': rel})
-    # Fixed execution order whatever the packet order: runtime images, then packages, then catalog apps.
-    publications = sorted(publications, key=lambda p: ('runtime', 'debs').index(p['kind'])) + catalogs
-    return Packet(directory, doc, dict(sorted(files.items())), publications)
+    # Fixed execution order whatever the packet order: a dependency set, runtime images, packages, then catalog apps.
+    # The set goes first: adding it rebuilds the core's release notice from what is published, and between the
+    # runtime images and the packages that notice would name a release that is neither the old one nor the new.
+    publications = sorted(publications, key=lambda p: ('dependencies', 'runtime', 'debs').index(p['kind'])) + catalogs
+    return Packet(directory, doc, dict(sorted(files.items())), publications, len(files) + folded)
 
 def record_problem(record):
     """Validate a record received from the core (same closed schema, no files on disk). Returns None or a reason."""
@@ -489,7 +527,11 @@ def summary_lines(record, run_id, publications=None):
     if pubs:
         lines.append('Core publishes, in this order:')
         for p in pubs:
-            if p['kind'] == 'runtime':
+            if p['kind'] == 'dependencies':
+                lines.append('  - the dependency set of %s: %d package file(s) from %s, served under deps/%s (isle apt-repo publish '
+                             '--only-dependencies); the release the core announces stays the one it is'
+                             % (p['system'], len(p['files']), p['dir'], p['release']))
+            elif p['kind'] == 'runtime':
                 lines.append('  - runtime images from %s: %s (isle update publish-runtime)' % (p['manifest'], '; '.join(
                     '%s %s' % (m, ', '.join(c)) for m, c in p['runtimes'].items())))
             elif p['kind'] == 'debs':
@@ -1114,7 +1156,7 @@ def cmd_check(deps, directory, expect=None):
         deps.say('REFUSED: check on %s: %s' % (deps.device(), exc)); return 1
     if not check_expect(deps, pk, expect, 'check', deps.device()): return 1
     for line in summary_lines(pk.record, pk.run_id, pk.publications): deps.say(line)
-    deps.say('Packet is valid: %d file(s) match SHA256SUMS. Nothing was changed.' % len(pk.files))
+    deps.say('Packet is valid: %d file(s) match SHA256SUMS. Nothing was changed.' % pk.checked)
     return 0
 
 ROLE_WORDS = {'core': 'the core', 'remote': 'a member'}
@@ -1267,7 +1309,28 @@ def prepared_copy(deps, pk, receipt):
     return fresh
 
 def publication_key(p):
-    return {'runtime': 'publish-runtime', 'debs': 'publish-debs'}.get(p['kind']) or 'publish:' + p['app']
+    return {'runtime': 'publish-runtime', 'debs': 'publish-debs', 'dependencies': 'publish-dependencies'}.get(p['kind']) or 'publish:' + p['app']
+
+def dependencies_missing(deps, p):
+    """What a device of that release could not yet fetch of a dependency set: deps/<release>/Packages on apt.isle
+    must list every package file of the set with its checksum, and every one of those files must answer 200."""
+    index = 'https://apt.isle/deps/%s/Packages' % p['release']
+    status, body = deps.http(index)
+    if status != 200: return ['%s answers %s' % (index, status)]
+    served = {}
+    for block in body.decode('utf-8', 'replace').split('\n\n'):
+        fields = dict(line.split(': ', 1) for line in block.splitlines() if ': ' in line and not line.startswith(' '))
+        if 'Filename' in fields: served[fields['Filename'].rsplit('/', 1)[-1]] = fields.get('SHA256')
+    absent = sorted(n for n, sha in p['files'].items() if served.get(n) != sha)
+    if absent:
+        return ['%s lists %d of the %d package files of the set with their checksums (first one it does not: %s)'
+                % (index, len(p['files']) - len(absent), len(p['files']), absent[0])]
+    missing = []
+    for n in sorted(p['files']):
+        status, _ = deps.http('https://apt.isle/' + quote(n), head=True)
+        if status != 200: missing.append('https://apt.isle/%s answers %s' % (n, status))
+        if len(missing) == 5: missing.append('(and it was not asked for the rest)'); break
+    return missing
 
 def release_missing(deps, release_id):
     """What a member could not yet fetch for this release: /updates must name the id, and every package file and every
@@ -1356,7 +1419,19 @@ def run_core(deps, pk, device, submitted_by=None):
         if any((receipt.entry(publication_key(p)) or {}).get('state') != 'done' for p in pk.publications):
             src = prepared_copy(deps, pk, receipt)       # publish from a root-owned copy, never from the user's directory
         for p in pk.publications:
-            if p['kind'] == 'runtime':
+            if p['kind'] == 'dependencies':
+                e = receipt.begin('publish-dependencies', 'publish-dependencies', 'publish the dependency set of %s (%d package files) from %s'
+                                  % (p['system'], len(p['files']), p['dir']))
+                if e is not None:
+                    run_publish(deps, receipt, e, ['bash', str(deps.scripts / 'apt-repo.sh'), 'publish', '--only-dependencies',
+                                                   '--dependencies-from', str(src.directory / p['dir'])], 'publish-dependencies')
+                e = receipt.begin('wait-served:dependencies', 'wait-served', 'wait until the dependency set of %s is served on apt.isle' % p['system'])
+                if e is not None:
+                    try: poll(deps, 'wait-served dependencies', lambda p=p: dependencies_missing(deps, p), deps.wait_limit)
+                    except Refused as r:
+                        receipt.end(e, r.state, r.why); raise
+                    receipt.end(e, 'done', 'deps/%s lists every package file of the set, and every one answers' % p['release'])
+            elif p['kind'] == 'runtime':
                 e = receipt.begin('publish-runtime', 'publish-runtime', 'publish runtime images from ' + p['manifest'])
                 if e is not None:
                     run_publish(deps, receipt, e, ['bash', str(deps.scripts / 'update.sh'), 'publish-runtime', str(src.directory / p['manifest'])], 'publish-runtime')
@@ -1573,9 +1648,10 @@ def cmd_status(deps, run_id=None):
 HELP = """isle release - one reviewed release across the isle (slice 2)
   isle release build <out-dir> --previous <dir>          no sudo: build the packet of the next CLI release from one
         commit of the isle repository (`isle release build help` for the rest); nothing is published or installed
+  isle release build <out-dir> --dependencies <set dir>  no sudo: a packet that holds one dependency set and nothing else
   isle release check <packet-dir> [--expect <run-id>]    read-only: validate the packet, say what would happen
   sudo isle release run <packet-dir> [--yes] [--expect <run-id>] [--wait <minutes> | --no-wait]
-        core: copy the packet to a root-owned directory, publish (fixed order: runtime images, packages, catalog apps),
+        core: copy the packet to a root-owned directory, publish (fixed order: a dependency set, runtime images, packages, catalog apps),
         wait until served, run own steps, sign the approval, announce, then wait (default 30 min) for the approved
         members to report. Exit 0 all done, 1 any failed, 3 some still pending.
   sudo isle release follow [--yes] [--auto]   member: verify the signed approval, then run this device's steps;
@@ -1599,8 +1675,12 @@ A packet is SHA256SUMS + release-run.json (docs/release-run.example.json) and ma
   {"kind":"debs","dir":"<dir>"}            CLI/shell packages (isle apt-repo publish --from); every file in the dir must be a .deb
                                            listed in SHA256SUMS; publishing assigns the release id
   {"kind":"catalog","release":"<file>"}    a store app (isle store publish)
+  {"kind":"dependencies","dir":"<dir>"}    one dependency set: operating system packages and one file <system id>.txt that says
+                                           the system they are for (isle apt-repo publish --only-dependencies); every file in the
+                                           dir must be listed in SHA256SUMS; added first and waited for, and the release the core
+                                           announces stays the one it is; needs no debs entry
 Device steps: update-apply (releaseId may be "published" = the id this run's publication assigned, taken from the signed
-approval on members), store-install, module-add, hotfix (name: an `isle hotfix` fix the device's own CLI must know). At most one runtime and one debs entry."""
+approval on members), store-install, module-add, hotfix (name: an `isle hotfix` fix the device's own CLI must know). At most one runtime, one debs and one dependencies entry."""
 
 def parse_args(args, flags, valued):
     """-> (positionals, {option: value}); raises ValueError on an unknown option or missing value."""

@@ -361,6 +361,45 @@ else:sys.exit(90)
             with self.subTest(folder=folder):
                 result=self.publish('--dependencies-from',str(folder));self.assertNotEqual(result.returncode,0)
                 self.assertEqual(list(self.repo.iterdir()),[])
+    def only(self,*args):
+        return subprocess.run(['bash',str(self.script),'publish','--only-dependencies',*args],env=self.env,capture_output=True,text=True,timeout=15)
+    def test_only_a_dependency_set_is_added_and_no_package_is_looked_for(self):
+        self.deb(self.platform,'polari-platform_1_all.deb','polari-platform','1','all')
+        first=self.publish();self.assertEqual(first.returncode,0,first.stdout+first.stderr)
+        main=(self.repo/'Packages').read_bytes()
+        home=self.root/'polari-shells';home.mkdir();self.deb(home,'polari-left-behind_9_all.deb','polari-left-behind','9','all')
+        self.deb(self.dependencies,'libfoo_1-22.04_amd64.deb','libfoo','1-22.04');(self.dependencies/'ubuntu-22.04.txt').write_text('ubuntu-22.04\n')
+        result=self.only('--dependencies-from',str(self.dependencies));self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        self.assertEqual(self.listed('jammy'),['libfoo_1-22.04_amd64.deb'])
+        self.assertEqual((self.repo/'Packages').read_bytes(),main,'the main index lists what it listed')
+        self.assertEqual(sorted(p.name for p in self.repo.glob('*.deb')),['libfoo_1-22.04_amd64.deb','polari-platform_1_all.deb'])
+        self.assertIn('1 isle and polari packages in the main index, 1 operating system packages in deps/jammy',result.stdout)
+    def test_only_dependencies_is_refused_unchanged_with_packages_or_without_a_set(self):
+        self.deb(self.platform,'polari-platform_1_all.deb','polari-platform','1','all')
+        self.deb(self.dependencies,'libfoo_1_amd64.deb','libfoo','1')
+        for words,args in (('it does not go with --from',('--from',str(self.platform),'--dependencies-from',str(self.dependencies))),
+                           ('--only-dependencies needs the set',()),
+                           ('dependency directory missing',('--dependencies-from',str(self.root/'absent')))):
+            with self.subTest(words=words):
+                result=self.only(*args);self.assertNotEqual(result.returncode,0,result.stdout)
+                self.assertIn(words,result.stdout+result.stderr);self.assertIn('epository unchanged',result.stdout+result.stderr)
+                self.assertEqual(list(self.repo.iterdir()),[])
+        (self.dependencies/'libfoo_1_amd64.deb').unlink()
+        result=self.only('--dependencies-from',str(self.dependencies));self.assertNotEqual(result.returncode,0,result.stdout)
+        self.assertEqual(list(self.repo.iterdir()),[])
+    def test_a_set_added_alone_may_not_hold_an_isle_or_polari_package(self):
+        # the release the core announces is read from those packages, and a set added alone must leave it as it is
+        self.deb(self.dependencies,'libfoo_1_amd64.deb','libfoo','1')
+        for name in ('isle-mesh-cli','polari-shell-core'):
+            with self.subTest(name=name):
+                extra=self.deb(self.dependencies,name+'_9_all.deb',name,'9','all')
+                result=self.only('--dependencies-from',str(self.dependencies));text=result.stdout+result.stderr
+                self.assertNotEqual(result.returncode,0,text);self.assertIn('adds operating system packages only',text);self.assertIn(extra.name,text)
+                self.assertEqual(list(self.repo.iterdir()),[]);extra.unlink()
+        # the same folder given beside the packages of a release is taken, as before
+        self.deb(self.platform,'polari-platform_1_all.deb','polari-platform','1','all')
+        self.deb(self.dependencies,'isle-mesh-cli_9_all.deb','isle-mesh-cli','9','all')
+        result=self.publish('--dependencies-from',str(self.dependencies));self.assertEqual(result.returncode,0,result.stdout+result.stderr)
     def test_existing_conflicting_release_preserved_without_partial_copy(self):
         existing=self.deb(self.repo,'existing.deb','package-a','1',content='old').read_bytes()
         self.deb(self.platform,'new-name.deb','package-a','1',content='new')
