@@ -27,9 +27,11 @@ class AptPublication(unittest.TestCase):
         self.dependencies=self.root/'dependencies';self.dependencies.mkdir()
         self.repo=self.etc/'isle-mesh/apt/repo';self.repo.mkdir(parents=True)
         self.bin=self.root/'bin';self.bin.mkdir();self.log=self.root/'calls'
-        self.script=self.root/'apt-repo.sh'
+        self.cli=self.root/'cli/scripts';self.cli.mkdir(parents=True);(self.root/'cli/apt').mkdir()
+        self.script=self.cli/'apt-repo.sh'
         self.script.write_text(SOURCE.read_text().replace('/etc/',str(self.etc)+'/'))
-        (self.root/'apt_index_split.py').write_text(SOURCE.with_name('apt_index_split.py').read_text())
+        for name in ('apt_index_split.py','supported_os.py'):(self.cli/name).write_text(SOURCE.with_name(name).read_text())
+        (self.root/'cli/apt/supported-os.json').write_text((SOURCE.parent.parent/'apt/supported-os.json').read_text())
         (self.etc/'os-release').write_text('NAME="Ubuntu"\nVERSION_CODENAME=noble\nUBUNTU_CODENAME=noble\n')
         self.deps=self.repo/'deps/noble'
         ca=self.etc/'isle-mesh/ca/isle-root.crt';ca.parent.mkdir();ca.write_text('fixture CA')
@@ -138,14 +140,14 @@ else:sys.exit(90)
         for flag in ('FAIL_SIGN','FAIL_SIGN_DEPS'):
             with self.subTest(flag=flag):
                 second=self.publish('--dependencies-from',str(self.dependencies),**{flag:'1'});self.assertNotEqual(second.returncode,0)
-                self.assertIn('InRelease signing failed'+(' (dependency set)' if flag=='FAIL_SIGN_DEPS' else ''),second.stdout+second.stderr)
+                self.assertIn('InRelease signing failed'+(' (dependency set noble)' if flag=='FAIL_SIGN_DEPS' else ''),second.stdout+second.stderr)
                 for path,data in committed.items():self.assertEqual(path.read_bytes(),data,path)
                 for base in (self.repo,self.deps):self.assert_hashes_available((base/'InRelease').read_text(),canonical=True,base=base)
         third=self.publish('--dependencies-from',str(self.dependencies));self.assertEqual(third.returncode,0,third.stdout+third.stderr)
         self.assertIn('Version: 2',(self.deps/'Packages').read_text());self.assertIn('Version: 2',(self.repo/'Packages').read_text())
     def test_the_dependency_index_is_committed_before_the_main_index(self):
         text=SOURCE.read_text()
-        self.assertLess(text.index('commit_index "$METADATA/deps"'),text.index('commit_index "$METADATA/main"'))
+        self.assertLess(text.index('commit_index "$METADATA/deps/$name"'),text.index('commit_index "$METADATA/main"'))
         self.deb(self.platform,'polari-platform_1_all.deb','polari-platform','1','all')
         self.deb(self.dependencies,'libfoo_1_amd64.deb','libfoo','1')
         result=self.publish('--dependencies-from',str(self.dependencies));self.assertEqual(result.returncode,0,result.stdout+result.stderr)
@@ -156,10 +158,60 @@ else:sys.exit(90)
         result=self.publish();self.assertNotEqual(result.returncode,0)
         self.assertIn("cannot read this core's Ubuntu release name",result.stdout+result.stderr)
         self.assertEqual(list(self.repo.iterdir()),[])
-        (self.etc/'os-release').write_text('VERSION_CODENAME=noble\n');(self.root/'apt_index_split.py').unlink()
+        (self.etc/'os-release').write_text('VERSION_CODENAME=noble\n');(self.cli/'apt_index_split.py').unlink()
         result=self.publish();self.assertNotEqual(result.returncode,0)
         self.assertIn('apt_index_split.py is missing',result.stdout+result.stderr)
         self.assertEqual(list(self.repo.iterdir()),[])
+    def listed(self,release):
+        return sorted(l.split('/')[-1] for l in (self.repo/'deps'/release/'Packages').read_text().splitlines() if l.startswith('Filename:'))
+    def test_a_set_built_for_another_release_is_filed_under_it_and_the_first_set_stays(self):
+        self.deb(self.platform,'polari-platform_1_all.deb','polari-platform','1','all')
+        self.deb(self.dependencies,'libfoo_1-24.04_amd64.deb','libfoo','1-24.04')
+        self.deb(self.repo,'libold_1_amd64.deb','libold','1')                    # in the repository before there were sets: this core's release
+        first=self.publish('--dependencies-from',str(self.dependencies));self.assertEqual(first.returncode,0,first.stdout+first.stderr)
+        other=self.root/'jammy-set';other.mkdir()
+        self.deb(other,'libfoo_1-22.04_amd64.deb','libfoo','1-22.04');self.deb(other,'libbar_3_all.deb','libbar','3','all')
+        second=self.publish('--dependencies-from',str(other),'--dependencies-release','jammy');self.assertEqual(second.returncode,0,second.stdout+second.stderr)
+        self.assertIn('dependency set filed under deps/jammy (as typed)',second.stdout)
+        self.assertIn('2 operating system packages in deps/jammy, 2 operating system packages in deps/noble',second.stdout)
+        self.assertEqual(self.listed('noble'),['libfoo_1-24.04_amd64.deb','libold_1_amd64.deb'])
+        self.assertEqual(self.listed('jammy'),['libbar_3_all.deb','libfoo_1-22.04_amd64.deb'])
+        release=(self.repo/'deps/jammy/Release').read_text()
+        for line in ('Origin: isle-mesh-deps\n','Suite: deps/jammy\n','Codename: jammy\n'):self.assertIn(line,release)
+        self.assertEqual(len(list(self.repo.glob('*.deb'))),5);self.assertFalse(list((self.repo/'deps').rglob('*.deb')))
+        self.assertEqual([l for l in (self.repo/'Packages').read_text().splitlines() if l.startswith('Package')],['Package: polari-platform'])
+        third=self.publish();self.assertEqual(third.returncode,0,third.stdout+third.stderr)   # a later publication keeps every file where it was filed
+        self.assertEqual(self.listed('noble'),['libfoo_1-24.04_amd64.deb','libold_1_amd64.deb'])
+        self.assertEqual(self.listed('jammy'),['libbar_3_all.deb','libfoo_1-22.04_amd64.deb'])
+        again=self.root/'noble-again';again.mkdir();self.deb(again,'libbar_3_all.deb','libbar','3','all')   # the same file, now also given for noble
+        fourth=self.publish('--dependencies-from',str(again),'--dependencies-release','noble');self.assertEqual(fourth.returncode,0,fourth.stdout+fourth.stderr)
+        self.assertIn('libbar_3_all.deb',self.listed('noble'));self.assertIn('libbar_3_all.deb',self.listed('jammy'))
+    def test_a_set_from_an_offline_medium_says_its_release_itself(self):
+        self.deb(self.platform,'polari-platform_1_all.deb','polari-platform','1','all')
+        self.deb(self.dependencies,'libfoo_1-22.04_amd64.deb','libfoo','1-22.04');(self.dependencies/'ubuntu-22.04.txt').write_text('ubuntu-22.04\n')
+        (self.dependencies/'CLOSURE_URIS.txt').write_text('not a marker\n')
+        result=self.publish('--dependencies-from',str(self.dependencies));self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        self.assertIn('dependency set filed under deps/jammy (the directory is marked ubuntu-22.04)',result.stdout)
+        self.assertEqual(self.listed('jammy'),['libfoo_1-22.04_amd64.deb']);self.assertFalse((self.repo/'deps/noble').exists())
+    def test_a_release_that_is_not_in_the_record_or_does_not_match_is_refused_unchanged(self):
+        self.deb(self.platform,'polari-platform_1_all.deb','polari-platform','1','all')
+        self.deb(self.dependencies,'libfoo_1_amd64.deb','libfoo','1')
+        def refused(words,*args):
+            result=self.publish(*args);self.assertNotEqual(result.returncode,0,result.stdout)
+            self.assertIn(words,result.stdout+result.stderr);self.assertIn('epository unchanged',result.stdout+result.stderr)
+            self.assertEqual(list(self.repo.iterdir()),[])
+        refused('jammi is not a release name in the record of supported operating systems (noble, jammy)','--dependencies-from',str(self.dependencies),'--dependencies-release','jammi')
+        refused('../x is not a release name','--dependencies-from',str(self.dependencies),'--dependencies-release','../x')
+        refused('it needs that directory too','--dependencies-release','jammy')
+        refused('dependency directory missing','--dependencies-from',str(self.root/'absent'))
+        (self.dependencies/'ubuntu-22.04.txt').write_text('ubuntu-22.04\n')
+        refused('is built for ubuntu-22.04 (jammy), not for noble','--dependencies-from',str(self.dependencies),'--dependencies-release','noble')
+        (self.dependencies/'ubuntu-24.04.txt').write_text('ubuntu-24.04\n')
+        refused('built for more than one system (ubuntu-22.04, ubuntu-24.04)','--dependencies-from',str(self.dependencies))
+        (self.dependencies/'ubuntu-22.04.txt').unlink();(self.dependencies/'ubuntu-24.04.txt').rename(self.dependencies/'debian-12.txt')
+        refused('built for debian-12, which is not in the record','--dependencies-from',str(self.dependencies))
+        (self.cli/'supported_os.py').unlink();(self.dependencies/'debian-12.txt').unlink()
+        refused('supported_os.py is missing','--dependencies-from',str(self.dependencies))
     def assert_hashes_available(self,release,canonical=False,base=None):
         base=base or self.repo
         self.assertIn('Acquire-By-Hash: yes',release)
@@ -258,7 +310,7 @@ else:sys.exit(90)
                 self.assertNotIn('hosting replica lags',result.stdout)
                 self.assertTrue([c for c in self.calls() if c[0]=='isle' and c[1:3]==['app','deploy']],'the private deploy is still attempted')
     def test_snapshot_objects_survive_republish_with_changed_mutable_files(self):
-        boot=self.root/'isle-bootstrap.sh';ca=self.etc/'isle-mesh/ca/isle-root.crt'
+        boot=self.cli/'isle-bootstrap.sh';ca=self.etc/'isle-mesh/ca/isle-root.crt'
         boot.write_text('bootstrap v1');ca.write_text('CA v1')
         self.deb(self.platform,'platform_1_all.deb','polari-platform','1','all')
         first=self.publish();self.assertEqual(first.returncode,0,first.stdout+first.stderr)

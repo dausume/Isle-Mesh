@@ -48,6 +48,14 @@ def collect(device, images=()):
     record('isle.package_versions',json.dumps(packages),'dpkg-query exact installed package versions')
     record('host.architecture', platform.machine(), 'platform.machine')
     try:
+        # Which operating system this machine runs (isle os devices; a dependency set is filed per release name).
+        from supported_os import read_os_release
+        system, name = read_os_release()
+        if system: record('host.os_release', system, '/etc/os-release ID and VERSION_ID')
+        if name: record('host.os_codename', name, '/etc/os-release release name')
+    except Exception:
+        pass
+    try:
         with open('/proc/meminfo') as stream:
             available = next(int(line.split()[1]) // 1024 for line in stream if line.startswith('MemAvailable:'))
         record('resources.memory_available_mib', available, '/proc/meminfo:MemAvailable')

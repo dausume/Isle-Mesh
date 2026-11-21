@@ -6,7 +6,7 @@
 # isle-mesh-cli / polari-shell-core / isle-app-store over the isle,
 # no internet needed.
 #
-#   isle apt-repo publish [--from <dir>] [--dependencies-from <dir>]
+#   isle apt-repo publish [--from <dir>] [--dependencies-from <dir> [--dependencies-release <release name>]]
 #                                      (core) collect platform + dependency debs,
 #                                          sign, (re)serve at apt.isle
 #   isle apt-repo enable                   (client) trust the repo key +
@@ -17,9 +17,14 @@
 #
 # Two indexes over one set of package files (apt separation, CLI release 89):
 #   ./                 isle-* and polari-* packages only. This is what a device's apt reads.
-#   deps/<release>/    every other package: the operating system packages of the offline
-#                      dependency set, built for the Ubuntu release of this core (noble, ...).
+#   deps/<release>/    every other package: the operating system packages of an offline dependency
+#                      set, one index per Ubuntu release the set was built for (noble, jammy, ...).
 #                      Only `isle apt install` reads it, and only on a device of that release.
+# A set given with --dependencies-from is filed under the release it was built for: the release typed
+# with --dependencies-release, else the one the directory is marked with (an offline medium writes
+# <system id>.txt beside its packages), else this core's own. The release has to be in the record of
+# supported operating systems (apt/supported-os.json; `isle os list`). A package file stays in every
+# set that already lists it, so a core can serve the sets of several releases at once.
 #
 # Trust model: the archive-signing KEY is fetched over a TLS channel
 # the isle root CA authenticates (tier-1 trust must already be
@@ -160,10 +165,11 @@ publish() {
     # then the from-code build output (.generated/debs of a suite
     # checkout) — the normal fresh-box world after build-polari-isle-deb
     local UH; UH="$(getent passwd "${SUDO_USER:-$USER}" | cut -d: -f6)"
-    local FROM="" DEPENDENCIES_FROM=""
+    local FROM="" DEPENDENCIES_FROM="" DEPS_RELEASE="" DEPS_WHY=""
     while [ $# -gt 0 ]; do case "$1" in
         --from) [ $# -ge 2 ] || die "--from needs a directory"; FROM="$2"; shift 2 ;;
         --dependencies-from) [ $# -ge 2 ] || die "--dependencies-from needs a directory"; DEPENDENCIES_FROM="$2"; shift 2 ;;
+        --dependencies-release) [ $# -ge 2 ] || die "--dependencies-release needs a release name (isle os list --table)"; DEPS_RELEASE="$2"; shift 2 ;;
         *) die "unknown publish argument: $1" ;;
     esac; done
     if [ -z "$FROM" ]; then
@@ -177,6 +183,17 @@ publish() {
     local CODENAME; CODENAME=$(os_codename || true)
     [ -n "$CODENAME" ] || die "cannot read this core's Ubuntu release name from /etc/os-release; repository unchanged"
     [ -f "$SCRIPT_DIR/apt_index_split.py" ] || die "this CLI is incomplete (apt_index_split.py is missing); repository unchanged"
+    # Under which release the given dependency set is filed (see the header). Decided before anything is changed.
+    [ -z "$DEPS_RELEASE" ] || [ -n "$DEPENDENCIES_FROM" ] || die "--dependencies-release says what --dependencies-from holds; it needs that directory too; repository unchanged"
+    if [ -n "$DEPENDENCIES_FROM" ]; then
+        [ -d "$DEPENDENCIES_FROM" ] || die "dependency directory missing: $DEPENDENCIES_FROM; repository unchanged"
+        [ -f "$SCRIPT_DIR/supported_os.py" ] || die "this CLI is incomplete (supported_os.py is missing); repository unchanged"
+        local DECIDED
+        DECIDED=$(python3 "$SCRIPT_DIR/supported_os.py" dependency-release "$DEPENDENCIES_FROM" "$CODENAME" "$DEPS_RELEASE" 2>&1) \
+            || die "$DECIDED Repository unchanged."
+        DEPS_RELEASE=${DECIDED%%$'\t'*}; DEPS_WHY=${DECIDED#*$'\t'}
+        echo "   dependency set filed under deps/$DEPS_RELEASE ($DEPS_WHY)"
+    fi
     # Serialise automatic dependency publications and interactive publishes.
     # Readers never need this lock: committed InRelease + by-hash is immutable.
     command -v flock >/dev/null 2>&1 || die "flock is required for repository publication"
@@ -250,25 +267,36 @@ PYPACKAGES
 
     # Build every index/signature privately. A failed indexing/signing pass
     # leaves the committed generation intact for clients already using it.
-    # One scan, two indexes (see the header): main = isle-* and polari-*, deps/<release> = everything else.
-    local METADATA COUNTS MAIN_COUNT DEPS_COUNT
+    # One scan, several indexes (see the header): main = isle-* and polari-*, deps/<release> = everything else,
+    # each package file under the release(s) it was filed for.
+    local METADATA COUNTS MAIN_COUNT="" SETS=() DEPS_WORDS="" kind name count
     METADATA=$(mktemp -d) || die "cannot create private metadata stage"
-    if ! ( sudo mkdir -p "$METADATA/main" "$METADATA/deps" && cd "$REPO" \
+    if ! ( cd "$REPO" \
       && sudo nice -n 15 ionice -c 3 sh -c 'dpkg-scanpackages --multiversion . /dev/null > "$1/scanned" 2>/dev/null' sh "$METADATA" ); then
         sudo rm -rf -- "$METADATA"; die "index build failed"
     fi
-    if ! COUNTS=$(sudo python3 "$SCRIPT_DIR/apt_index_split.py" "$METADATA/scanned" "$METADATA/main/Packages" "$METADATA/deps/Packages"); then
+    local SPLIT=("$METADATA/scanned" "$METADATA" "$CODENAME" --served "$REPO")
+    [ -z "$DEPS_RELEASE" ] || SPLIT+=(--add "$DEPS_RELEASE" "$DEPENDENCIES_FROM")
+    if ! COUNTS=$(sudo python3 "$SCRIPT_DIR/apt_index_split.py" "${SPLIT[@]}"); then
         sudo rm -rf -- "$METADATA"; die "index build failed"
     fi
-    MAIN_COUNT=${COUNTS% *}; DEPS_COUNT=${COUNTS#* }
+    while read -r kind name count; do
+        case "$kind" in
+            main) MAIN_COUNT="$name" ;;
+            deps) SETS+=("$name"); DEPS_WORDS="${DEPS_WORDS:+$DEPS_WORDS, }$count operating system packages in deps/$name" ;;
+        esac
+    done <<< "$COUNTS"
+    [ -n "$MAIN_COUNT" ] || { sudo rm -rf -- "$METADATA"; die "index build failed"; }
     if ! build_index "$METADATA/main" isle-mesh "Isle Mesh" isle "" "Isle-Mesh apt-on-mesh repo"; then
         sudo rm -rf -- "$METADATA"; die "$INDEX_ERROR"
     fi
     # Suite = the directory a source line names (deps/<release>): apt compares the two and warns when they differ.
-    if [ "$DEPS_COUNT" != 0 ] && ! build_index "$METADATA/deps" isle-mesh-deps "Isle Mesh dependency set" "deps/$CODENAME" "$CODENAME" \
-            "Operating system packages of the isle offline dependency set, built for $CODENAME"; then
-        sudo rm -rf -- "$METADATA"; die "$INDEX_ERROR (dependency set)"
-    fi
+    for name in ${SETS[@]+"${SETS[@]}"}; do
+        if ! build_index "$METADATA/deps/$name" isle-mesh-deps "Isle Mesh dependency set" "deps/$name" "$name" \
+                "Operating system packages of the isle offline dependency set, built for $name"; then
+            sudo rm -rf -- "$METADATA"; die "$INDEX_ERROR (dependency set $name)"
+        fi
+    done
     sudo GNUPGHOME="$GNUPG" gpg --batch --yes --export -o "$(part_of "$REPO/$KEYRING_NAME")" \
         && commit_part "$REPO/$KEYRING_NAME" || die "archive keyring export failed"
     # serve the remote bootstrap + the root CA next to the debs (the
@@ -341,15 +369,17 @@ recovery. Never accept an unauthenticated fetched root.</p>
 </body></html>
 HTMLEOF
     sudo chmod -R a+rX,go-w "$REPO"
-    # The dependency set goes first: a package leaves the main index only after deps/<release>/ lists it.
-    if [ "$DEPS_COUNT" != 0 ] && ! commit_index "$METADATA/deps" "$REPO/deps/$CODENAME"; then
-        sudo rm -rf -- "$METADATA"; die "atomic metadata publication failed (dependency set)"
-    fi
+    # The dependency sets go first: a package leaves the main index only after deps/<release>/ lists it.
+    for name in ${SETS[@]+"${SETS[@]}"}; do
+        if ! commit_index "$METADATA/deps/$name" "$REPO/deps/$name"; then
+            sudo rm -rf -- "$METADATA"; die "atomic metadata publication failed (dependency set $name)"
+        fi
+    done
     if ! commit_index "$METADATA/main" "$REPO"; then
         sudo rm -rf -- "$METADATA"; die "atomic metadata publication failed"
     fi
     sudo rm -rf -- "$METADATA"
-    ok "repo indexed + signed ($(ls "$REPO"/*.deb | wc -l) debs: $MAIN_COUNT isle and polari packages in the main index, $DEPS_COUNT operating system packages in deps/$CODENAME) + landing page"
+    ok "repo indexed + signed ($(ls "$REPO"/*.deb | wc -l) debs: $MAIN_COUNT isle and polari packages in the main index, ${DEPS_WORDS:-0 operating system packages}) + landing page"
 
     # serve: an nginx on the agent net at apt.isle (bind-mounted, so
     # re-publish is live without redeploy)
@@ -488,5 +518,5 @@ case "${1:-help}" in
     enable)  enable_client ;;
     pin)     shift; pin "$@" ;;
     status)  status ;;
-    *) echo "usage: isle apt-repo [publish [--from <dir>] [--dependencies-from <dir>]|snapshot|enable|pin [check|apply]|status]" ;;
+    *) echo "usage: isle apt-repo [publish [--from <dir>] [--dependencies-from <dir> [--dependencies-release <release name>]]|snapshot|enable|pin [check|apply]|status]" ;;
 esac

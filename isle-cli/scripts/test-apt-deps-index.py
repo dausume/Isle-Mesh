@@ -101,7 +101,8 @@ with tempfile.TemporaryDirectory(prefix='isle-apt-deps-') as directory:
     # ---- A. the real publication
     fixture = root / 'fixture'
     (fixture / 'apt-repo.sh').write_text((SCRIPTS / 'apt-repo.sh').read_text().replace('/etc/', str(etc) + '/'))
-    for name in ('apt_index_split.py', 'isle-bootstrap.sh', 'apt-install.sh'): shutil.copy(SCRIPTS / name, fixture / name)
+    for name in ('apt_index_split.py', 'supported_os.py', 'isle-bootstrap.sh', 'apt-install.sh'): shutil.copy(SCRIPTS / name, fixture / name)
+    (root / 'apt').mkdir(); shutil.copy(SCRIPTS.parent / 'apt' / 'supported-os.json', root / 'apt' / 'supported-os.json')   # the record, where the copied script looks for it
     (etc / 'os-release').write_text(f'NAME="Test"\nVERSION_CODENAME={CODENAME}\n')
     stand_ins = {'sudo': '#!/bin/bash\nwhile [[ "${1:-}" == *=* ]]; do export "$1"; shift; done\nexec "$@"\n',
                  'getent': '#!/bin/bash\necho "fixture:x:1000:1000::%s:/bin/bash"\n' % root,

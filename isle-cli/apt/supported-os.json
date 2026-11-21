@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "about": "The operating systems the isle is run on, and what differs between them for packages. Read by isle os (supported_os.py) and by isle apt-repo publish, which files a dependency set only under a release name listed here. A proof says how far a system is proven in a role: live-verified (a real machine of an isle runs it in that role), source-tested (proven in tests only), not proven. Every value below was read on a machine or in the build scripts; the place is named in evidence.",
+  "systems": [
+    {
+      "id": "ubuntu-24.04",
+      "distribution": "ubuntu",
+      "version": "24.04",
+      "codename": "noble",
+      "architectures": ["amd64"],
+      "core": "live-verified",
+      "member": "source-tested",
+      "baseImage": "ubuntu:24.04",
+      "apt": "2.8",
+      "python3": "3.12",
+      "packageNames": {},
+      "variations": [
+        "The offline dependency list is written with this release's package names (libgtk-3-0t64, libasound2t64).",
+        "The full offline medium (router image, dependency set, container images) is built and installed for this release."
+      ],
+      "evidence": [
+        "core: a core runs this release with CLI release 89 (read on the machine 2026-11-21: apt 2.8.4, python 3.12.3, amd64)",
+        "member: test-apt-deps-index.py installs as a member in a container of this release; no real member runs it yet",
+        "baseImage: build-offline-bundle.sh resolves the dependency set in this image"
+      ]
+    },
+    {
+      "id": "ubuntu-22.04",
+      "distribution": "ubuntu",
+      "version": "22.04",
+      "codename": "jammy",
+      "architectures": ["amd64"],
+      "core": "not proven",
+      "member": "live-verified",
+      "baseImage": "ubuntu:22.04",
+      "apt": "2.4",
+      "python3": "3.10",
+      "packageNames": {
+        "libgtk-3-0t64": "libgtk-3-0",
+        "libasound2t64": "libasound2",
+        "systemd-resolved": "systemd"
+      },
+      "variations": [
+        "Two libraries carry their older names here (packageNames): 24.04 renamed them with the t64 suffix.",
+        "systemd-resolved is not a package of its own here: it is part of systemd (24.04 split it out).",
+        "python3 is 3.10: every isle CLI script has to run on it, so nothing newer than 3.10 is used in them.",
+        "A core has never been installed on this release; the offline medium can be built for it (--target ubuntu-22.04) but that build is not proven by an install."
+      ],
+      "evidence": [
+        "member: two members run this release with CLI release 89 (read on the machines 2026-11-21: apt 2.4.14 and 2.4.15, python 3.10.12, amd64)",
+        "packageNames: build-offline-medium.sh replaces the two library names for --target ubuntu-22.04; systemd-resolved has no candidate in the base image of this release (read 2026-11-21), and the dependency list resolves once it is named systemd",
+        "dependency set: built for this release on 2026-11-21 from the offline dependency list (927 packages, 539 MB, every one checked against the signed archive index); not published on a core yet",
+        "baseImage: build-offline-bundle.sh resolves the dependency set in this image"
+      ]
+    }
+  ]
+}

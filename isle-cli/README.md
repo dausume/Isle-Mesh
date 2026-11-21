@@ -450,6 +450,45 @@ DNS, starts an app, authorizes removal, or records migration completion. Both
 snapshot and destination verification remain preparatory shared operations;
 copy, mount lifecycle, app deployment and verified cutover are separate work.
 
+### Supported operating systems and dependency sets
+
+The operating systems the isle is run on are written down in one file of this CLI,
+`apt/supported-os.json`. It is data, not code: one entry per system with its release name, its
+architectures, how far it is proven as a core and as a member (`live-verified`, `source-tested` or
+`not proven`), the image its dependency set is resolved in, and what differs from the other systems
+for packages (for example a library that has another name there). A system is added by adding its
+entry after it has been proven; no script decides by a release name written into it.
+
+```sh
+isle os list --table       # the record
+isle os check --table      # this machine: its system, whether the record has it, whether the core serves its dependency set
+isle os devices --table    # what every machine of the isle last reported as its system
+```
+
+All three only read; without `--table` they print JSON. `isle os check` exits 0 when this machine's
+system and architecture are in the record and 1 when not. Every machine sends its system
+(`host.os_release`, for example `ubuntu-22.04`) and its release name (`host.os_codename`) with its
+normal device report; `isle os devices` shows them from the core's device list, so a machine with an
+older CLI shows as "not reported".
+
+The isle package repository has two kinds of index. The main index holds only `isle-*` and `polari-*`
+packages and is what a device's own apt reads. The operating system packages those need offline are
+**dependency sets**. A set is built for one release, so each release has its own index,
+`deps/<release name>/`, and only `isle apt install` reads it, on a device of that same release. The
+package files of all sets lie together in the repository; an index only lists them.
+
+```sh
+sudo isle apt-repo publish --dependencies-from <directory> [--dependencies-release <release name>]
+```
+
+The release a set is filed under is decided before anything is changed, in this order: the release
+typed with `--dependencies-release`; the marker file an offline medium writes beside its packages
+(`<system id>.txt`, for example `ubuntu-22.04.txt`); else this core's own release. A typed or marked
+release has to be in the record, and a typed one may not disagree with the marker; otherwise the
+publication is refused and the repository is unchanged. A later publication keeps every package file
+in each set that already lists it, so adding a set for one release never empties another. A package
+file that no set lists is filed under this core's own release.
+
 ### Storage devices, partitions and roles (st-1)
 
 A machine's storage is described by three things. A **device** is a disk, named by its hardware serial and
