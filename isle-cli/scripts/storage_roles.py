@@ -50,6 +50,8 @@ USAGE = ('Usage: isle storage device list [--table] | isle storage partition lis
          '       sudo isle storage device health <serial> [--table]\n'
          '       isle storage partition create <serial> [--partition <partition-identifier>|--whole --role <role>[,<role>...] [--label <label>]]\n'
          '       sudo isle storage partition create <serial> --partition ...|--whole --role ... --expect <plan-id>      (erases that partition or device)\n'
+         '       sudo isle storage partition mount <filesystem-identifier> --at <folder>\n'
+         '       sudo isle storage partition unmount <filesystem-identifier> [--with-datasets]\n'
          '       isle storage role list [--table] | isle storage role show <role> [--table]\n'
          '       isle storage role list --isle [--table] | isle storage role show <role> --isle [--table]\n'
          'Roles: %s') % ('|'.join(CLASSES), ', '.join(ROLES))
@@ -60,6 +62,7 @@ class Io:
     records = RECORDS
 
     root = storage_devices.LOCAL_ROOT
+    unit_dir, fstab = '/etc/systemd/system', '/etc/fstab'        # partition mount | unmount
     run = staticmethod(subprocess.run)
 
     def tree(self): return storage_devices.read_tree(self.run)
@@ -438,6 +441,9 @@ def main(argv=None, io=None):
     if words[:2] == ['partition', 'create']:
         import storage_create
         return storage_create.main(io, argv)
+    if words[:2] in (['partition', 'mount'], ['partition', 'unmount']):
+        import storage_mounting
+        return storage_mounting.main(io, argv)
     if words[:2] == ['device', 'health']:
         import storage_health
         return storage_health.main(io, argv)

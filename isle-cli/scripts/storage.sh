@@ -12,6 +12,8 @@
 #     device register|retire, partition assign|retire;
 #   partition create <serial> ...: reads the plan for anyone; with --expect <plan-id>, root: makes a filesystem on a partition that
 #     has none, or on a device that has no partition table (this erases it), and records it;
+#   partition mount <filesystem-identifier> --at <folder> | partition unmount <filesystem-identifier>: root; writes, starts, stops and
+#     removes one systemd mount unit that names the filesystem by its identifier (/etc/fstab is never written);
 #   device health <serial>: root; reads the disk's own health report (smartctl) and keeps the result in those records;
 #   units apply --dataset D: root, journaled (rewrites the dataset's systemd units on the hosting device).
 #   units prove --dataset D: root; starts the sync unit now (the sync it starts is the journaled operation).

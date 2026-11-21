@@ -662,6 +662,8 @@ isle storage partition create <serial>
 isle storage partition create <serial> --partition <partition-identifier> --role <role>[,<role>...] [--label <label>]
 isle storage partition create <serial> --whole --role <role>[,<role>...] [--label <label>]
 sudo isle storage partition create <serial> --partition ...|--whole --role ... --expect <plan-id>
+sudo isle storage partition mount <filesystem-identifier> --at <folder>
+sudo isle storage partition unmount <filesystem-identifier> [--with-datasets]
 isle storage role list --table
 isle storage role show <role> --table
 isle storage role list --isle --table
@@ -767,8 +769,32 @@ says what the device holds at that point (a partition table that may be partly w
 partition and no filesystem, with the `--partition` command that goes on from there; a filesystem that may be
 partly made; or a finished filesystem that this machine does not record yet, with the `partition assign`
 command that records it). It does not mount: the new filesystem shows in `partition check` as recorded and not
-mounted. It needs `sfdisk` (package `fdisk`), `blkid` (`util-linux`) and `mkfs.ext4` (`e2fsprogs`); the offline
+mounted, and `partition mount` is the verb for that. It needs `sfdisk` (package `fdisk`), `blkid` (`util-linux`) and `mkfs.ext4` (`e2fsprogs`); the offline
 package list names none of them, and the three machines of the isle have them.
+
+`partition mount` mounts a partition at a folder and keeps it mounted there. It writes one systemd mount unit
+in `/etc/systemd/system` that names the filesystem by its identifier (never by a device name such as `sdb1`,
+which can change), then reloads systemd, enables the unit and starts it. The unit is wanted by the device and
+not by the start of the machine: the partition is mounted each time its disk is present, and a dock disk that
+is away holds nothing up. systemd makes the folder when it is not there. Nothing is erased, formatted or
+moved, `/etc/fstab` is read and never written, and no option of the mount is set (the filesystem's own
+defaults). It refuses, and changes nothing: an identifier this machine does not see, or sees on two partitions;
+a partition of the running system; a device that is not registered; a partition that is mounted already in any
+other way (a mount made by hand or by `/etc/fstab` is not taken over); a filesystem or a folder that
+`/etc/fstab` names; a folder that is `/`, is reached through a link, is not a folder, is not empty or has
+something mounted on it; a unit file for that folder that this verb did not write; and a second folder for a
+partition that has a unit of this verb already. Typed again for a partition it mounted, it says so and changes
+nothing. When a step fails after the unit was written it prints `FAILED:` and says what is there (the unit
+written, or written and enabled, and the partition not mounted by it); the same command goes on from there.
+
+`partition unmount` stops that unit, disables it and removes the file. It only ever touches a unit that
+`partition mount` wrote (the first line of the file says so): a partition mounted another way is refused and
+left alone. A partition that holds a dataset of this machine is refused unless `--with-datasets` is typed,
+because what serves the dataset is bound to the mount and stops with it. The folder is left where it is, no data
+is changed, and the storage records are not touched: the roles stay, and `partition check` shows the partition
+as not mounted. It also removes the unit of a disk that is away. When systemd cannot stop the mount (something
+on it is in use) it prints `FAILED:`, keeps the unit, and says that what depends on the mount may have been
+stopped.
 
 These records describe one machine, and each machine keeps its own. With `--isle`, `role list` and `role show`
 print what every machine of the isle reported, side by side, from any machine: each machine adds its partitions
@@ -780,9 +806,9 @@ cannot read. It is a report, not a check: whether a partition is really there is
 `partition check`. Polari reads the same device list; there is no second store.
 
 The roles are not yet part of the core's placement record, and no verb reads a role to decide where data goes.
-Not built: a verb that mounts a partition, and adding a partition to a partition table that is there.
+Not built: adding a partition to a partition table that is there.
 Tests: `python3 isle-cli/scripts/test-storage-roles.py`, `test-storage-retire.py`, `test-storage-health.py`, `test-storage-create.py`,
-`test-storage-isle.py` and `test-storage-devices.py` (fixtures; `test-storage-create.py` also runs the real `sfdisk`, `blkid` and
+`test-storage-mounting.py`, `test-storage-isle.py` and `test-storage-devices.py` (fixtures; `systemctl` is never started by them; `test-storage-create.py` also runs the real `sfdisk`, `blkid` and
 `mkfs.ext4` on image files it makes in a temporary folder, and never on a device).
 
 ### Storage migration contract (stm-1)

@@ -169,7 +169,8 @@ class Main(unittest.TestCase):
         for argv, text in [(('device',), 'Usage'), (('device', 'list', 'extra'), 'Usage'), (('volume', 'list'), 'Usage'),
                            (('device', 'register'), 'not a listing'), (('partition', 'assign'), 'not a listing'),
                            (('partition', 'check'), 'not a listing'), (('device', 'health'), 'not a listing'),
-                           (('partition', 'create'), 'not a listing'), (('device', 'wipe'), 'Unknown verb')]:
+                           (('partition', 'create'), 'not a listing'), (('partition', 'mount'), 'not a listing'),
+                           (('partition', 'unmount'), 'not a listing'), (('device', 'wipe'), 'Unknown verb')]:
             code, lines, calls = self.call(*argv)
             data = json.loads(lines[0])
             self.assertEqual((code, data['ok'], calls), (1, False, []), argv)
@@ -192,6 +193,9 @@ class Main(unittest.TestCase):
             result = subprocess.run(['node', str(ENTRY), 'storage', 'partition', 'create'], env=env, capture_output=True, text=True, timeout=20)
             self.assertEqual(result.returncode, 2)                       # the verb is built: without a serial it is the usage text
             self.assertIn('isle storage partition create <serial>', result.stdout)
+            result = subprocess.run(['node', str(ENTRY), 'storage', 'partition', 'unmount'], env=env, capture_output=True, text=True, timeout=20)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn('isle storage partition unmount <filesystem-identifier>', result.stdout)
 
 
 if __name__ == '__main__':

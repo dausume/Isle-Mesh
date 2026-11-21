@@ -19,7 +19,7 @@ NOT_A_FILESYSTEM = ('crypto_LUKS', 'LVM2_member', 'linux_raid_member', 'swap')
 VERBS = {'device': ('list',), 'partition': ('list',)}
 LATER = {'device': (), 'partition': ()}
 #: verbs of the same two words that storage_roles.py answers
-RECORD_VERBS = {'device': ('register', 'retire', 'health'), 'partition': ('assign', 'check', 'retire', 'create')}
+RECORD_VERBS = {'device': ('register', 'retire', 'health'), 'partition': ('assign', 'check', 'retire', 'create', 'mount', 'unmount')}
 
 
 def read_tree(run=subprocess.run):
