@@ -1452,9 +1452,9 @@ def nothing_is_imported_lazily_after_a_step_has_run():
     allowed = {'import names', 'import operations', 'import names, operations   # noqa: F401'}
     # the only function-level imports are in Deps.device / journal_allows / preload, all reached before the first step;
     # release_intake and release_offer are imported where a verb starts (setting, a member's run, intake, offer), never
-    # after a step, and release_run only by the __main__ block
+    # after a step, and release_run only by the __main__ block; release_build is the verb `build`, which runs no step at all
     assert all(l.split('#')[0].strip() in {'import names', 'import operations', 'import names, operations', 'import release_intake',
-                                           'import release_offer', 'import release_run'} for _, l in inner), inner
+                                           'import release_offer', 'import release_run', 'import release_build'} for _, l in inner), inner
     for i, l in inner:
         if l.startswith(('import release_intake', 'import release_offer')):
             before = '\n'.join(src[max(0, i - 12):i])

@@ -1,5 +1,7 @@
 #!/bin/bash
 # release.sh - isle release: one reviewed release across the isle (slices 1-2).
+#   isle release build <out-dir> --previous <dir>         no sudo: the packet of the next CLI release, built from one
+#                                         commit of the isle repository (release_build.py); nothing is published
 #   isle release check <packet-dir> [--expect <run-id>]   read-only validation and summary
 #   sudo isle release run <packet-dir> [--expect <run-id>] [--wait <min>|--no-wait]
 #                                         core: publish, wait until served, own steps, sign the approval, announce,
@@ -25,7 +27,7 @@ DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 case "${1:-help}" in
     # run / follow / approval-key / setting <value> need root, but release_run.py says so itself, AFTER it has checked that this device has
     # the role the verb needs: a member must hear "core only" without first being asked for a password.
-    run|follow|approval-key|setting|intake|offer|check|status|help|-h|--help) ;;
+    build|run|follow|approval-key|setting|intake|offer|check|status|help|-h|--help) ;;
     *) echo "unknown release command: $1 (try: isle release help)"; exit 2 ;;
 esac
 exec python3 "$DIR/release_run.py" "$@"

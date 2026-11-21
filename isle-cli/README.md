@@ -326,6 +326,30 @@ archive per item and `device-backup.json`.
 - Nothing is encrypted and nothing is sent anywhere.
 - `isle release run` takes one as a device step: `{"verb": "backup"}`. The run stops there if it is not complete.
 
+### Building the packet of a CLI release
+
+One command turns one commit of this repository into the folder `isle release run` takes. It needs no sudo, asks no
+core anything, and publishes and installs nothing:
+
+    isle release build <out-dir> --previous <dir>
+    isle release build help                  every option
+
+- `--previous` is the folder `members` of the build before. The next version numbers are read from its packages
+  (the last number and the release number each go up by one), and the member packages a CLI release does not
+  rebuild are taken from it unchanged.
+- The commit is built, not the files on disk (`--commit`, default `HEAD` of `--source`). Files that are changed but
+  not committed are counted and said to be left out.
+- A CLI release carries three packages: the CLI, the store, and the combined package a core installs. The command
+  builds all three, then unpacks the CLI package and the combined one and compares every file the CLI package packs
+  with the commit, byte for byte. A difference is a refusal.
+- The packet names no device unless `--device` does: it is then for the core and every member the core heard from
+  in the last 24 hours. `--backup` makes every device take a device-backup first. `--verify <url>` adds a check.
+- It is built on a machine of the isle the release is for, because the store package carries that isle's root
+  certificate.
+- It leaves `packet/` (copy this to where the run is typed), `members/` (the `--previous` of the next build),
+  `source/`, `build.log`, and `build.json`: the commit, the versions and every checksum.
+- A folder that already holds something is never written over.
+
 ### Starting a release run from a member (start setting `any-device`)
 
 By default a release run is started on the core only. The core can allow members to start one:

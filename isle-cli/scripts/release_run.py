@@ -1571,6 +1571,8 @@ def cmd_status(deps, run_id=None):
     return 0
 
 HELP = """isle release - one reviewed release across the isle (slice 2)
+  isle release build <out-dir> --previous <dir>          no sudo: build the packet of the next CLI release from one
+        commit of the isle repository (`isle release build help` for the rest); nothing is published or installed
   isle release check <packet-dir> [--expect <run-id>]    read-only: validate the packet, say what would happen
   sudo isle release run <packet-dir> [--yes] [--expect <run-id>] [--wait <minutes> | --no-wait]
         core: copy the packet to a root-owned directory, publish (fixed order: runtime images, packages, catalog apps),
@@ -1621,6 +1623,9 @@ def main(argv, deps=None):
         cmd = argv[0] if argv else 'help'
         rest = argv[1:]
         if cmd in ('help', '-h', '--help'): deps.say(HELP); return 0
+        if cmd == 'build':
+            import release_build
+            return release_build.main(rest)
         spec = {'check': ((), ('--expect',)), 'run': (('--yes', '--no-wait'), ('--expect', '--wait')),
                 'follow': (('--yes', '--auto'), ()), 'status': ((), ()), 'approval-key': ((), ()), 'setting': ((), ()),
                 'intake': (('--auto',), ()), 'offer': ((), ())}
