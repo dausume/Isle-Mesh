@@ -83,9 +83,22 @@ def isle(t, setting='any-device'):
     core, member = Fake(Path(t) / 'core'), Fake(Path(t) / 'member', 'remote', 'member1')
     member.notice = core.notice                               # members read what the core publishes
     core.intake_io, member.offer_io = CoreIO(Path(t) / 'core', net), MemberIO(Path(t) / 'member', net, 'member1', '10.10.0.11')
+    reports(core, member1='10.10.0.11', member2='10.10.0.12')
     if setting: assert rr.main(['setting', setting], core) == 0, core.said
-    core.said, core.events = [], []
+    core.said, core.events = [], []; core.http_log.clear()
     return core, member, net, make_packet(Path(t) / 'member')
+
+def reports(core, **addresses):
+    """What the agents reported to the core's device list: member -> address, None for a row without one."""
+    for row in core.device_list:
+        if row['name'] in addresses:
+            row.pop('agent_address', None)
+            if addresses[row['name']] is not None: row['agent_address'] = addresses[row['name']]
+
+def asked_devices(core):
+    """How often the core read its device list since the fixture was made or this was last asked."""
+    n = sum(1 for url, head in core.http_log if url.endswith('/api/islemesh/devices')); core.http_log.clear()
+    return n
 
 def offer(member, d, code=3):
     """The member offers the packet and does not wait: exit 3, the offer stays up."""
@@ -182,6 +195,11 @@ def a_member_that_cannot_offer_is_refused_and_nothing_stays_behind():
         member.offer_io.on_free = lambda: (d / 'compose.yml').write_text((d / 'compose.yml').read_text().upper())
         offer(member, d, 1)
         assert refused(member)[0].startswith('REFUSED: offer on member1') and not member.offer_io.deploys and not member.offer_io.home.exists(), member.said
+        member, net, d = fresh()                                                           # ... and its sums with it: a valid packet, but another one
+        member.offer_io.on_free = lambda: ((d / 'compose.yml').write_text('services: {other: {}}\n'), write_sums(d))
+        offer(member, d, 1)
+        assert 'the packet changed while it was copied' in refused(member)[0], member.said
+        assert not member.offer_io.deploys and not member.offer_io.home.exists()
         member, net, d = fresh(deploy_rc=1)
         offer(member, d, 1)
         assert 'could not be served behind this device\'s agent' in refused(member)[0] and 'the agent did not answer' in refused(member)[0]
@@ -197,21 +215,45 @@ def a_member_that_cannot_offer_is_refused_and_nothing_stays_behind():
 def the_core_fetches_only_from_a_name_the_authority_issued_to_that_member():
     with tmp() as t:
         core, member, net, d = isle(t)
-        asked = core.intake_io.asked_router                                                # choosing the setting asked once
-        assert take(core, '--auto') == 0 and core.intake_io.asked_router == asked          # no offer name is held: the router is left alone
         offer(member, d)
         net.claims[NAME1] = 'member2'                                                      # served by member1, issued to member2
         assert take(core) == 0 and not net.fetched and not core.events and answer(core) is None, core.said
-        assert core.intake_io.asked_router == asked
         assert 'member1: the name %s was issued to member2, so nothing is fetched from it.' % NAME1 in core.said, core.said
         net.claims[NAME1] = 'member1'; del net.members['member1']                          # a claim of a device that is no member
         assert take(core) == 0 and not net.fetched and not core.events
-        net.members['member1'] = 'fingerprint-1'; net.leases = [('member2', '10.10.0.12')]
-        assert take(core) == 0 and not net.fetched and 'member1: the router lists no address for its agent.' in core.said, core.said
-        net.leases = None
-        assert take(core) == 0 and not net.fetched and 'The router did not tell which addresses it leased; no member could be asked.' in core.said
-        net.leases = [('member1', '10.10.0.99')]                                           # another address answers nothing
+        assert core.intake_io.asked_router == 0 and not asked_devices(core)                # nobody to ask: neither source was read
+
+@test
+def the_core_finds_a_member_in_its_device_list_first_and_in_the_routers_leases_second():
+    neither = 'member1: neither the core\'s device list nor the router\'s leases give an address for its agent.'
+    with tmp() as t:
+        core, member, net, d = isle(t)
+        assert core.intake_io.asked_router == 0                                            # choosing the setting read the device list only
+        assert take(core, '--auto') == 0 and not asked_devices(core)                       # no offer name is held: nothing is asked
+        offer(member, d)
+        net.leases = None                                                                  # the router is not needed at all
+        assert take(core) == 0 and answer(core)['state'] == 'done' and core.intake_io.asked_router == 0, core.said
+    for report in ({'member1': None}, {'member1': 'not an address'}, {'member1': 7}):      # the list has no usable address: the router's lease
+        with tmp() as t:
+            core, member, net, d = isle(t); reports(core, **report); offer(member, d)
+            assert take(core) == 0 and answer(core)['state'] == 'done' and core.intake_io.asked_router == 1, core.said
+    with tmp() as t:                                                                       # a mock row tells nothing
+        core, member, net, d = isle(t); offer(member, d); net.leases = []
+        next(r for r in core.device_list if r['name'] == 'member1')['is_mock'] = True
+        assert take(core) == 0 and not net.fetched and neither in core.said, core.said
+    with tmp() as t:                                                                       # the list cannot be read: the router's lease
+        core, member, net, d = isle(t); offer(member, d); core.devices_unreadable = True
+        assert take(core) == 0 and answer(core)['state'] == 'done' and core.intake_io.asked_router == 1, core.said
+    with tmp() as t:
+        core, member, net, d = isle(t); reports(core, member1=None); offer(member, d)
+        net.leases = [('member2', '10.10.0.12')]
+        assert take(core) == 0 and not net.fetched and neither in core.said, core.said
+        core.devices_unreadable, net.leases = True, None
+        assert take(core) == 0 and not net.fetched and not core.events, core.said
+        assert 'Neither the core\'s device list nor the router\'s leases could be read; no member could be asked.' in core.said, core.said
+        core.devices_unreadable = False; reports(core, member1='10.10.0.99')               # an address where nothing of that name answers
         assert take(core) == 0 and net.fetched == [(NAME1, 'offer.json')] and not core.events and answer(core) is None
+        assert core.intake_io.asked_router == 2                                            # a reported address is used as it is; the router is not asked again
 
 @test
 def what_a_member_serves_must_be_an_offer_of_that_member():
@@ -368,10 +410,17 @@ def choosing_any_device_switches_the_timer_and_states_its_cost():
         said = text(core)
         assert core.intake_io.timers == [True] and 'isle-release-intake.timer is on' in said and ri.COST in said, said
         assert core.events == ['notice-setting'] and json.loads(core.setting_file.read_text())['start'] == 'any-device'
+    with tmp() as t:                                                                       # one way to find a member is enough
+        core, member, net, d = isle(t, setting=None); net.leases = None
+        assert rr.main(['setting', 'any-device'], core) == 0 and core.intake_io.timers == [True], core.said
+    with tmp() as t:
+        core, member, net, d = isle(t, setting=None); core.devices_unreadable = True
+        assert rr.main(['setting', 'any-device'], core) == 0 and core.intake_io.asked_router == 1, core.said
     for broken, needle in (('members', 'the member list of the certificate authority cannot be read'),
-                           ('claims', 'the list of claimed service names'), ('leases', 'the router did not tell which addresses it leased')):
+                           ('claims', 'the list of claimed service names'),
+                           ('leases', 'neither the core\'s device list nor the router\'s leases can be read')):
         with tmp() as t:
-            core, member, net, d = isle(t, setting=None); setattr(net, broken, None)
+            core, member, net, d = isle(t, setting=None); setattr(net, broken, None); core.devices_unreadable = broken == 'leases'
             assert rr.main(['setting', 'any-device'], core) == 1 and needle in refused(core)[0] and not core.intake_io.timers, core.said
             assert not core.setting_file.exists() and not core.events
     with tmp() as t:
@@ -421,7 +470,7 @@ def the_real_io_reads_no_credential_and_asks_only_over_verified_tls():
             assert argv[argv.index('--max-redirs') + 1] == '0' and argv[argv.index('--max-filesize') + 1] == '5'
             assert not {'-k', '--insecure', '-L', '--location'} & set(argv)
             calls.clear()
-            assert core_io.fetch(NAME1, 'core.isle', 'offer.json', '/x/out', 5) == 'the router gave no usable address' and not calls
+            assert core_io.fetch(NAME1, 'core.isle', 'offer.json', '/x/out', 5) == 'no usable address to ask at' and not calls
         finally: ro.subprocess.run = real
 
 

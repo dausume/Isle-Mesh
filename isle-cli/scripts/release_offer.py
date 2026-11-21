@@ -210,7 +210,7 @@ def put(deps, io, pk, member):
         (home / 'nginx.conf').write_text(NGINX)
         rr.atomic(home / 'docker-compose.yml', compose(image, home), 0o644)      # JSON is YAML
         rr.atomic(home / 'state.json', state, 0o644)
-    except (rr.PacketError, OSError) as exc:
+    except (rr.PacketError, OSError, OfferFailed) as exc:        # whatever stopped it, no copy stays behind
         shutil.rmtree(home, ignore_errors=True)
         raise OfferFailed(str(exc))
     code, words = io.deploy(name, state['domain'], home / 'docker-compose.yml')

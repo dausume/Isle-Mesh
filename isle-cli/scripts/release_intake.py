@@ -14,8 +14,9 @@ What the core checks before a member's packet runs (cmd_take), in this order:
   2. the member is in the certificate authority's root-owned member list, and the offer name derived from that member's
      name is recorded there as claimed by that same member (claims.json): the authority issues the certificate of a
      name to its claimant and to no other member, and the private key stays on the member;
-  3. offer.json and every file are fetched from that name over TLS verified against the isle root alone, from the
-     address the router leased to that member's agent; the offer must name that member;
+  3. offer.json and every file are fetched from that name over TLS verified against the isle root alone; the offer
+     must name that member. Where to ask is the address the member's agent reported to the core's device list, else
+     the one the router leased to it: either only says where to ask, the certificate is what proves the member;
   4. the files, in a root-owned folder, are plain files and exactly the offered ones at their sizes;
   5. the packet passes the full `isle release check` there (every checksum), and its run id is the offered one.
 Then the run is `isle release run --yes --no-wait` on that copy: same publication, same signed approval, same follow
@@ -70,7 +71,8 @@ class IntakeIO:
         return self._names(self.claims_file, missing={})
 
     def leases(self):
-        """[(agent host name, isle address)] as the router leased them, or None when the router did not answer."""
+        """[(agent host name, isle address)] as the router leased them, or None when the router did not answer.
+        The second way to find a member: asked only for a member the core's device list has no address for."""
         import storage_core
         return storage_core.router_leases()
 
@@ -82,7 +84,7 @@ class IntakeIO:
         """Fetch https://<domain>/<path> from `address` into dest, at most `limit` bytes. -> None, or why not.
         Trust is the isle root alone; no redirect is followed; nothing but HTTPS is spoken."""
         try: ipaddress.IPv4Address(address)
-        except ValueError: return 'the router gave no usable address'
+        except ValueError: return 'no usable address to ask at'
         argv = ['curl', '--http1.1', '--silent', '--show-error', '--fail', '--proto', '=https', '--max-redirs', '0',
                 '--connect-timeout', '8', '--max-time', str(int(max_time)), '--max-filesize', str(int(limit)),
                 '--cacert', self.ca_file, '--resolve', '%s:443:%s' % (domain, address), '--output', str(dest),
@@ -102,12 +104,28 @@ def io_of(deps): return getattr(deps, 'intake_io', None) or IntakeIO()
 
 # ---------------------------------------------------------------- the setting (called by release_run.cmd_setting)
 
+def reported_addresses(deps):
+    """{device: the isle address its agent reported to the core's device list}, or None when the list cannot be read.
+    A device writes its own row (every app deploy reports it, so it is fresh when an offer goes up). It only says where
+    to ask: what answers there must still hold the certificate of the member's offer name."""
+    listing = rr.list_devices(deps)
+    if listing is None: return None
+    found = {}
+    for d in listing:
+        address = d.get('agent_address')
+        if d.get('is_mock') or not isinstance(address, str): continue
+        try: found[d['name']] = str(ipaddress.IPv4Address(address))
+        except ValueError: continue
+    return found
+
 def setting_problem(deps):
     """None when this core can take a member's offer, else why any-device cannot be chosen. Asked as root."""
     io = io_of(deps)
     if io.members() is None: return 'the member list of the certificate authority cannot be read on this core'
     if io.claims() is None: return 'the list of claimed service names of the certificate authority cannot be read on this core'
-    if io.leases() is None: return 'the router did not tell which addresses it leased, so the core could not reach a member\'s offer'
+    if reported_addresses(deps) is None and io.leases() is None:
+        return ('neither the core\'s device list nor the router\'s leases can be read, so the core could not find where a '
+                'member\'s offer is')
     return None
 
 def apply_setting(deps, value):
@@ -150,12 +168,21 @@ def _answer(deps, io, answers, member, doc, state, words):
 
 # ---------------------------------------------------------------- the core looks at its members
 
-def look(io, members, claims, answers, told=None):
+def look(io, members, claims, answers, told=None, reported=None):
     """The offers of the paired members that have no final answer yet: [(member, offer, address)], members in name
-    order. `told` (a list) receives a line for every member whose offer could not be read for a reason worth saying."""
+    order. `told` (a list) receives a line for every member whose offer could not be read for a reason worth saying.
+    `reported()` gives the addresses of the core's device list (reported_addresses)."""
     def tell(line):
         if told is not None: told.append(line)
-    leases, found = None, []
+    where, found = {}, []
+    def address_of(member):
+        # Each source is asked once a pass, and only when a member holds an offer name; the router only for a member
+        # the device list has no address for.
+        if 'reported' not in where: where['reported'] = reported() if reported else None
+        address = (where['reported'] or {}).get(member)
+        if address: return address
+        if 'leases' not in where: where['leases'] = io.leases()
+        return io.lease_of(where['leases'], member) if where['leases'] is not None else None
     Path(io.dir).mkdir(parents=True, exist_ok=True)
     for member in sorted(members):
         try: domain = offer_of.offer_domain(member)
@@ -163,10 +190,10 @@ def look(io, members, claims, answers, told=None):
         owner = claims.get(domain)
         if owner is None: continue                            # this member never put an offer up
         if owner != member: tell('%s: the name %s was issued to %s, so nothing is fetched from it.' % (member, domain, owner)); continue
-        if leases is None: leases = io.leases()               # the router is asked only when a member holds an offer name
-        if leases is None: tell('The router did not tell which addresses it leased; no member could be asked.'); return found
-        address = io.lease_of(leases, member)
-        if not address: tell('%s: the router lists no address for its agent.' % member); continue
+        address = address_of(member)
+        if not address and where['reported'] is None and where['leases'] is None:
+            tell('Neither the core\'s device list nor the router\'s leases could be read; no member could be asked.'); return found
+        if not address: tell('%s: neither the core\'s device list nor the router\'s leases give an address for its agent.' % member); continue
         with tempfile.NamedTemporaryFile(dir=io.dir, prefix='offer-') as sink:
             if io.fetch(domain, address, offer_of.OFFER_FILE, sink.name, offer_of.MAX_OFFER_BYTES, 20): continue     # no offer is up
             try: doc = json.loads(Path(sink.name).read_bytes()[:offer_of.MAX_OFFER_BYTES + 1])
@@ -221,7 +248,7 @@ def _take_locked(deps, io, auto):
     answers = read_answers(io)
     if (Path(io.dir) / 'unpublished').exists(): _publish(deps, io, answers)      # an answer an earlier pass could not publish
     told = []
-    offers = look(io, members, claims, answers, told)
+    offers = look(io, members, claims, answers, told, lambda: reported_addresses(deps))
     if not auto:
         for line in told: deps.say(line)
     if not offers:

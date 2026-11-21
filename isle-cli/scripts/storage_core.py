@@ -101,8 +101,13 @@ def real_lease(root=None, device='this device'):
 def router_leases():
     """The isle addresses the router leased to device agents: [(host name, address)], or None when it did not answer."""
     key = '/etc/isle-mesh/router/ssh/isle_router_key'
+    try:
+        import host_network
+        router = host_network.management_gateway()          # the address this core's own record names, not one written here
+    except (OSError, ValueError, AttributeError):
+        return None
     done = _run(['ssh', '-i', key, '-o', 'ConnectTimeout=8', '-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=/dev/null',
-                 'root@192.168.1.1', 'cat /tmp/dhcp.leases'], timeout=30)
+                 'root@' + router, 'cat /tmp/dhcp.leases'], timeout=30)
     if done.returncode != 0:
         return None
     rows = [line.split() for line in done.stdout.splitlines()]

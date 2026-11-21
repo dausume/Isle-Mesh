@@ -328,6 +328,8 @@ By default a release run is started on the core only. The core can allow members
 - The core fetches only from a name the certificate authority issued to that very member, over TLS checked against
   the isle's root, checks the packet again and runs it as if it had been typed on the core. The receipt names the
   offering member.
+- Where the core asks: at the address the member's agent reported to the core's device list, else at the one the
+  router leased to it. The address only says where to ask; the certificate is what proves the member.
 - Cost: root on any paired member can then release to the whole isle, and every device on the isle can read an
   offered packet while it is offered.
 

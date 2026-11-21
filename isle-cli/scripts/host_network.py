@@ -10,9 +10,13 @@ CONFIG=Path('/etc/isle-mesh/host-network.json')
 STATE=Path('/var/lib/isle-mesh/host-network.json')
 def run(argv):return subprocess.run(argv,check=True,capture_output=True,text=True).stdout
 
-def plan():
+def management_gateway():
+    """The router's management address: what this core's record names, else OPENWRT_IP, else router.sh's default."""
     config=json.loads(CONFIG.read_text()) if CONFIG.exists() else {}
-    gateway=str(ipaddress.IPv4Address(config.get('managementGateway',os.environ.get('OPENWRT_IP','192.168.1.1'))))
+    return str(ipaddress.IPv4Address(config.get('managementGateway',os.environ.get('OPENWRT_IP','192.168.1.1'))))
+
+def plan():
+    gateway=management_gateway()
     route=json.loads(run(['ip','-j','-4','route','get',gateway]))[0];interface=route['dev']
     if route.get('gateway') or Path('/sys/class/net',interface,'wireless').exists() or interface.startswith('wl'):
         raise ValueError('Management gateway must be directly reachable on a dedicated wired/bridge link')
