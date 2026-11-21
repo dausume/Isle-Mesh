@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """isle storage device register | partition assign | partition check | role list | role show
+(`partition retire` and `device retire`, which take these away again, are in storage_retire.py.)
 
 The storage records of one machine.  A device is declared by its hardware serial with a class (fixed, dock or
 flash).  A partition is given one role or more than one.  Its roles are written in two places: in a marker file
@@ -43,6 +44,8 @@ USAGE = ('Usage: isle storage device list [--table] | isle storage partition lis
          '       sudo isle storage device register <serial> --class %s\n'
          '       sudo isle storage partition assign <filesystem-identifier> --role <role>[,<role>...]\n'
          '       isle storage partition check [--table]\n'
+         '       sudo isle storage partition retire <filesystem-identifier> --role <role>[,<role>...] [--record-only] [--leave-data]\n'
+         '       sudo isle storage device retire <serial>\n'
          '       isle storage role list [--table] | isle storage role show <role> [--table]\n'
          '       isle storage role list --isle [--table] | isle storage role show <role> --isle [--table]\n'
          'Roles: %s') % ('|'.join(CLASSES), ', '.join(ROLES))
@@ -301,7 +304,7 @@ def assign(io, identifier, asked):
             return _refuse(io, what, '%s, and its marker (written %s on %s) names %s. To make both name all of them: sudo isle storage partition assign %s --role %s' % (
                 'this machine records partition %s with %s' % (row['name'], _words(recorded)) if recorded else 'this machine does not record partition %s' % row['name'],
                 row['marker'].get('assignedAt'), row['marker'].get('assignedOn'), _words(marked), identifier, ','.join(target))
-                + '. Taking a role away is `isle storage partition retire`, which is not in this CLI yet')
+                + '. To take a role away instead: sudo isle storage partition retire %s --role <role>' % identifier)
         mark = sorted(marked) != sorted(target)                  # the marker has to be written (again)
         if row['roleState'] == 'ok' and recorded == target:
             io.say('Partition %s (%s) already carries %s. Nothing was changed.' % (row['name'], identifier, _words(wanted))); return 0
@@ -422,6 +425,9 @@ def main(argv=None, io=None):
         import storage_isle
         return storage_isle.main(io, [a for a in argv if a != '--isle'])
     words = [a for a in argv if a != '--table']
+    if words[:2] in (['partition', 'retire'], ['device', 'retire']):
+        import storage_retire
+        return storage_retire.main(io, argv)
     if words[:1] in (['device'], ['partition']) and (len(words) < 2 or words[1] not in storage_devices.RECORD_VERBS[words[0]]):
         return storage_devices.main(argv, run=io.run, root=io.root, usage=io.usage, out=io.say, records=from_records(io))
     if len(words) == 5 and words[:2] == ['device', 'register'] and words[3] == '--class' and '--table' not in argv:

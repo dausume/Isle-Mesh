@@ -655,13 +655,15 @@ sudo isle storage device register <serial> --class fixed|dock|flash
 isle storage partition list --table
 sudo isle storage partition assign <filesystem-identifier> --role <role>[,<role>...]
 isle storage partition check --table
+sudo isle storage partition retire <filesystem-identifier> --role <role>[,<role>...] [--record-only] [--leave-data]
+sudo isle storage device retire <serial>
 isle storage role list --table
 isle storage role show <role> --table
 isle storage role list --isle --table
 isle storage role show <role> --isle --table
 ```
 
-Without `--table` every listing is a JSON document. The two `sudo` verbs print the command to type when they
+Without `--table` every listing is a JSON document. The `sudo` verbs print the command to type when they
 are run without root, after every check has passed.
 
 `partition assign` adopts a filesystem that already exists and is mounted. It writes one file, the marker
@@ -682,7 +684,7 @@ no role is taken over unasked. A marker that is changed keeps who wrote it first
 
 `assign` refuses, and writes nothing, when: the device is not registered or reports no serial; the partition
 carries the running system; its marker and this machine's record name different roles and not all of them were
-typed (taking a role away is `partition retire`, which is not built yet); a role is typed twice; a role has to
+typed (taking a role away is `partition retire`, below); a role is typed twice; a role has to
 be written to the marker and the filesystem is mounted read-only; the marker or the record changed while the
 command ran; two partitions report the same identifier; the marker names another filesystem (the filesystem
 is a block copy); a file of that name exists that is not a marker; or the filesystem is not mounted whole where
@@ -696,6 +698,25 @@ in any order. `role show <role>` lists the partitions that carry a role with the
 datasets bound on them; a partition with several roles is listed under each, and `role list` counts its free
 space under each (it is one space, and the listing says so).
 
+`partition retire` takes roles away again: afterwards neither the marker nor this machine's record names the
+roles typed. A role that is not typed stays where it is, in the marker and in the record. When no role is left,
+the record entry is dropped and the marker file is removed; that is the only file the verb ever removes. It
+erases, formats, unmounts and moves nothing, and every other file on the partition stays. A role the partition
+does not carry changes nothing and is not an error.
+
+- `--record-only` changes this machine's record and never looks at the marker. It is for a partition whose
+  marker cannot be changed: the disk is away or gone for good, it is not mounted whole, it is mounted read-only,
+  the marker cannot be read, or the filesystem is a block copy. Without the option each of these is a refusal
+  that names it. A marker left behind still names the role wherever the disk is plugged in next.
+- `--leave-data` is needed in two cases, and without it the verb refuses and says why. One: the role `backup`
+  is taken from the partition that holds this machine's device-backups; after that `isle backup` keeps new ones
+  in the machine's state folder and no longer lists the ones on the partition (assigning the role again brings
+  them back). Two: the last role is taken from a partition that a dataset is bound on.
+
+`device retire` takes a device out of this machine's record. It does not look at the disk, so a disk that is
+gone can be retired. It refuses while the record holds a partition with a role on that device, and prints the
+`partition retire` command for each.
+
 These records describe one machine, and each machine keeps its own. With `--isle`, `role list` and `role show`
 print what every machine of the isle reported, side by side, from any machine: each machine adds its partitions
 that carry a role (role, filesystem identifier, class, size, free space, state, datasets; no hardware serial) to
@@ -706,9 +727,9 @@ cannot read. It is a report, not a check: whether a partition is really there is
 `partition check`. Polari reads the same device list; there is no second store.
 
 The roles are not yet part of the core's placement record, and no verb reads a role to decide where data goes.
-Not built: `device health|retire`, `partition create|retire`.
-Tests: `python3 isle-cli/scripts/test-storage-roles.py`, `test-storage-isle.py` and `test-storage-devices.py`
-(fixtures only).
+Not built: `device health`, `partition create`.
+Tests: `python3 isle-cli/scripts/test-storage-roles.py`, `test-storage-retire.py`, `test-storage-isle.py` and
+`test-storage-devices.py` (fixtures only).
 
 ### Storage migration contract (stm-1)
 

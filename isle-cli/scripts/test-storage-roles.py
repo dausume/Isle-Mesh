@@ -605,8 +605,8 @@ class Listings(Case):
         self.assertIn('CLASS', self.m.said[0].splitlines()[0])
 
     def test_verbs_not_built_and_unknown_verbs_say_so(self):
-        for argv, text in ((('partition', 'create'), 'not in this CLI yet'), (('device', 'retire'), 'not in this CLI yet'),
-                           (('device', 'wipe'), 'Known: list, register'), (('partition', 'format'), 'Known: list, assign, check')):
+        for argv, text in ((('partition', 'create'), 'not in this CLI yet'), (('device', 'health'), 'not in this CLI yet'),
+                           (('device', 'wipe'), 'Known: list, register, retire'), (('partition', 'format'), 'Known: list, assign, check, retire')):
             self.assertEqual(self.m.call(*argv), 1, argv)
             self.assertIn(text, json.loads(self.m.said[0])['error'])
 
