@@ -119,7 +119,7 @@ def home(deps):
         _, _, partitions = storage_roles.survey(deps.roles_io())
     except (ValueError, OSError, KeyError, subprocess.SubprocessError) as exc:
         raise Refused('the storage records or the disks of this machine could not be read (%s). See: isle storage partition check' % exc)
-    mine = [row for row in partitions if row.get('recordedRole') == 'backup']
+    mine = [row for row in partitions if 'backup' in (row.get('recordedRoles') or ())]
     if not mine:
         return dict(kind='local', path=str(Path(deps.state) / FOLDER), filesystemUuid=None)
     if len(mine) > 1:

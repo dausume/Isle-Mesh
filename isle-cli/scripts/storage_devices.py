@@ -2,7 +2,7 @@
 """isle storage device list | isle storage partition list - read-only, for anyone.
 
 What this machine has, by identity: a device by its hardware serial, a partition by its filesystem identifier.
-Nothing is mounted, written or registered.  The declared device class and the role come from the storage records
+Nothing is mounted, written or registered.  The declared device class and the roles come from the storage records
 of this machine (storage_roles.py), which hands them in; this file never guesses them.
 """
 from datetime import datetime, timezone
@@ -138,8 +138,8 @@ def table(kind, rows):
                  'yes' if r['hotplug'] else 'no', 'yes' if r['system'] else 'no',
                  'whole device' if r['wholeDeviceFilesystem'] else str(r['partitions'])) for r in rows]
     else:
-        head = ('PARTITION', 'DEVICE', 'SIZE', 'FILESYSTEM', 'IDENTIFIER', 'ROLE', 'STATE', 'MOUNT', 'FREE', 'SYSTEM', 'DATASETS')
-        body = [(r['name'], r['device'], _size(r['sizeBytes']), r['filesystem'] or '-', r['filesystemUuid'] or '-', r.get('role') or '-', r['state'],
+        head = ('PARTITION', 'DEVICE', 'SIZE', 'FILESYSTEM', 'IDENTIFIER', 'ROLES', 'STATE', 'MOUNT', 'FREE', 'SYSTEM', 'DATASETS')
+        body = [(r['name'], r['device'], _size(r['sizeBytes']), r['filesystem'] or '-', r['filesystemUuid'] or '-', ', '.join(r.get('roles') or ()) or '-', r['state'],
                  r['mount'] or '-', _size(r['availableBytes']) if 'availableBytes' in r else '-',
                  'yes' if r['system'] else 'no', ', '.join(r['datasets']) or '-') for r in rows]
     widths = [max(len(str(line[i])) for line in [head] + body) for i in range(len(head))]
@@ -173,7 +173,7 @@ def main(argv=None, *, run=subprocess.run, root=LOCAL_ROOT, usage=_usage, out=No
         else:
             datasets, status = local_datasets(root)
             rows, result = partitions(tree, datasets, usage), dict(datasetsStatus=status)
-        note = records(kind, rows) if records else 'Read-only report. The class and the role were not asked for.'
+        note = records(kind, rows) if records else 'Read-only report. The class and the roles were not asked for.'
     except (OSError, ValueError, KeyError, TypeError, AttributeError, subprocess.SubprocessError) as exc:
         return refuse(str(exc) or exc.__class__.__name__)
     if plain:

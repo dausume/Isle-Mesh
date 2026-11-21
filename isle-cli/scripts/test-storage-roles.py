@@ -96,9 +96,23 @@ class Records(Case):
         for bad in ('{not json', '[]', json.dumps(dict(version=2, devices={}, partitions={})),
                     json.dumps(dict(version=1, devices={'S': {'class': 'shelf'}}, partitions={})),
                     json.dumps(dict(version=1, devices={}, partitions={'x': dict(role='package-repo')})),
-                    json.dumps(dict(version=1, devices={}, partitions={'x': dict(role='attic', deviceSerial='S')}))):
+                    json.dumps(dict(version=1, devices={}, partitions={'x': dict(role='attic', deviceSerial='S')})),
+                    json.dumps(dict(version=1, devices={}, partitions={'x': dict(role='git', roles=['git', 'attic'], deviceSerial='S')})),
+                    json.dumps(dict(version=1, devices={}, partitions={'x': dict(role='git', roles=['git', 'git'], deviceSerial='S')})),
+                    json.dumps(dict(version=1, devices={}, partitions={'x': dict(role='git', roles=['blob', 'git'], deviceSerial='S')})),
+                    json.dumps(dict(version=1, devices={}, partitions={'x': dict(role='git', roles=[], deviceSerial='S')})),
+                    json.dumps(dict(version=1, devices={}, partitions={'x': dict(role='git', roles='git', deviceSerial='S')}))):
             self.m.records.write_text(bad)
             with self.assertRaises(ValueError, msg=bad): sr.read_records(self.m.records)
+
+    def test_one_role_and_more_than_one_are_both_read(self):
+        self.assertEqual(sr.roles_of(dict(role='git')), ['git'])                              # as written before there could be more
+        self.assertEqual(sr.roles_of(dict(role='git', roles=['git', 'blob'])), ['git', 'blob'])
+        self.assertEqual(sr.roles_of(dict(roles=['blob', 'git'])), ['blob', 'git'])
+        for bad in (dict(), dict(role=None), dict(role='git', roles=['blob']), dict(role=['git'])):
+            with self.assertRaises(ValueError, msg=bad): sr.roles_of(bad)
+        self.assertEqual(sr.with_roles(dict(role='x', roles=['x', 'y'], deviceSerial='S'), ['git']), dict(deviceSerial='S', role='git'))
+        self.assertEqual(sr.with_roles(dict(deviceSerial='S'), ['git', 'blob']), dict(deviceSerial='S', role='git', roles=['git', 'blob']))
 
     def test_a_damaged_record_stops_every_verb_and_is_left_alone(self):
         self.m.records.parent.mkdir()
@@ -134,7 +148,9 @@ class Marker(Case):
     def test_what_is_not_a_marker(self):
         folder, path = str(self.m.folders['dock']), self.m.marker('dock')
         for text in ('{not json', '[]', json.dumps(dict(self.GOOD, kind='other')), json.dumps(dict(self.GOOD, version=2)),
-                     json.dumps(dict(self.GOOD, role='attic')), json.dumps(dict(self.GOOD, filesystemUuid=7)), 'x' * (sr.MARKER_MAX + 1)):
+                     json.dumps(dict(self.GOOD, role='attic')), json.dumps(dict(self.GOOD, filesystemUuid=7)), 'x' * (sr.MARKER_MAX + 1),
+                     json.dumps(dict(self.GOOD, roles=['git', 'attic'])), json.dumps(dict(self.GOOD, roles=['blob', 'git'])),
+                     json.dumps(dict(self.GOOD, roles=['git', 'git']))):
             path.write_text(text)
             marker, problem = sr.read_marker(folder)
             self.assertIsNone(marker)
@@ -142,6 +158,12 @@ class Marker(Case):
         path.unlink(); path.mkdir()
         self.assertIn('not a plain file', sr.read_marker(folder)[1])
         self.assertIn('cannot be opened', sr.read_marker(str(self.m.tmp / 'absent'))[1])
+
+    def test_a_marker_with_more_than_one_role_is_read(self):
+        folder, both = str(self.m.folders['dock']), dict(self.GOOD, roles=['git', 'blob'])
+        sr.write_marker(folder, both)
+        self.assertEqual(sr.read_marker(folder), (both, None))
+        self.assertEqual(sr.roles_of(sr.read_marker(folder)[0]), ['git', 'blob'])
 
     def test_a_link_is_never_followed(self):
         folder, path = str(self.m.folders['dock']), self.m.marker('dock')
@@ -219,13 +241,130 @@ class Assign(Case):
             assignedAt='2026-01-01T00:00:00+00:00', assignedOn='test-machine'))
         self.assertEqual(self.m.record()['partitions'], {ARCH: dict(role='package-repo', deviceSerial='S2', assignedAt='2026-01-01T00:00:00+00:00')})
 
-    def test_again_changes_nothing_and_a_second_role_is_refused(self):
+    def test_again_changes_nothing(self):
         self.m.ready()
         marker, record = self.m.marker().read_bytes(), self.m.records.read_bytes()
         self.assertEqual(self.m.call('partition', 'assign', ARCH, '--role', 'package-repo'), 0)
-        self.assertIn('Nothing was changed', self.m.text())
-        self.refused(self.m.call('partition', 'assign', ARCH, '--role', 'git'), 'already carries the role package-repo', 'one role')
+        self.assertIn('already carries the role package-repo. Nothing was changed', self.m.text())
         self.assertEqual((self.m.marker().read_bytes(), self.m.records.read_bytes()), (marker, record))
+
+    def test_a_second_role_is_added_beside_the_first(self):
+        self.m.ready()
+        before = self.m.listing()
+        self.assertEqual(self.m.call('partition', 'assign', ARCH, '--role', 'git'), 0, self.m.text())
+        for words in ('now carries the roles package-repo, git', 'No data was moved', 'It carried the role package-repo before', 'apt-public-repo'):
+            self.assertIn(words, self.m.text())
+        self.assertEqual(self.m.listing(), before)                                    # no file was added or removed
+        self.assertEqual((self.m.folders['archive'] / 'kept.txt').read_text(), 'data that must stay\n')
+        self.assertEqual(json.loads(self.m.marker().read_text()), dict(
+            kind=sr.MARKER_KIND, version=1, filesystemUuid=ARCH, role='package-repo', roles=['package-repo', 'git'], deviceSerial='S2',
+            assignedAt='2026-01-01T00:00:00+00:00', assignedOn='test-machine', changedAt='2026-01-01T00:00:00+00:00', changedOn='test-machine'))
+        self.assertEqual(self.m.record()['partitions'], {ARCH: dict(role='package-repo', roles=['package-repo', 'git'], deviceSerial='S2',
+                                                                    assignedAt='2026-01-01T00:00:00+00:00')})
+        self.assertEqual(self.m.call('partition', 'check'), 0)
+        marker, record = self.m.marker().read_bytes(), self.m.records.read_bytes()
+        for again in ('git', 'package-repo', 'git,package-repo', 'package-repo,git'):          # each of them is already there, in any order
+            self.assertEqual(self.m.call('partition', 'assign', ARCH, '--role', again), 0, again)
+            self.assertIn('Nothing was changed', self.m.text())
+        self.assertEqual((self.m.marker().read_bytes(), self.m.records.read_bytes()), (marker, record))
+        self.assertEqual(self.m.call('partition', 'assign', ARCH, '--role', 'blob'), 0, self.m.text())
+        self.assertIn('now carries the roles package-repo, git, blob', self.m.text())
+        self.assertEqual(self.m.record()['partitions'][ARCH]['roles'], ['package-repo', 'git', 'blob'])
+
+    def test_a_role_it_has_typed_with_one_it_has_not_adds_the_new_one(self):
+        self.m.ready()
+        self.assertEqual(self.m.call('partition', 'assign', ARCH, '--role', 'git,package-repo'), 0, self.m.text())
+        self.assertIn('now carries the roles package-repo, git', self.m.text())
+        self.assertEqual(sr.roles_of(self.m.record()['partitions'][ARCH]), ['package-repo', 'git'])
+        self.assertEqual(sr.roles_of(json.loads(self.m.marker().read_text())), ['package-repo', 'git'])
+
+    def test_several_roles_at_once(self):
+        self.m.call('device', 'register', 'S2', '--class', 'fixed')
+        self.assertEqual(self.m.call('partition', 'assign', ARCH, '--role', 'backup,registry'), 0, self.m.text())
+        self.assertIn('now carries the roles backup, registry', self.m.text())
+        self.assertEqual(sr.roles_of(json.loads(self.m.marker().read_text())), ['backup', 'registry'])
+        self.assertEqual(sr.roles_of(self.m.record()['partitions'][ARCH]), ['backup', 'registry'])
+        marker, record = self.m.marker().read_bytes(), self.m.records.read_bytes()
+        for bad in ('git,git', 'git,', ',git', ',', '', 'git,attic', 'git blob', 'git, blob'):
+            self.refused(self.m.call('partition', 'assign', ARCH, '--role', bad), 'role must be one of', 'commas')
+        self.assertEqual((self.m.marker().read_bytes(), self.m.records.read_bytes()), (marker, record))
+
+    def test_a_partition_with_several_roles_is_under_each_of_them(self):
+        self.m.ready()
+        self.m.call('partition', 'assign', ARCH, '--role', 'git')
+        self.m.call('partition', 'assign', DOCK, '--role', 'git')
+        self.m.call('role', 'list')
+        rows = {r['role']: r for r in json.loads(self.m.said[0])['result']['roles']}
+        self.assertEqual((rows['package-repo']['partitions'], rows['git']['partitions'], rows['blob']['partitions']), ([ARCH], sorted([ARCH, DOCK]), []))
+        self.assertEqual((rows['package-repo']['availableBytes'], rows['git']['availableBytes']), (400, 800))
+        self.m.call('role', 'list', '--table')
+        self.assertIn('more than one role is counted under each of them', self.m.text())
+        for role, found in (('git', {ARCH, DOCK}), ('package-repo', {ARCH}), ('blob', set())):
+            self.m.call('role', 'show', role)
+            self.assertEqual({p['filesystemUuid'] for p in json.loads(self.m.said[0])['result']['partitions']}, found, role)
+        self.m.call('role', 'show', 'git')
+        row = next(p for p in json.loads(self.m.said[0])['result']['partitions'] if p['filesystemUuid'] == ARCH)
+        self.assertEqual((row['roles'], row['recordedRoles'], row['markerRoles']), (['package-repo', 'git'],) * 3)
+        self.m.call('partition', 'check', '--table')
+        self.assertIn('package-repo, git', self.m.text())
+
+    def test_the_marker_and_the_record_are_joined_only_when_every_role_is_typed(self):
+        self.m.ready()
+        self.m.marker().write_text(json.dumps(dict(json.loads(self.m.marker().read_text()), role='git')))     # as another machine left it
+        marker, record = self.m.marker().read_bytes(), self.m.records.read_bytes()
+        for asked in ('package-repo', 'git', 'blob', 'package-repo,blob'):
+            self.refused(self.m.call('partition', 'assign', ARCH, '--role', asked), 'records partition sdb1 with the role package-repo',
+                         'its marker', 'names the role git', 'partition retire')
+            self.assertIn('--role package-repo,git', self.m.text())
+        self.assertEqual((self.m.marker().read_bytes(), self.m.records.read_bytes()), (marker, record))
+        self.assertEqual(self.m.call('partition', 'assign', ARCH, '--role', 'git,package-repo'), 0, self.m.text())
+        self.assertIn('Its marker named the role git before', self.m.text())
+        self.assertEqual(sr.roles_of(json.loads(self.m.marker().read_text())), ['package-repo', 'git'])
+        self.assertEqual(sr.roles_of(self.m.record()['partitions'][ARCH]), ['package-repo', 'git'])
+        self.assertEqual(self.m.call('partition', 'check'), 0)
+
+    def test_the_same_roles_in_another_order_are_the_same(self):
+        self.m.ready()
+        self.m.call('partition', 'assign', ARCH, '--role', 'git')
+        self.m.marker().write_text(json.dumps(dict(json.loads(self.m.marker().read_text()), role='git', roles=['git', 'package-repo'])))
+        self.assertEqual(self.m.call('partition', 'check'), 0)
+        marker = self.m.marker().read_bytes()
+        self.assertEqual(self.m.call('partition', 'assign', ARCH, '--role', 'git'), 0)
+        self.assertIn('Nothing was changed', self.m.text())
+        self.assertEqual(self.m.marker().read_bytes(), marker)
+
+    def test_adding_a_role_on_a_read_only_mount_is_refused(self):
+        self.m.ready()
+        marker, record = self.m.marker().read_bytes(), self.m.records.read_bytes()
+        self.m.mount_rows[1]['options'] = 'ro,relatime'
+        self.refused(self.m.call('partition', 'assign', ARCH, '--role', 'git'), 'read-only')
+        self.assertEqual((self.m.marker().read_bytes(), self.m.records.read_bytes()), (marker, record))
+
+    def test_a_marker_or_a_record_that_changed_meanwhile_stops_it(self):
+        self.m.ready()
+        marker, record = self.m.marker().read_text(), self.m.records.read_text()
+        is_mount = self.m.is_mount
+
+        def marker_changes(path):                                # another machine's write lands after the look, before the write
+            self.m.marker().write_text(json.dumps(dict(json.loads(marker), role='blob')))
+            return is_mount(path)
+        self.m.is_mount = marker_changes
+        self.refused(self.m.call('partition', 'assign', ARCH, '--role', 'git'), 'changed while this command ran')
+        self.assertEqual(json.loads(self.m.marker().read_text())['role'], 'blob')              # what the other wrote is still there
+        self.assertEqual(self.m.records.read_text(), record)
+        self.m.is_mount = is_mount
+        self.m.marker().write_text(marker)
+        now = self.m.now
+
+        def record_changes():                                    # another command recorded a role after the look
+            doc = json.loads(record)
+            doc['partitions'][ARCH] = sr.with_roles(doc['partitions'][ARCH], ['package-repo', 'assets'])
+            self.m.records.write_text(json.dumps(doc))
+            return now()
+        self.m.now = record_changes
+        self.refused(self.m.call('partition', 'assign', ARCH, '--role', 'git'), 'now records it with the roles package-repo, assets')
+        self.assertEqual(self.m.marker().read_text(), marker)
+        self.assertEqual(sr.roles_of(self.m.record()['partitions'][ARCH]), ['package-repo', 'assets'])
 
     def test_refusals_write_nothing(self):
         self.m.call('device', 'register', 'S3', '--class', 'dock')
@@ -279,6 +418,8 @@ class Assign(Case):
         self.m.root_user = False
         self.assertEqual(self.m.call('partition', 'assign', ARCH, '--role', 'git'), 1)
         self.assertIn('sudo isle storage partition assign %s --role git' % ARCH, self.m.text())
+        self.assertEqual(self.m.call('partition', 'assign', ARCH, '--role', 'git,blob'), 1)
+        self.assertIn('sudo isle storage partition assign %s --role git,blob' % ARCH, self.m.text())
         self.assertFalse(self.m.marker().exists())
         self.assertEqual(self.m.record()['partitions'], {})
 
@@ -298,13 +439,38 @@ class Assign(Case):
         raw = self.m.marker('dock').read_bytes()
         self.m.call('role', 'show', 'assets')
         row = json.loads(self.m.said[0])['result']['partitions'][0]
-        self.assertEqual((row['role'], row['roleState'], row['recordedRole']), ('assets', 'not recorded here', None))
+        self.assertEqual((row['roles'], row['roleState'], row['recordedRoles']), (['assets'], 'not recorded here', []))
         self.assertEqual(self.m.call('partition', 'check'), 0)           # known from its marker only: shown, not wrong
-        self.refused(self.m.call('partition', 'assign', DOCK, '--role', 'git'), 'already carries the role assets')
+        self.refused(self.m.call('partition', 'assign', DOCK, '--role', 'git'), 'does not record partition sdc1', 'names the role assets',
+                     '--role assets,git')                                # the role it came with is not taken over unasked
+        self.assertEqual(self.m.marker('dock').read_bytes(), raw)
         self.assertEqual(self.m.call('partition', 'assign', DOCK, '--role', 'assets'), 0)
         self.assertIn('another-machine', self.m.text())
         self.assertEqual(self.m.marker('dock').read_bytes(), raw)
         self.assertEqual(self.m.record()['partitions'][DOCK]['role'], 'assets')
+
+    def test_a_role_added_to_a_marker_from_another_machine_keeps_who_wrote_it(self):
+        self.m.call('device', 'register', 'S3', '--class', 'dock')
+        theirs = dict(kind=sr.MARKER_KIND, version=1, filesystemUuid=DOCK, role='assets', deviceSerial='S3',
+                      assignedAt='2025-05-05T00:00:00+00:00', assignedOn='another-machine')
+        self.m.marker('dock').write_text(json.dumps(theirs))
+        self.assertEqual(self.m.call('partition', 'assign', DOCK, '--role', 'assets,git'), 0, self.m.text())
+        self.assertIn('Its marker was already there (written 2025-05-05T00:00:00+00:00 on another-machine, naming the role assets)', self.m.text())
+        self.assertEqual(json.loads(self.m.marker('dock').read_text()), dict(
+            theirs, roles=['assets', 'git'], changedAt='2026-01-01T00:00:00+00:00', changedOn='test-machine'))
+        self.assertEqual(self.m.record()['partitions'][DOCK], dict(role='assets', roles=['assets', 'git'], deviceSerial='S3',
+                                                                   assignedAt='2026-01-01T00:00:00+00:00'))
+        self.assertEqual(self.m.call('partition', 'check'), 0)
+
+    def test_a_marker_from_another_machine_on_a_read_only_mount_is_still_recorded(self):
+        self.m.call('device', 'register', 'S3', '--class', 'dock')
+        self.m.marker('dock').write_text(json.dumps(dict(kind=sr.MARKER_KIND, version=1, filesystemUuid=DOCK, role='assets', roles=['assets', 'git'],
+                                                         deviceSerial='S3')))
+        raw = self.m.marker('dock').read_bytes()
+        self.m.mount_rows[2]['options'] = 'ro'
+        self.assertEqual(self.m.call('partition', 'assign', DOCK, '--role', 'git,assets'), 0, self.m.text())
+        self.assertEqual(self.m.marker('dock').read_bytes(), raw)
+        self.assertEqual(sr.roles_of(self.m.record()['partitions'][DOCK]), ['assets', 'git'])
 
     def test_a_copy_of_a_marked_filesystem_is_refused(self):
         self.m.ready()
@@ -429,10 +595,12 @@ class Listings(Case):
         self.assertEqual({d['serial']: d['class'] for d in data['result']['devices']}, {'S1': None, 'S2': 'fixed', 'S3': 'dock', None: None})
         self.assertIn('partition check', data['result']['note'])
         self.assertEqual(self.m.call('partition', 'list'), 0)
-        roles = {p['name']: p['role'] for p in json.loads(self.m.said[0])['result']['partitions']}
-        self.assertEqual((roles['sdb1'], roles['sdc1'], roles['sdc3']), ('package-repo', None, None))
+        roles = {p['name']: p['roles'] for p in json.loads(self.m.said[0])['result']['partitions']}
+        self.assertEqual((roles['sdb1'], roles['sdc1'], roles['sdc3']), (['package-repo'], [], []))
+        self.assertEqual(self.m.call('partition', 'assign', ARCH, '--role', 'git'), 0, self.m.text())
         self.assertEqual(self.m.call('partition', 'list', '--table'), 0)
-        self.assertIn('ROLE', self.m.said[0].splitlines()[0])
+        self.assertIn('ROLES', self.m.said[0].splitlines()[0])
+        self.assertIn('package-repo, git', self.m.said[0])
         self.assertEqual(self.m.call('device', 'list', '--table'), 0)
         self.assertIn('CLASS', self.m.said[0].splitlines()[0])
 

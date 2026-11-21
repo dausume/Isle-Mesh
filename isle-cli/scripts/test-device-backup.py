@@ -494,6 +494,14 @@ class DeviceBackup(unittest.TestCase):
         self.w.assign(OTHER_FS, 'git')
         self.assertEqual(db.home(self.w)['kind'], 'local')
 
+    def test_a_partition_that_carries_backup_beside_another_role_is_the_home(self):
+        self.w.assign(OTHER_FS, 'git')
+        self.w.assign(OTHER_FS, 'backup')
+        self.assertEqual((db.home(self.w)['kind'], db.home(self.w)['filesystemUuid']), ('partition', OTHER_FS))
+        both = World(tempfile.mkdtemp(dir=self.dir.name))
+        both.assign(BACKUP_FS, 'registry,backup')
+        self.assertEqual((db.home(both)['kind'], db.home(both)['filesystemUuid']), ('partition', BACKUP_FS))
+
     # ---- list, verify, release-hold
 
     def test_list_and_verify(self):

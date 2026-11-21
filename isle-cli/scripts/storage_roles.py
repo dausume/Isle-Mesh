@@ -2,9 +2,9 @@
 """isle storage device register | partition assign | partition check | role list | role show
 
 The storage records of one machine.  A device is declared by its hardware serial with a class (fixed, dock or
-flash).  A partition is given exactly one role.  The role is written in two places: in a marker file at the
-root of the partition itself, so the disk says what it is for wherever it is plugged in, and in this machine's
-record, so a partition that is away is still known here.
+flash).  A partition is given one role or more than one.  Its roles are written in two places: in a marker file
+at the root of the partition itself, so the disk says what it is for wherever it is plugged in, and in this
+machine's record, so a partition that is away is still known here.
 
 Nothing in this file creates, erases, formats, mounts or moves anything.  `partition assign` adopts a filesystem
 that already exists: it writes the marker and the record and leaves every other file alone.
@@ -41,7 +41,7 @@ WRONG = ('marker missing', 'marker differs', 'marker cannot be read', 'device no
 AWAY = ('not present', 'not mounted', 'not mounted whole')
 USAGE = ('Usage: isle storage device list [--table] | isle storage partition list [--table]\n'
          '       sudo isle storage device register <serial> --class %s\n'
-         '       sudo isle storage partition assign <filesystem-identifier> --role <role>\n'
+         '       sudo isle storage partition assign <filesystem-identifier> --role <role>[,<role>...]\n'
          '       isle storage partition check [--table]\n'
          '       isle storage role list [--table] | isle storage role show <role> [--table]\n'
          '       isle storage role list --isle [--table] | isle storage role show <role> --isle [--table]\n'
@@ -76,9 +76,32 @@ class Io:
         return [r for r in rows if isinstance(r, dict)]
 
 
+def roles_of(entry):
+    """The roles a record entry or a marker names, in the order they were given.  ValueError when it names none, an
+    unknown one or the same one twice.  With one role only `role` is written, as it was when a partition had exactly
+    one; with more, `roles` holds all of them and `role` the first, so an older CLI still reads a role it knows."""
+    listed = entry.get('roles', [entry.get('role')])
+    if (not isinstance(listed, list) or not listed or any(not isinstance(r, str) or r not in ROLES for r in listed)
+            or len(set(listed)) != len(listed) or entry.get('role', listed[0]) != listed[0]):
+        raise ValueError('it does not name roles this CLI understands')
+    return list(listed)
+
+
+def with_roles(entry, roles):
+    """The record entry or marker as it is written for these roles."""
+    out = {k: v for k, v in entry.items() if k not in ('role', 'roles')}
+    out['role'] = roles[0]
+    if len(roles) > 1: out['roles'] = list(roles)
+    return out
+
+
+def _words(roles):
+    return ('the role ' if len(roles) == 1 else 'the roles ') + ', '.join(roles)
+
+
 def read_records(path):
-    """This machine's record: {version, devices: {serial: {class, ...}}, partitions: {identifier: {role, deviceSerial, ...}}}.
-    A record that is damaged is an error, never an empty one: an empty one would let a second role be written."""
+    """This machine's record: {version, devices: {serial: {class, ...}}, partitions: {identifier: {role[, roles], deviceSerial, ...}}}.
+    A record that is damaged is an error, never an empty one: an empty one would hide the roles that are recorded."""
     try: text = Path(path).read_text()
     except FileNotFoundError: return dict(version=1, devices={}, partitions={})
     except OSError as exc: raise ValueError('the storage records of this machine cannot be read (%s)' % exc.strerror)
@@ -87,7 +110,7 @@ def read_records(path):
         devices, partitions = doc['devices'], doc['partitions']
         good = (doc.get('version') == 1 and isinstance(devices, dict) and isinstance(partitions, dict)
                 and all(isinstance(v, dict) and v.get('class') in CLASSES for v in devices.values())
-                and all(isinstance(v, dict) and v.get('role') in ROLES and isinstance(v.get('deviceSerial'), str)
+                and all(isinstance(v, dict) and roles_of(v) and isinstance(v.get('deviceSerial'), str)
                         for v in partitions.values()))
     except (ValueError, KeyError, TypeError, AttributeError): good = False
     if not good: raise ValueError('the storage records of this machine are damaged (%s)' % path)
@@ -124,9 +147,10 @@ def read_marker(mount):
     finally: os.close(base)
     try: doc = json.loads(raw) if len(raw) <= MARKER_MAX else None
     except ValueError: doc = None
-    if (not isinstance(doc, dict) or doc.get('kind') != MARKER_KIND or doc.get('version') != 1 or doc.get('role') not in ROLES
-            or not isinstance(doc.get('filesystemUuid'), str)):
-        return None, '%s at its root is not a partition marker this CLI understands' % MARKER
+    try: good = isinstance(doc, dict) and doc.get('kind') == MARKER_KIND and doc.get('version') == 1 and bool(roles_of(doc)) \
+        and isinstance(doc.get('filesystemUuid'), str)
+    except ValueError: good = False
+    if not good: return None, '%s at its root is not a partition marker this CLI understands' % MARKER
     return doc, None
 
 
@@ -164,7 +188,7 @@ def whole_mount(mounts, identifier):
 
 
 def survey(io):
-    """One read of the machine: (records, devices, partitions), each partition with its role, marker and state."""
+    """One read of the machine: (records, devices, partitions), each partition with its roles, marker and state."""
     records = read_records(io.records)
     tree = io.tree()
     devices = storage_devices.devices(tree)
@@ -181,35 +205,36 @@ def survey(io):
         marker, problem = read_marker(root['target']) if root else (None, None)
         if identifier: present.add(identifier)
         registered = bool(row['deviceSerial']) and row['deviceSerial'] in records['devices']
+        recorded_roles, marker_roles = roles_of(recorded) if recorded else [], roles_of(marker) if marker else []
         row.update(deviceClass=records['devices'][row['deviceSerial']]['class'] if registered else None,
-                   recordedRole=recorded['role'] if recorded else None, markerRole=marker['role'] if marker else None,
+                   recordedRoles=recorded_roles, markerRoles=marker_roles,
                    wholeMount=root['target'] if root else None,
                    mountedReadOnly=bool(root) and 'ro' in str(root.get('options') or '').split(','), marker=marker)
         row['markerProblem'] = problem
         copied = bool(marker) and marker['filesystemUuid'] != identifier
         if recorded:
             if problem: state = 'marker cannot be read'
-            elif marker: state = 'ok' if marker['role'] == recorded['role'] and not copied else 'marker differs'
+            elif marker: state = 'ok' if sorted(marker_roles) == sorted(recorded_roles) and not copied else 'marker differs'
             else: state = 'marker missing' if root else 'not mounted whole' if mounted else 'not mounted'
             if state == 'ok' and recorded['deviceSerial'] != row['deviceSerial']: state = 'on another device'
             elif state == 'ok' and not registered: state = 'device not registered'
         elif marker: state = 'marker of another filesystem' if copied else 'not recorded here'
         else: state = None      # no role here; a file of that name that is not a marker is only looked at by `assign`
-        row['role'] = recorded['role'] if recorded else marker['role'] if state == 'not recorded here' else None
+        row['roles'] = recorded_roles if recorded else marker_roles if state == 'not recorded here' else []
         row['roleState'] = state
     for identifier, recorded in sorted(records['partitions'].items()):
         if identifier in present: continue
         known = records['devices'].get(recorded['deviceSerial'])
         partitions.append(dict(name=None, device=None, deviceSerial=recorded['deviceSerial'], filesystemUuid=identifier,
-                               deviceClass=known['class'] if known else None, role=recorded['role'], recordedRole=recorded['role'],
-                               markerRole=None, roleState='not present', state='not present', mount=None, wholeMount=None,
+                               deviceClass=known['class'] if known else None, roles=roles_of(recorded), recordedRoles=roles_of(recorded),
+                               markerRoles=[], roleState='not present', state='not present', mount=None, wholeMount=None,
                                sizeBytes=0, system=False, datasets=[], marker=None, markerProblem=None))
     return records, devices, partitions
 
 
 def wrong(row):
     """Whether a partition this machine records is in a state `partition check` reports as wrong."""
-    if not row['recordedRole']: return False
+    if not row['recordedRoles']: return False
     return row['roleState'] in WRONG or (row['roleState'] in AWAY and row['deviceClass'] not in MAY_BE_AWAY)
 
 
@@ -245,9 +270,13 @@ def register(io, serial, device_class):
     return 0
 
 
-def assign(io, identifier, role):
+def assign(io, identifier, asked):
+    """Give a partition a role, or one more role.  Afterwards the marker and the record name the same roles.  A role
+    that only the record or only the marker names is kept only when it is typed too: no role is taken over unasked."""
     what = 'partition assign'
-    if role not in ROLES: return _refuse(io, what, 'the role must be one of: ' + ', '.join(ROLES))
+    wanted = (asked or '').split(',')
+    if any(r not in ROLES for r in wanted) or len(set(wanted)) != len(wanted):
+        return _refuse(io, what, 'the role must be one of: %s (for more than one, put commas between them)' % ', '.join(ROLES))
     if not IDENTIFIER.match(identifier or ''): return _refuse(io, what, 'that is not a filesystem identifier')
     try:
         records, _, partitions = survey(io)
@@ -263,38 +292,50 @@ def assign(io, identifier, role):
         if row['markerProblem']: return _refuse(io, what, row['markerProblem'])
         if row['marker'] and row['marker']['filesystemUuid'] != identifier:
             return _refuse(io, what, 'the marker at its root names another filesystem (%s): this filesystem is a copy of that one' % row['marker']['filesystemUuid'])
-        for held in (row['recordedRole'], row['markerRole']):
-            if held and held != role:
-                return _refuse(io, what, 'partition %s already carries the role %s, and a partition carries one role. Taking a role away is '
-                               '`isle storage partition retire`, which is not in this CLI yet' % (row['name'], held))
         if not row['wholeMount']:
             return _refuse(io, what, 'partition %s is not mounted%s, and the marker is written at its root' % (row['name'],
                            ' whole where it can be reached (only a folder of it is, or another mount covers it)' if row['mount'] else ''))
-        if row['roleState'] == 'ok':
-            io.say('Partition %s (%s) already carries the role %s. Nothing was changed.' % (row['name'], identifier, role)); return 0
+        recorded, marked = row['recordedRoles'], row['markerRoles']
+        target = list(dict.fromkeys(recorded + marked + wanted))
+        if row['marker'] and (set(recorded) ^ set(marked)) - set(wanted):
+            return _refuse(io, what, '%s, and its marker (written %s on %s) names %s. To make both name all of them: sudo isle storage partition assign %s --role %s' % (
+                'this machine records partition %s with %s' % (row['name'], _words(recorded)) if recorded else 'this machine does not record partition %s' % row['name'],
+                row['marker'].get('assignedAt'), row['marker'].get('assignedOn'), _words(marked), identifier, ','.join(target))
+                + '. Taking a role away is `isle storage partition retire`, which is not in this CLI yet')
+        mark = sorted(marked) != sorted(target)                  # the marker has to be written (again)
+        if row['roleState'] == 'ok' and recorded == target:
+            io.say('Partition %s (%s) already carries %s. Nothing was changed.' % (row['name'], identifier, _words(wanted))); return 0
         if not io.is_root():
-            io.say('This changes the storage records of this machine. Type: sudo isle storage partition assign %s --role %s' % (identifier, role)); return 1
-        if row['mountedReadOnly'] and not row['marker']: return _refuse(io, what, 'partition %s is mounted read-only' % row['name'])
+            io.say('This changes the storage records of this machine. Type: sudo isle storage partition assign %s --role %s' % (identifier, asked)); return 1
+        if row['mountedReadOnly'] and mark: return _refuse(io, what, 'partition %s is mounted read-only' % row['name'])
         at = io.now()
         with locked(io):
             records = read_records(io.records)
             held = records['partitions'].get(identifier)
-            if held and held['role'] != role: return _refuse(io, what, 'this machine now records it with the role %s' % held['role'])
-            if not row['marker']:
+            if (roles_of(held) if held else []) != recorded:
+                return _refuse(io, what, 'this machine now records it with %s' % (_words(roles_of(held)) if held else 'no role'))
+            if mark:
                 still = whole_mount(io.mounts(), identifier)[0]      # looked at again, now that the lock is held
                 if not still or still['target'] != row['wholeMount'] or not io.is_mount(row['wholeMount']):
                     return _refuse(io, what, 'partition %s is no longer mounted at %s' % (row['name'], row['wholeMount']))
-                write_marker(row['wholeMount'], dict(kind=MARKER_KIND, version=1, filesystemUuid=identifier, role=role,
-                                                     deviceSerial=serial, assignedAt=at, assignedOn=io.machine()))
+                if read_marker(row['wholeMount']) != (row['marker'], None):
+                    return _refuse(io, what, 'the marker at the root of partition %s changed while this command ran' % row['name'])
+                fresh = dict(kind=MARKER_KIND, version=1, filesystemUuid=identifier, deviceSerial=serial, assignedAt=at, assignedOn=io.machine())
+                write_marker(row['wholeMount'], with_roles(dict(row['marker'], changedAt=at, changedOn=io.machine()) if row['marker'] else fresh, target))
             moved = held['deviceSerial'] if held and held['deviceSerial'] != serial else None
-            if not held or moved:
-                records['partitions'][identifier] = dict(role=role, deviceSerial=serial, assignedAt=held['assignedAt'] if moved and held.get('assignedAt') else at)
+            if not held or moved or recorded != target:
+                records['partitions'][identifier] = with_roles(dict(
+                    deviceSerial=serial, assignedAt=held['assignedAt'] if held and held.get('assignedAt') else at), target)
                 atomic(Path(io.records), records)
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as exc:
         return _refuse(io, what, str(exc) or exc.__class__.__name__)
-    io.say('Partition %s (%s) on device %s now carries the role %s. No data was moved.' % (row['name'], identifier, serial, role))
+    io.say('Partition %s (%s) on device %s now carries %s. No data was moved.' % (row['name'], identifier, serial, _words(target)))
+    if recorded and recorded != target: io.say('It carried %s before.' % _words(recorded))
     if moved: io.say('This machine recorded it on device %s before; the record now names the device it is on.' % moved)
-    if row['marker'] and not moved: io.say('Its marker was already there (written %s on %s); this machine now records it.' % (row['marker'].get('assignedAt'), row['marker'].get('assignedOn')))
+    if row['marker'] and not recorded:
+        io.say('Its marker was already there (written %s on %s, naming %s); this machine now records it.' % (
+            row['marker'].get('assignedAt'), row['marker'].get('assignedOn'), _words(marked)))
+    elif row['marker'] and sorted(marked) != sorted(recorded): io.say('Its marker named %s before.' % _words(marked))
     if row['datasets']: io.say('Datasets already on it: %s.' % ', '.join(row['datasets']))
     return 0
 
@@ -313,8 +354,8 @@ def _table(head, body):
 
 
 def _partition_table(rows):
-    return _table(('ROLE', 'PARTITION', 'IDENTIFIER', 'DEVICE SERIAL', 'CLASS', 'SIZE', 'FREE', 'STATE', 'DATASETS'),
-                  [(r['role'] or '-', r['name'] or '-', r['filesystemUuid'], r['deviceSerial'] or '-', r['deviceClass'] or '-',
+    return _table(('ROLES', 'PARTITION', 'IDENTIFIER', 'DEVICE SERIAL', 'CLASS', 'SIZE', 'FREE', 'STATE', 'DATASETS'),
+                  [(', '.join(r['roles']) or '-', r['name'] or '-', r['filesystemUuid'], r['deviceSerial'] or '-', r['deviceClass'] or '-',
                     storage_devices._size(r['sizeBytes']) if r['sizeBytes'] else '-', _free(r), r['roleState'],
                     ', '.join(r['datasets']) or '-') for r in rows])
 
@@ -332,7 +373,9 @@ def report(io, argv):
         _, _, partitions = survey(io)
     except (OSError, ValueError, KeyError, TypeError, AttributeError, subprocess.SubprocessError) as exc:
         return answer(False, error=str(exc) or exc.__class__.__name__)
-    held = sorted((p for p in partitions if p['roleState']), key=lambda p: (ROLES.index(p['role']) if p['role'] in ROLES else len(ROLES), p['filesystemUuid']))
+    held = sorted((p for p in partitions if p['roleState']), key=lambda p: (ROLES.index(p['roles'][0]) if p['roles'] else len(ROLES), p['filesystemUuid']))
+    shared = ('A partition with more than one role is counted under each of them; its free space is one space.'
+              if any(len(p['roles']) > 1 for p in held) else None)
     if words == ['partition', 'check']:
         bad = [p for p in held if wrong(p)]
         if plain:
@@ -341,18 +384,19 @@ def report(io, argv):
             return 1 if bad else 0
         return answer(not bad, result=dict(partitions=[_public(p) for p in held], needAttention=[p['filesystemUuid'] for p in bad]))
     if words == ['role', 'list']:
-        rows = [dict(role=role, partitions=[p['filesystemUuid'] for p in held if p['role'] == role],
-                     datasets=sorted(d for p in held if p['role'] == role for d in p['datasets']),
-                     availableBytes=sum(p.get('availableBytes', 0) for p in held if p['role'] == role and p['roleState'] == 'ok'))
+        rows = [dict(role=role, partitions=[p['filesystemUuid'] for p in held if role in p['roles']],
+                     datasets=sorted(d for p in held if role in p['roles'] for d in p['datasets']),
+                     availableBytes=sum(p.get('availableBytes', 0) for p in held if role in p['roles'] and p['roleState'] == 'ok'))
                 for role in ROLES]
         if plain:
             io.say(_table(('ROLE', 'PARTITIONS', 'FREE', 'DATASETS'), [(r['role'], len(r['partitions']),
                    storage_devices._size(r['availableBytes']) if r['partitions'] else '-', ', '.join(r['datasets']) or '-') for r in rows]))
+            if shared: io.say(shared)
             return 0
         return answer(True, result=dict(roles=rows))
     role = words[2]
     if role not in ROLES: return answer(False, error='Unknown role: %s. Roles: %s.' % (role, ', '.join(ROLES)))
-    mine = [p for p in held if p['role'] == role]
+    mine = [p for p in held if role in p['roles']]
     if plain:
         io.say(_partition_table(mine) if mine else 'No partition of this machine carries the role %s.' % role)
         return 0
@@ -360,13 +404,13 @@ def report(io, argv):
 
 
 def from_records(io):
-    """For the listings: add the class and the role this machine records.  Returns the note the listing carries."""
+    """For the listings: add the class and the roles this machine records.  Returns the note the listing carries."""
     def add(kind, rows):
         records = read_records(io.records)
         for row in rows:
             if kind == 'device': row['class'] = (records['devices'].get(row['serial']) or {}).get('class')
-            else: row['role'] = (records['partitions'].get(row['filesystemUuid']) or {}).get('role')
-        return ('The class and the role are what this machine records. `isle storage partition check` compares the '
+            else: row['roles'] = roles_of(records['partitions'][row['filesystemUuid']]) if row['filesystemUuid'] in records['partitions'] else []
+        return ('The class and the roles are what this machine records. `isle storage partition check` compares the '
                 'record with the marker on each partition.')
     return add
 

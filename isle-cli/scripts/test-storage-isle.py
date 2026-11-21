@@ -80,6 +80,22 @@ class TheFact(Case):
         self.assertNotIn('S2', text); self.assertNotIn('Serial', text); self.assertNotIn(str(self.m.tmp), text)   # no serial, no path
         self.assertEqual(si.read_fact(dict(status='observed', observed_at=AT, value=text))[0], doc['partitions'])   # the reader takes what is sent
 
+    def test_a_partition_with_several_roles_is_one_row_per_role(self):
+        self.m.ready()
+        self.assertEqual(self.m.call('partition', 'assign', ARCH, '--role', 'backup,git'), 0, self.m.text())
+        self.assertEqual(self.m.call('partition', 'assign', DOCK, '--role', 'assets'), 0, self.m.text())
+        text = si.report_fact(self.m)
+        doc = json.loads(text)
+        self.assertEqual(doc['schemaVersion'], 1)                         # the same shape as before: a reader of one role per row reads it
+        self.assertEqual(sorted((p['filesystemUuid'], p['role']) for p in doc['partitions']),
+                         sorted([(ARCH, 'package-repo'), (ARCH, 'backup'), (ARCH, 'git'), (DOCK, 'assets')]))
+        mine = [p for p in doc['partitions'] if p['filesystemUuid'] == ARCH]
+        self.assertEqual([p['role'] for p in mine], [r for r in sr.ROLES if r in ('package-repo', 'backup', 'git')])   # in the order of the roles
+        self.assertEqual({(p['sizeBytes'], p['availableBytes'], p['roleState'], tuple(p['datasets'])) for p in mine},
+                         {(499000, 400, 'ok', ('apt-public-repo',))})
+        self.assertNotIn('roles', text)
+        self.assertEqual(si.read_fact(dict(status='observed', observed_at=AT, value=text))[0], doc['partitions'])
+
     def test_a_partition_that_is_away_is_reported_as_away(self):
         self.m.ready()
         self.assertEqual(self.m.call('partition', 'assign', DOCK, '--role', 'assets'), 0, self.m.text())
@@ -175,6 +191,16 @@ class TheIsle(Case):
         self.assertEqual([(d['device'], d['state']) for d in result['devices']],
                          [('bare', si.NO_REPORT), ('core1', 'reported'), ('econ', si.NO_REPORT), ('odd', si.NOT_READABLE), ('pol', 'reported')])
         self.assertNotIn('ghost', self.m.said[0]); self.assertNotIn('eeee-0005', self.m.said[0])
+
+    def test_a_partition_reported_under_two_roles_is_in_both_and_the_table_says_so(self):
+        self.m.listing = [device('pol', fact(part('git', 'aaaa-0001'), part('backup', 'aaaa-0001'), part('backup', 'bbbb-0002')))]
+        code, doc = self.isle('role', 'list', '--isle')
+        by = {r['role']: r for r in doc['result']['roles']}
+        self.assertEqual((by['git']['partitions'], by['backup']['partitions'], by['git']['availableBytes'], by['backup']['availableBytes']), (1, 2, 400, 800))
+        self.assertEqual(self.isle('role', 'list', '--isle', '--table')[0], 0)
+        self.assertIn('A partition with more than one role has one line per role', self.m.text())
+        self.assertEqual(self.isle('role', 'show', 'git', '--isle', '--table')[0], 0)
+        self.assertNotIn('more than one role', self.m.text())             # one role is shown: nothing is on two lines
 
     def test_role_show_keeps_one_role(self):
         code, doc = self.isle('role', 'show', 'backup', '--isle')

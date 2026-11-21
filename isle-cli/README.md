@@ -494,14 +494,15 @@ file that no set lists is filed under this core's own release.
 A machine's storage is described by three things. A **device** is a disk, named by its hardware serial and
 declared with a class: `fixed` (stays in the machine), `dock` or `flash` (may be away). A **partition** is a
 filesystem, named by its filesystem identifier, never by a name such as `sdc1`. A **role** says what a partition
-is for; a partition carries exactly one: `package-repo`, `distribution`, `registry`, `blob`, `git`, `assets`,
-`backup`, `scratch` or `transfer`.
+is for: `package-repo`, `distribution`, `registry`, `blob`, `git`, `assets`, `backup`, `scratch` or `transfer`.
+A partition carries one role or more than one. Roles on one partition share its space: nothing is set aside for
+each of them.
 
 ```
 isle storage device list --table
 sudo isle storage device register <serial> --class fixed|dock|flash
 isle storage partition list --table
-sudo isle storage partition assign <filesystem-identifier> --role <role>
+sudo isle storage partition assign <filesystem-identifier> --role <role>[,<role>...]
 isle storage partition check --table
 isle storage role list --table
 isle storage role show <role> --table
@@ -517,24 +518,38 @@ are run without root, after every check has passed.
 (`/etc/isle-mesh/storage/device-records.json`). It creates, erases, formats, mounts and moves nothing, and it
 leaves every other file on the partition alone. The marker travels with the disk, so a partition marked on one
 machine is recognised on another: `partition check` shows it as `not recorded here`, and `assign` with the same
-role records it without rewriting the marker. A link at the marker's name is never followed.
+roles records it without rewriting the marker. A link at the marker's name is never followed.
+
+A role is added by assigning it: `assign` on a partition that already carries roles keeps them and adds the one
+typed (several are typed with commas between them, `--role backup,git`). The roles a partition already carries
+are never taken away by `assign`. With one role the marker and the record hold `role`, as before; with more
+they hold `roles` (all of them, in the order they were given) and `role` (the first), so a CLI from before reads
+a role it knows. When the marker and the record name different roles (the disk was given a role on another
+machine), `assign` joins them only when every one of those roles is typed, and prints the command that does it:
+no role is taken over unasked. A marker that is changed keeps who wrote it first and gains `changedAt` and
+`changedOn`.
 
 `assign` refuses, and writes nothing, when: the device is not registered or reports no serial; the partition
-carries the running system; it already carries another role (taking a role away is `partition retire`, which is
-not built yet); two partitions report the same identifier; the marker names another filesystem (the filesystem
+carries the running system; its marker and this machine's record name different roles and not all of them were
+typed (taking a role away is `partition retire`, which is not built yet); a role is typed twice; a role has to
+be written to the marker and the filesystem is mounted read-only; the marker or the record changed while the
+command ran; two partitions report the same identifier; the marker names another filesystem (the filesystem
 is a block copy); a file of that name exists that is not a marker; or the filesystem is not mounted whole where
 it can be reached (only a folder of it is mounted, or another mount covers it).
 
 `partition check` compares the record with the marker on each recorded partition and exits 1 when one needs
 attention: `marker missing`, `marker differs`, `marker cannot be read`, `device not registered`,
 `on another device`, or a partition of a `fixed` device that is away. A partition of a `dock` or `flash` device
-that is away is reported and is not an error. `role show <role>` lists the partitions of one role with their
-device, free space and the datasets bound on them.
+that is away is reported and is not an error. The marker and the record agree when they name the same roles,
+in any order. `role show <role>` lists the partitions that carry a role with their device, free space and the
+datasets bound on them; a partition with several roles is listed under each, and `role list` counts its free
+space under each (it is one space, and the listing says so).
 
 These records describe one machine, and each machine keeps its own. With `--isle`, `role list` and `role show`
 print what every machine of the isle reported, side by side, from any machine: each machine adds its partitions
 that carry a role (role, filesystem identifier, class, size, free space, state, datasets; no hardware serial) to
-the device report it already sends to the core, and the view reads the core's device list. It shows when each
+the device report it already sends to the core, and the view reads the core's device list. A partition with
+several roles is reported once per role, so the report has the same shape as before. It shows when each
 machine reported, and names the machines that sent no storage report (an older isle CLI) or one this version
 cannot read. It is a report, not a check: whether a partition is really there is asked on the machine itself with
 `partition check`. Polari reads the same device list; there is no second store.

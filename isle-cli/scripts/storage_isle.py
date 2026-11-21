@@ -9,6 +9,10 @@ of the device list; nothing here adds a store or an API of its own.
 
 The view is a report, not a record: it says what each machine said, with the time it said it.  Whether a partition
 is really there is asked on the machine itself (`isle storage partition check`).  A hardware serial is not reported.
+
+A row of the report holds one role.  A partition that carries more than one role is reported once per role, with
+the same identifier, size and free space in each row: so a reader from before there could be more than one role
+reads every row as it is.
 """
 from datetime import datetime
 import json
@@ -36,10 +40,11 @@ def report_fact(io=None):
     be read (the fact is then left out, which the view shows as no report).  Never raises."""
     try:
         _, _, partitions = sr.survey(io or sr.Io())
-        held = sorted((p for p in partitions if p['roleState'] in STATES and p['role']), key=lambda p: p['filesystemUuid'])
+        held = sorted(((p, role) for p in partitions if p['roleState'] in STATES for role in p['roles']),
+                      key=lambda found: (found[0]['filesystemUuid'], sr.ROLES.index(found[1])))
         rows = []
-        for p in held[:MAX_PARTITIONS]:
-            row = dict(role=p['role'], filesystemUuid=p['filesystemUuid'], deviceClass=p['deviceClass'],
+        for p, role in held[:MAX_PARTITIONS]:
+            row = dict(role=role, filesystemUuid=p['filesystemUuid'], deviceClass=p['deviceClass'],
                        sizeBytes=int(p['sizeBytes'] or 0), roleState=p['roleState'],
                        datasets=[d for d in sorted(p['datasets']) if sc.DATASET.match(d)][:MAX_DATASETS])
             if 'availableBytes' in p: row['availableBytes'] = int(p['availableBytes'])
@@ -163,5 +168,7 @@ def main(io, argv):
     for m in silent:
         io.say('%s: %s.' % (m['device'], 'no storage report yet (its isle CLI may be older than this view)' if m['state'] == NO_REPORT
                             else 'its storage report cannot be read by this version of the isle CLI'))
+    if len({(p['device'], p['filesystemUuid']) for p in held}) < len(held):
+        io.say('A partition with more than one role has one line per role; its size and free space are one space.')
     io.say('This is what each machine last reported, not a check. On a machine itself: isle storage partition check --table')
     return 0
