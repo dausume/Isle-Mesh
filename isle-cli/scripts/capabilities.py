@@ -113,6 +113,13 @@ def collect(device, images=()):
         if isinstance(fact, str) and fact: record('isle.release_run', fact, 'local release-run receipt')
     except Exception:
         pass
+    try:
+        # What a plan for the whole isle reads (isle storage role list --isle). Any failure just omits the fact.
+        from storage_isle import report_fact as storage_fact
+        fact = storage_fact()
+        if isinstance(fact, str) and fact: record('isle.storage_partitions', fact, 'local storage records and partition markers')
+    except Exception:
+        pass
     for endpoint, url in [('whoami','https://whoami.isle/'),('polari','https://api.polari.isle/api/health'),('polari-frontend','https://polari.isle/')]:
         code, output, _ = run(['curl','--http1.1','--silent','--show-error','--max-time','6','--output','/dev/null','--write-out','%{http_code}',url])
         # A completed TLS exchange and HTTP response proves access, not an app's

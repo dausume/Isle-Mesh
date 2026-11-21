@@ -1,5 +1,6 @@
 import importlib.util,sys,types,unittest
 from pathlib import Path
+sys.modules['storage_isle']=None  # the storage fact would read this machine's real disks; test-storage-isle.py covers it with fixtures
 from unittest.mock import patch
 spec=importlib.util.spec_from_file_location('probe',Path(__file__).with_name('capabilities.py'));probe=importlib.util.module_from_spec(spec);spec.loader.exec_module(probe)
 class Fact(unittest.TestCase):

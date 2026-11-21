@@ -44,6 +44,7 @@ USAGE = ('Usage: isle storage device list [--table] | isle storage partition lis
          '       sudo isle storage partition assign <filesystem-identifier> --role <role>\n'
          '       isle storage partition check [--table]\n'
          '       isle storage role list [--table] | isle storage role show <role> [--table]\n'
+         '       isle storage role list --isle [--table] | isle storage role show <role> --isle [--table]\n'
          'Roles: %s') % ('|'.join(CLASSES), ', '.join(ROLES))
 
 
@@ -373,6 +374,9 @@ def from_records(io):
 def main(argv=None, io=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     io = io or Io()
+    if '--isle' in argv:        # what every machine of the isle reported, read from the core's device list
+        import storage_isle
+        return storage_isle.main(io, [a for a in argv if a != '--isle'])
     words = [a for a in argv if a != '--table']
     if words[:1] in (['device'], ['partition']) and (len(words) < 2 or words[1] not in storage_devices.RECORD_VERBS[words[0]]):
         return storage_devices.main(argv, run=io.run, root=io.root, usage=io.usage, out=io.say, records=from_records(io))

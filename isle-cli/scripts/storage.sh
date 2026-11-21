@@ -6,7 +6,8 @@
 #   publisher-side root CLIs under the publication lock, not operations: publish-manifest, gc;
 #   core evidence relay (not journaled): relay;  placement view for the backend: view-export [--post];
 #   read-only verbs for anyone: list, check, check-path, guard-domain, status, domain-entry, fence-check,
-#     placement (prints the record), device list, partition list|check, role list|show, units check;
+#     placement (prints the record), device list, partition list|check, role list|show (with --isle: what
+#     every machine reported to the core's device list), units check;
 #   this machine's storage records (root, under the records' own lock; no dataset, so not journaled):
 #     device register, partition assign;
 #   units apply --dataset D: root, journaled (rewrites the dataset's systemd units on the hosting device).

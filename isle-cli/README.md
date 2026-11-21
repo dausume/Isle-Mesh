@@ -466,6 +466,8 @@ sudo isle storage partition assign <filesystem-identifier> --role <role>
 isle storage partition check --table
 isle storage role list --table
 isle storage role show <role> --table
+isle storage role list --isle --table
+isle storage role show <role> --isle --table
 ```
 
 Without `--table` every listing is a JSON document. The two `sudo` verbs print the command to type when they
@@ -490,9 +492,18 @@ attention: `marker missing`, `marker differs`, `marker cannot be read`, `device 
 that is away is reported and is not an error. `role show <role>` lists the partitions of one role with their
 device, free space and the datasets bound on them.
 
-These records describe one machine. They are not yet part of the core's placement record, and no verb reads a
-role to decide where data goes. Not built: `device health|retire`, `partition create|retire`.
-Tests: `python3 isle-cli/scripts/test-storage-roles.py` and `test-storage-devices.py` (fixtures only).
+These records describe one machine, and each machine keeps its own. With `--isle`, `role list` and `role show`
+print what every machine of the isle reported, side by side, from any machine: each machine adds its partitions
+that carry a role (role, filesystem identifier, class, size, free space, state, datasets; no hardware serial) to
+the device report it already sends to the core, and the view reads the core's device list. It shows when each
+machine reported, and names the machines that sent no storage report (an older isle CLI) or one this version
+cannot read. It is a report, not a check: whether a partition is really there is asked on the machine itself with
+`partition check`. Polari reads the same device list; there is no second store.
+
+The roles are not yet part of the core's placement record, and no verb reads a role to decide where data goes.
+Not built: `device health|retire`, `partition create|retire`.
+Tests: `python3 isle-cli/scripts/test-storage-roles.py`, `test-storage-isle.py` and `test-storage-devices.py`
+(fixtures only).
 
 ### Storage migration contract (stm-1)
 
