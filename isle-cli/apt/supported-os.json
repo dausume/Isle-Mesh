@@ -16,12 +16,14 @@
       "packageNames": {},
       "variations": [
         "The offline dependency list is written with this release's package names (libgtk-3-0t64, libasound2t64).",
-        "The full offline medium (router image, dependency set, container images) is built and installed for this release."
+        "The full offline medium (router image, dependency set, container images) is built and installed for this release.",
+        "libasound2 and libgtk-3-0 are no packages here, only names the t64 packages provide. Two packages provide libasound2, so apt refuses that name when it is asked for by itself. The isle's own packages still name both (22.04 has them as packages); build-offline-bundle.sh leaves such a name out of what it resolves when the list names a package that provides it, and stops when the list names none."
       ],
       "evidence": [
         "core: a core runs this release with CLI release 89 (read on the machine 2026-11-21: apt 2.8.4, python 3.12.3, amd64)",
         "member: test-apt-deps-index.py installs as a member in a container of this release; no real member runs it yet",
-        "baseImage: build-offline-bundle.sh resolves the dependency set in this image"
+        "baseImage: build-offline-bundle.sh resolves the dependency set in this image",
+        "dependency set: built again on 2026-11-22 from the offline dependency list with the storage verbs' tools (1146 package files, 509 MiB, every one checked against the signed archive index); packed and not run yet. The set the core serves under deps/noble is the older one"
       ]
     },
     {
@@ -49,7 +51,8 @@
       "evidence": [
         "member: two members run this release with CLI release 89 (read on the machines 2026-11-21: apt 2.4.14 and 2.4.15, python 3.10.12, amd64)",
         "packageNames: build-offline-medium.sh replaces the two library names for --target ubuntu-22.04; systemd-resolved has no candidate in the base image of this release (read 2026-11-21), and the dependency list resolves once it is named systemd",
-        "dependency set: built for this release on 2026-11-22 from the offline dependency list (930 packages, 540 MB, every one checked against the signed archive index); not published on a core yet",
+        "dependency set: built for this release on 2026-11-22 from the offline dependency list (930 packages, 540 MB, every one checked against the signed archive index)",
+        "dependency set: its second build (930 package files, 515 MiB, with the storage verbs' tools) went through a release packet on 2026-11-22 and the core serves it under deps/jammy; both members asked for its index and got it. No machine was installed offline from it yet",
         "baseImage: build-offline-bundle.sh resolves the dependency set in this image"
       ]
     }
