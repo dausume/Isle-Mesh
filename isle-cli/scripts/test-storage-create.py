@@ -361,7 +361,7 @@ class OnAWholeDevice(Case):
 
     def test_a_table_tool_that_is_missing_or_refuses_the_call_is_found_by_the_rehearsal(self):
         approved = self.whole_id()
-        for result, words in ((FileNotFoundError(2, 'No such file'), 'sfdisk is not installed on this machine (package fdisk)'),
+        for result, words in ((FileNotFoundError(2, 'No such file'), 'sfdisk is not installed on this machine (package fdisk). Type: sudo isle apt install fdisk'),
                               ((1, "sfdisk: unrecognized option '--lock'\nTry 'sfdisk --help' for more information.\n"),
                                "sfdisk would not write the table: exit 1 (Try 'sfdisk --help' for more information.)"),
                               ((1, ''), 'sfdisk would not write the table: exit 1. Nothing was changed')):

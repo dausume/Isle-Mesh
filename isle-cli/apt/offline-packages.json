@@ -50,11 +50,14 @@
     "libxi6",
     "libgl1",
     "libnss3",
-    "libgbm1"
+    "libgbm1",
+    "smartmontools",
+    "fdisk"
   ],
   "cacheOnly": [
     "openssh-server",
     "python3-pip",
-    "python3-venv"
+    "python3-venv",
+    "fuse3"
   ]
 }

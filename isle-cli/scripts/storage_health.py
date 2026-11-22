@@ -35,7 +35,7 @@ def ask(io, node, bridge=False):
     """(exit status, report) of the disk at this node.  The report is None when smartctl printed none."""
     command = [TOOL, '--json=c', '--info', '--health', '--attributes'] + (['--device', 'sat'] if bridge else []) + ['/dev/' + node]
     try: done = io.run(command, capture_output=True, text=True, timeout=60)
-    except FileNotFoundError: raise NoReport('%s is not installed on this machine (package %s)' % (TOOL, PACKAGE))
+    except FileNotFoundError: raise NoReport('%s is not installed on this machine (package %s). Type: sudo isle apt install %s' % (TOOL, PACKAGE, PACKAGE))
     except subprocess.TimeoutExpired: raise NoReport('the disk did not answer within 60 seconds')
     try: doc = json.loads(done.stdout or '')
     except ValueError: doc = None

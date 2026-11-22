@@ -188,7 +188,7 @@ class Refusals(Case):
         for serial, words in (('S9', 'no storage device with the serial S9'), ('', 'not a hardware serial')):
             self.refused(self.health(serial, '--table'), words)
         self.answers = [(FileNotFoundError(2, 'No such file'), None)]
-        self.refused(self.health('S2', '--table'), 'smartctl is not installed on this machine (package smartmontools)')
+        self.refused(self.health('S2', '--table'), 'smartctl is not installed on this machine (package smartmontools). Type: sudo isle apt install smartmontools')
         self.answers = [(subprocess.TimeoutExpired('smartctl', 60), None)]
         self.refused(self.health('S2', '--table'), 'did not answer within 60 seconds')
         self.m.disks[2]['serial'] = 'S2'

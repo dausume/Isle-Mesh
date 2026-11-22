@@ -49,7 +49,7 @@
       "evidence": [
         "member: two members run this release with CLI release 89 (read on the machines 2026-11-21: apt 2.4.14 and 2.4.15, python 3.10.12, amd64)",
         "packageNames: build-offline-medium.sh replaces the two library names for --target ubuntu-22.04; systemd-resolved has no candidate in the base image of this release (read 2026-11-21), and the dependency list resolves once it is named systemd",
-        "dependency set: built for this release on 2026-11-21 from the offline dependency list (927 packages, 539 MB, every one checked against the signed archive index); not published on a core yet",
+        "dependency set: built for this release on 2026-11-22 from the offline dependency list (930 packages, 540 MB, every one checked against the signed archive index); not published on a core yet",
         "baseImage: build-offline-bundle.sh resolves the dependency set in this image"
       ]
     }

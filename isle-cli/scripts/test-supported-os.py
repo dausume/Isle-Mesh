@@ -317,6 +317,11 @@ class TheOfflineList(Base):
         self.assertIn('libgtk-3-0t64', newest); self.assertIn('libgtk-3-0,', older); self.assertNotIn('t64', older)
         self.assertIn('docker.io | docker-ce', older)                     # an either-or entry stays one entry
         self.assertEqual(so.offline_packages(self.entry('ubuntu-22.04'), 'cache-only'), ','.join(doc['cacheOnly']))
+        for system in ('ubuntu-24.04', 'ubuntu-22.04'):                   # the tools the storage verbs call (the user, 2026-11-22)
+            installed = so.offline_packages(self.entry(system), 'install').split(',')
+            carried = so.offline_packages(self.entry(system), 'cache-only').split(',')
+            self.assertIn('smartmontools', installed); self.assertIn('fdisk', installed)
+            self.assertIn('fuse3', carried); self.assertNotIn('fuse3', installed)
 
     def test_a_list_this_version_does_not_read_is_refused(self):
         good = {'schemaVersion': 1, 'install': ['a', 'b | c'], 'cacheOnly': ['d']}

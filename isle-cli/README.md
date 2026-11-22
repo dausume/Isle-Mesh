@@ -601,7 +601,8 @@ only whole names that the record lists for the asked system and leaves every oth
 The operating system packages an isle needs when it is installed with no internet are one list,
 `apt/offline-packages.json`, beside the record. It has two parts: `install` (packages an offline
 install puts on the machine) and `cacheOnly` (packages that are only carried, for a later step that
-installs them). An entry `a | b` means either package serves. The builder of an offline medium and
+installs them). An entry `a | b` means either package serves. The storage verbs' tools are in it:
+`smartmontools` and `fdisk` are installed, `fuse3` is carried for the mount of a file pool, which is not built. The builder of an offline medium and
 `isle os dependencies build` both read this one list.
 
 #### Building a dependency set
@@ -822,8 +823,9 @@ when the verdict is "passed" and no such count is above zero. It reads the repor
 A disk behind a USB bridge that does not answer is asked once more as a SATA disk; one that answers neither way
 is a refusal with the tool's own words. When the device is registered the result (time, verdict, what needs
 attention, hours) is kept in this machine's storage record under the device; a class change keeps it and
-`device retire` drops it. It needs `smartctl` (package `smartmontools`), which the offline package list does not
-name: on a machine without it the verb is a refusal that says so.
+`device retire` drops it. It needs `smartctl` (package `smartmontools`). The offline package list names it, so an
+offline install puts it on the machine; on a machine without it the verb is a refusal that names the command
+(`sudo isle apt install smartmontools`).
 
 `partition create` makes a new filesystem (ext4, 1% kept in reserve) with the marker of its roles at its root
 from the first moment, and records it on this machine. It is the one storage verb that erases. With the serial
@@ -859,8 +861,8 @@ says what the device holds at that point (a partition table that may be partly w
 partition and no filesystem, with the `--partition` command that goes on from there; a filesystem that may be
 partly made; or a finished filesystem that this machine does not record yet, with the `partition assign`
 command that records it). It does not mount: the new filesystem shows in `partition check` as recorded and not
-mounted, and `partition mount` is the verb for that. It needs `sfdisk` (package `fdisk`), `blkid` (`util-linux`) and `mkfs.ext4` (`e2fsprogs`); the offline
-package list names none of them, and the three machines of the isle have them.
+mounted, and `partition mount` is the verb for that. It needs `sfdisk` (package `fdisk`), `blkid` (`util-linux`) and `mkfs.ext4` (`e2fsprogs`). The offline
+package list names `fdisk`; the other two are part of every Ubuntu install.
 
 `partition mount` mounts a partition at a folder and keeps it mounted there. It writes one systemd mount unit
 in `/etc/systemd/system` that names the filesystem by its identifier (never by a device name such as `sdb1`,

@@ -33,7 +33,7 @@ def last_line(done):
 def rehearse(io, path, identifier):
     """The same call with --no-act, which writes nothing: a tool that is missing or refuses the call is found here."""
     try: done = _run(io, path, identifier, True)
-    except FileNotFoundError: raise NotStarted('%s is not installed on this machine (package fdisk)' % TOOL)
+    except FileNotFoundError: raise NotStarted('%s is not installed on this machine (package fdisk). Type: sudo isle apt install fdisk' % TOOL)
     if done.returncode != 0: raise NotStarted('%s would not write the table: exit %d%s' % (TOOL, done.returncode, last_line(done)))
 
 
