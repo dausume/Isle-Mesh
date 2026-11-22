@@ -24,7 +24,7 @@ from storage_migrate import HttpError
 from storage_snapshot import encoded
 
 FAILED, COUNT = [], [0]
-UUID = '3bd28d7c-ba1e-4e6e-9a9f-23f684f4adf8'
+UUID = '11112222-3333-4444-8555-666677778888'
 DATASET, REL = 'apt-public-repo', 'isle/datasets/apt-public-repo'
 DEVICE, ORIGIN, SOURCE_ADDR = 'pol-core', 'isle-core', '10.1.2.3'
 DOMAIN = 'apt.isle'

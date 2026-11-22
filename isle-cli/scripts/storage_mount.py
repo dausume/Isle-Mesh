@@ -25,7 +25,7 @@ def _absolute(path, name):
 
 def mount_unit_name(path):
     """Return the systemd mount unit name of an absolute path, like `systemd-escape --path --suffix=mount`.
-    '/mnt/pol-ssd' gives 'mnt-pol\\x2dssd.mount'; '/' gives '-.mount'."""
+    '/mnt/dock-ssd' gives 'mnt-dock\\x2dssd.mount'; '/' gives '-.mount'."""
     _absolute(path, 'Mount path')
     parts = [part for part in path.split('/') if part]
     if not parts:

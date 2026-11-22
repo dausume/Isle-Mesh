@@ -367,7 +367,7 @@ without credentials, 200 (PolariPlatform) with them → `sudo isle url unexpose
 isle is fully contained". Containment holds both ways.
 One inconsistency for you: `isle security gate` answers differently by user.
 As root it says "clean — deployable material only"; as the login user it FAILS,
-looking at `/home/detts/polari-suite/polari-rf-node/prf-keycloak/…env` (the dev
+looking at `~/polari-suite/polari-rf-node/prf-keycloak/…env` (the dev
 checkout) instead of the installed material — so `isle url expose` WITHOUT sudo
 is refused by the gate even though the isle is deployable. Either the gate
 should resolve the installed root regardless of the caller, or `isle url

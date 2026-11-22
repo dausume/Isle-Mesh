@@ -16,7 +16,7 @@
 set -euo pipefail
 
 SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-UUID_GOOD="3bd28d7c-ba1e-4e6e-9a9f-23f684f4adf8"
+UUID_GOOD="11112222-3333-4444-8555-666677778888"
 UUID_WRONG="00000000-dead-beef-0000-000000000000"
 REL="isle/datasets/apt-public-repo"
 

@@ -24,7 +24,7 @@ from storage_snapshot import encoded
 
 FAILED = []
 COUNT = [0]
-UUID = '3bd28d7c-ba1e-4e6e-9a9f-23f684f4adf8'
+UUID = '11112222-3333-4444-8555-666677778888'
 PLAN_ID = 'ce23b61c3a444592a0e9274751f76854'
 ITEM_ID = 'apt-repo-to-pol-core'
 DATASET = 'apt-public-repo'

@@ -113,7 +113,7 @@ The container uses the official nginx:alpine image, no custom build needed.
 
 ### Run with Docker Compose
 
-See the main docker-compose.yml in `/home/detts/Isle-Mesh/isle-agent/`
+See the main docker-compose.yml in `isle-agent/`
 
 ### Run Standalone
 
@@ -471,5 +471,5 @@ location /nginx_status {
 
 - **isle-host-agent**: Host mDNS broadcaster
 - **isle-agent-sync**: mDNS receiver and config generator
-- **Main Agent README**: `/home/detts/Isle-Mesh/isle-agent/README.md`
+- **Main Agent README**: `isle-agent/README.md`
 - **Nginx Documentation**: https://nginx.org/en/docs/

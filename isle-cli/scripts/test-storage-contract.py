@@ -163,7 +163,7 @@ def action_checks():
     check('migrate dependsOn authorize, device is target', act['dependsOn'] == [auth['id']] and act['device'] == 'pol-core')
     check('action status override', sc.planned_action(pid, 2, item(), d, rel, 'running', core_device=core)['status'] == 'running')
     refuses('action bad status refused', sc.planned_action, pid, 2, item(), d, rel, 'done', 'isle.storage.migrate', core)
-    check('action summary text', act['summary'] == 'mirror 16.0 GiB (1234 files) of apt-public-repo onto pol-core filesystem 3bd28d7c… under isle/datasets/apt-public-repo, deploy isle-content-host, cut apt.isle over, verify from a neighbour; source kept')
+    check('action summary text', act['summary'] == 'mirror 16.0 GiB (1234 files) of apt-public-repo onto pol-core filesystem 11112222… under isle/datasets/apt-public-repo, deploy isle-content-host, cut apt.isle over, verify from a neighbour; source kept')
     check('action operatorCommand', act['operatorCommand'] == 'sudo isle storage migrate --dataset apt-public-repo --plan %s --revision 2 --item apt-repo-to-pol-core --digest %s' % (pid, d))
     check('migrate undo emergency', act['undo'].startswith('sudo isle storage rollback --dataset apt-public-repo') and 'EMERGENCY ONLY' in act['undo'])
     refuses('action bad digest refused', sc.planned_action, pid, 2, item(), 'zz', rel, None, 'isle.storage.migrate', core)

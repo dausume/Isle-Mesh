@@ -481,7 +481,7 @@ class DiskAndMount(MigAsserts, unittest.TestCase):
                 texts = [(HERE / n).read_text() for n in names if (HERE / n).exists()]
                 self.assertTrue(any(gate.search(text) for text in texts),
                                 '%s: none of %s runs storage check before compose up' % (label, ', '.join(names)))
-        unit = storage_mount.unit_text('apt-public-repo', '/mnt/pol-ssd', '/mnt/pol-ssd/isle/datasets/apt-public-repo',
+        unit = storage_mount.unit_text('apt-public-repo', '/mnt/dock-ssd', '/mnt/dock-ssd/isle/datasets/apt-public-repo',
                                        'isle-content-host', 'isle-isle-content-host')
         pre = [l for l in unit.splitlines() if l.startswith('ExecStartPre=')]
         self.assertEqual(len(pre), 1)

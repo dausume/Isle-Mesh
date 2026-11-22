@@ -65,8 +65,8 @@ for byte; the `storage` block is kept (unknown keys inside it are dropped).
    "domain": "apt.isle",                                              // the name that cuts over
    "source": {"device": "isle-core", "path": "/etc/isle-mesh/apt/repo", "apps": ["apt"], "snapshotSha256": "<64 hex manifestSha>|null", "contentSha256": "<64 hex>|null",
               "snapshotTakenAt": "2026-11-09T12:00:00+00:00", "totalBytes": 17179869184, "entries": 1234},
-   "target": {"device": "pol-core", "filesystemUuid": "3bd28d7c-ba1e-4e6e-9a9f-23f684f4adf8",
-              "relativePath": "isle/datasets/apt-public-repo", "capacityBytes": 21474836480, "mountpoint": "/mnt/pol-ssd"},
+   "target": {"device": "pol-core", "filesystemUuid": "11112222-3333-4444-8555-666677778888",
+              "relativePath": "isle/datasets/apt-public-repo", "capacityBytes": 21474836480, "mountpoint": "/mnt/dock-ssd"},
    "sourceRemoval": "dependent"}}                                     // the only allowed value
 ```
 Constraints: `domain` is a DNS hostname ending `.isle` (labels `[a-z0-9-]`, 1–63 chars); `relativePath` relative, no `..`, ≤ 200; `snapshotSha256` 64
@@ -175,7 +175,7 @@ creation, so `latest(name)` works per dataset.  The lock is dedicated: a long co
 | # | label | does | refuses (nothing written) when |
 |---|---|---|---|
 | 1 | `fetching-plan` | GET plan by id+revision over trusted HTTPS; recompute digest; require active plan, item `planned`; `dataset` matches; read the placement view (`GET …/storage/placement?dataset=`, §5) | plan missing/not active/revision not retained/digest mismatch; item not storage or deferred; `device` ≠ own identity; placement view absent, or not `authorized` (or `migrated` with an entry digest equal to the request digest: a legitimate re-run, e.g. host redeploy after a disk swap) for this device and domain |
-| 2 | `preflight-storage` | `storage_preflight.inspect`; mount must be a systemd mount unit (an fstab entry qualifies through `systemd-fstab-generator`, which is pol's `/mnt/pol-ssd`); capacity = `totalBytes` + 5 % headroom; write probe; open the mount root fd and capture `st_dev` | any inspect refusal; mountpoint resolves to `/`; `<mount>/<relativePath>` exists on the root fs; existing `binding.json` names another uuid/dataset |
+| 2 | `preflight-storage` | `storage_preflight.inspect`; mount must be a systemd mount unit (an fstab entry qualifies through `systemd-fstab-generator`, which is how the disk of the first migration is mounted); capacity = `totalBytes` + 5 % headroom; write probe; open the mount root fd and capture `st_dev` | any inspect refusal; mountpoint resolves to `/`; `<mount>/<relativePath>` exists on the root fs; existing `binding.json` names another uuid/dataset |
 | 3 | `fetching-manifest` | GET `https://<domain>/snapshot/manifests/<manifestSha>.json` from the **source origin** (D11 below); document sha256 == `snapshotSha256`; validate `binding` (dataset, planId/itemId); `totalBytes` equals plan; validate every path (below); capacity re-check = `totalBytes` + largest file + 5 % + store delta | sha mismatch; binding mismatch; > 64 MiB; schema ≠ `isle-content-snapshot` v1; any unsafe path |
 | 4 | `receiving-content` | sequential; deduped by sha (one fetch per distinct sha256): skip if in `store/` with equal sha+size; else fetch `https://<domain>/snapshot/objects/<sha256>` (never a path) into `staging/<opid>/`, verify sha+size, fsync, link into `store/<sha256>`, hard-link into `generations/<contentSha>/<path>`; progress every 64 MiB | UUID/`st_dev` re-check fails before a file; capacity below remaining; sha/size mismatch (file deleted, stage fails, retryable) |
 | 5 | `verifying-content` | re-inventory `generations/<contentSha>/` with the generation verifier (§3) and **require `contentSha256`**; verify only, nothing is promoted in stage 5 (promote is stage 6, v3.4) | mismatch: generation left for inspection, `contentVerified:false` |
@@ -273,8 +273,8 @@ Without this, `dns-register.sh` (which allows only a pending cutover, rollback o
   "hostingRelease": {"name": "isle-content-host", "version": "2026.11.1", "manifestSha256": "…"},
   "dataset": "apt-public-repo", "domain": "apt.isle", "placement": {"state": "authorized", "generation": 1},
   "target": {"device": "pol-core", "filesystemUuid": "…", "filesystemUuidObserved": "…",
-             "mountSourceObserved": "/dev/sda1", "mount": "/mnt/pol-ssd", "stDev": "8:49",
-             "path": "/mnt/pol-ssd/isle/datasets/apt-public-repo", "availableBytesBefore": 0, "availableBytesAfter": 0},
+             "mountSourceObserved": "/dev/sda1", "mount": "/mnt/dock-ssd", "stDev": "8:49",
+             "path": "/mnt/dock-ssd/isle/datasets/apt-public-repo", "availableBytesBefore": 0, "availableBytesAfter": 0},
   "source": {"device": "isle-core", "snapshotSha256": "<manifestSha>", "contentSha256": "<contentSha>", "totalBytes": 0, "entries": 0, "origin": "<address used>"},
   "stages": {"preflight-storage": {"ok": true, "at": "…"}, "receiving-content": {"ok": true, "bytes": 0, "files": 0, "skipped": 0}},
   "generation": "<contentSha>", "contentSha": "<contentSha>", "manifestSha": "<manifestSha>", "epoch": 1, "contentVerified": true, "stagedDeploy": true, "readinessVerified": true,
@@ -315,7 +315,7 @@ against `members.json` locally and never log tokens (fingerprint only).
   staging/<opid>/               partial fetches
 ```
 ```json
-{"schemaVersion": 2, "dataset": "apt-public-repo", "filesystemUuid": "…", "mountpoint": "/mnt/pol-ssd", "relativePath": "…",
+{"schemaVersion": 2, "dataset": "apt-public-repo", "filesystemUuid": "…", "mountpoint": "/mnt/dock-ssd", "relativePath": "…",
  "currentGeneration": "<contentSha>", "boundAt": "…",
  "plan": {"id": "…", "revision": 2, "digest": "…"}, "hostApp": "isle-content-host"}
 ```

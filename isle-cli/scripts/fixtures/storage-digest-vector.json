@@ -1,5 +1,5 @@
 {
-  "expectedDigest": "7fa3e25e000d69e0ccc25887a0e31af14f430ca8dc331c67c408e4e38c5f335a",
+  "expectedDigest": "1882fc747bc64def114dbadfc1b3b7a031ab656277ef2692425a6950105b6bd3",
   "hostingRelease": {
     "manifestSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
     "name": "isle-content-host",
@@ -28,8 +28,8 @@
       "target": {
         "capacityBytes": 21474836480,
         "device": "pol-core",
-        "filesystemUuid": "3bd28d7c-ba1e-4e6e-9a9f-23f684f4adf8",
-        "mountpoint": "/mnt/pol-ssd",
+        "filesystemUuid": "11112222-3333-4444-8555-666677778888",
+        "mountpoint": "/mnt/dock-ssd",
         "relativePath": "isle/datasets/apt-public-repo"
       }
     }

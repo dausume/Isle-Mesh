@@ -268,6 +268,6 @@ The systemd service includes security hardening:
 
 ## See Also
 
-- **isle-agent-sync**: `/home/detts/Isle-Mesh/isle-agent/isle-agent-sync/README.md`
-- **isle-vlan-agent**: `/home/detts/Isle-Mesh/isle-agent/isle-vlan-agent/README.md`
+- **isle-agent-sync**: `isle-agent/isle-agent-sync/README.md`
+- **isle-vlan-agent**: `isle-agent/isle-vlan-agent/README.md`
 - **Avahi Documentation**: https://www.avahi.org/

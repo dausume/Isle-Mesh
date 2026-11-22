@@ -21,7 +21,7 @@ from storage_snapshot import encoded
 
 FAILED = []
 COUNT = [0]
-UUID = '3bd28d7c-ba1e-4e6e-9a9f-23f684f4adf8'
+UUID = '11112222-3333-4444-8555-666677778888'
 REL = ['isle', 'datasets', 'apt-public-repo']
 Vfs = collections.namedtuple('Vfs', 'f_bavail f_frsize f_blocks')
 BIG = lambda fd: Vfs(10 ** 12, 1, 10 ** 12)
@@ -556,20 +556,20 @@ def progress_check():
 # ------------------------------------------------------------------ mount unit, cli
 
 def mount_unit_checks():
-    check('mount unit name escapes dash', sm.mount_unit_name('/mnt/pol-ssd') == 'mnt-pol\\x2dssd.mount')
+    check('mount unit name escapes dash', sm.mount_unit_name('/mnt/dock-ssd') == 'mnt-dock\\x2dssd.mount')
     check('mount unit name nested', sm.mount_unit_name('/run/media/u/disk') == 'run-media-u-disk.mount')
     check('mount unit name root', sm.mount_unit_name('/') == '-.mount')
     check('mount unit name collapses slashes', sm.mount_unit_name('//mnt//x/') == 'mnt-x.mount')
     check('mount unit name leading dot escaped', sm.mount_unit_name('/.hid') == '\\x2ehid.mount')
     raises('mount unit name refuses relative', ValueError, sm.mount_unit_name, 'mnt/x')
-    text = sm.unit_text('apt-public-repo', '/mnt/pol-ssd', '/mnt/pol-ssd/isle/datasets/apt-public-repo', 'isle-content-host', 'isle-isle-content-host')
+    text = sm.unit_text('apt-public-repo', '/mnt/dock-ssd', '/mnt/dock-ssd/isle/datasets/apt-public-repo', 'isle-content-host', 'isle-isle-content-host')
     lines = text.splitlines()
-    unit = 'mnt-pol\\x2dssd.mount'
-    for want in ('RequiresMountsFor=/mnt/pol-ssd', 'BindsTo=' + unit, 'After=' + unit,
-                 'AssertPathExists=/mnt/pol-ssd/isle/datasets/apt-public-repo/binding.json',
+    unit = 'mnt-dock\\x2dssd.mount'
+    for want in ('RequiresMountsFor=/mnt/dock-ssd', 'BindsTo=' + unit, 'After=' + unit,
+                 'AssertPathExists=/mnt/dock-ssd/isle/datasets/apt-public-repo/binding.json',
                  'ExecStartPre=/usr/local/bin/isle storage check --dataset apt-public-repo',
                  'WorkingDirectory=/etc/isle-mesh/apps/isle-content-host',
-                 'Environment=ISLE_DATASET_PATH=/mnt/pol-ssd/isle/datasets/apt-public-repo',
+                 'Environment=ISLE_DATASET_PATH=/mnt/dock-ssd/isle/datasets/apt-public-repo',
                  'ExecStart=/usr/bin/docker compose -p isle-isle-content-host -f docker-compose.yml -f isle-overlay.yml up -d --no-build --pull never',
                  'ExecStop=/usr/bin/docker compose -p isle-isle-content-host -f docker-compose.yml -f isle-overlay.yml stop'):
         check('unit has ' + want.split('=')[0] + ' line', want in lines)
@@ -601,8 +601,8 @@ def mount_unit_checks():
     raises('unit refuses dataset path outside mount', ValueError, sm.unit_text, 'apt', '/mnt/x', '/mnt/y/d', 'a', 'p')
     raises('unit refuses percent specifier', ValueError, sm.unit_text, 'apt', '/mnt/x', '/mnt/x/%h', 'a', 'p')
     raises('unit refuses bad dataset', ValueError, sm.unit_text, '../x', '/mnt/x', '/mnt/x/d', 'a', 'p')
-    check('overlay_bind shape', sm.overlay_bind('ISLE_DATASET_PATH', '/mnt/pol-ssd/isle/d') == {
-        'type': 'bind', 'source': '/mnt/pol-ssd/isle/d', 'target': '/data', 'read_only': True, 'bind': {'create_host_path': False}})
+    check('overlay_bind shape', sm.overlay_bind('ISLE_DATASET_PATH', '/mnt/dock-ssd/isle/d') == {
+        'type': 'bind', 'source': '/mnt/dock-ssd/isle/d', 'target': '/data', 'read_only': True, 'bind': {'create_host_path': False}})
     raises('overlay_bind refuses relative source', ValueError, sm.overlay_bind, 'ISLE_DATASET_PATH', 'rel/x')
     raises('overlay_bind refuses bad param', ValueError, sm.overlay_bind, 'lower', '/x')
 

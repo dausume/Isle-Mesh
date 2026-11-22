@@ -14,7 +14,7 @@ def test(fn):
         RESULTS.append((fn.__name__, traceback.format_exc())); print('FAIL ' + fn.__name__ + '\n' + traceback.format_exc())
     return fn
 
-DS, APP, MP, REL = 'tank', 'board-engines', '/mnt/pol-ssd', 'isle/tank'
+DS, APP, MP, REL = 'tank', 'board-engines', '/mnt/dock-ssd', 'isle/tank'
 DSPATH = MP + '/' + REL
 GATE = 'isle-storage-%s.service' % DS
 SYNC, TIMER = sm.sync_unit_names(DS)
