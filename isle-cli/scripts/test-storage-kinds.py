@@ -70,14 +70,14 @@ class TheLists(unittest.TestCase):
 
     def test_the_table_as_it_was_agreed(self):
         self.assertEqual(list(sk.KINDS), ['plain-folder', 'file-pool', 'image-registry', 'git'])
-        self.assertEqual(list(sk.NEEDS), ['kept', 'served', 'pooled', 'cached', 'installed', 'carried'])
+        self.assertEqual(list(sk.NEEDS), ['kept', 'served', 'pooled', 'cached', 'installed', 'carried', 'taken'])
         self.assertEqual(list(sk.ASSOCIATIONS), ['isle', 'app', 'machine', 'release'])
         self.assertEqual({role: kind for role, (kind, _, _) in sk.ROLE.items()}, {
             'package-repo': 'plain-folder', 'distribution': 'plain-folder', 'backup': 'plain-folder', 'scratch': 'plain-folder',
             'transfer': 'plain-folder', 'blob': 'file-pool', 'assets': 'file-pool', 'registry': 'image-registry', 'git': 'git'})
         # a restore must not need the pool to be running: device-backups are a plain folder, kept on their machine
         self.assertEqual(sk.ROLE['backup'], ('plain-folder', ('kept',), ('machine',)))
-        self.assertEqual(sk.ROLE['assets'], ('file-pool', ('pooled', 'cached'), ('app', 'isle')))
+        self.assertEqual(sk.ROLE['assets'], ('file-pool', ('pooled', 'cached', 'taken'), ('app', 'isle')))
         self.assertEqual(sk.ROLE['registry'], ('image-registry', ('served', 'cached'), ('isle',)))
 
     def test_what_a_machine_must_have_in_words(self):
@@ -202,10 +202,11 @@ class TheListings(Case):
         self.assertEqual(rows[0], dict(need='kept', meaning='used only on the machine it sits on', planDoes='nothing', roles=['backup', 'scratch']))
         self.assertEqual({r['need']: r['roles'] for r in rows}, dict(
             kept=['backup', 'scratch'], served=['package-repo', 'distribution', 'registry', 'git'], pooled=['blob', 'assets'],
-            cached=['registry', 'assets'], installed=[], carried=['distribution', 'transfer']))
+            cached=['registry', 'assets'], installed=[], carried=['distribution', 'transfer'], taken=['assets']))
         self.assertEqual(self.m.call('need', 'list', '--table'), 0)
         lines = self.m.text().splitlines()
-        self.assertEqual((len(lines), lines[0].split()[:3]), (7, ['DISTRIBUTION', 'NEED', 'ROLES']))
+        self.assertEqual((len(lines), lines[0].split()[:3]), (8, ['DISTRIBUTION', 'NEED', 'ROLES']))
+        self.assertRegex(lines[7], r'^taken\s+assets\s+reserve the original, and apply the edits when the copy comes back\s+a copy on one device')
         self.assertRegex(lines[5], r'^installed\s+-\s+run an install on each device\s')
         self.assertEqual((self.looked, self.commands), ([], []))         # these two lists say nothing about the machine
 
@@ -241,11 +242,11 @@ class TheListings(Case):
         self.assertRegex(lines[3], r'^registry\s+image-registry\s+0\s')
         self.assertEqual(self.m.call('role', 'show', 'assets'), 0)
         result = json.loads(self.m.said[0])['result']
-        self.assertEqual((result['kind'], result['distribution'], result['association']), ('file-pool', ['pooled', 'cached'], ['app', 'isle']))
+        self.assertEqual((result['kind'], result['distribution'], result['association']), ('file-pool', ['pooled', 'cached', 'taken'], ['app', 'isle']))
         self.assertEqual(self.m.call('role', 'show', 'package-repo', '--table'), 0)
         self.assertEqual(self.m.said[0], 'Role package-repo: storage of the kind plain-folder; distribution: served; belongs to: isle.')
         self.assertEqual(self.m.call('role', 'show', 'assets', '--table'), 0)
-        self.assertEqual(self.m.said, ['Role assets: storage of the kind file-pool; distribution: pooled, cached; belongs to: app, isle.',
+        self.assertEqual(self.m.said, ['Role assets: storage of the kind file-pool; distribution: pooled, cached, taken; belongs to: app, isle.',
                                        'No partition of this machine carries the role assets.'])
         self.assertEqual((self.looked, self.commands), ([], []))         # what a role allows is the table, not a look at the machine
 

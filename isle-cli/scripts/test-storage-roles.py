@@ -27,6 +27,7 @@ class Machine(sr.Io):
         self.root_user, self.said, self.bound = root, [], [dict(dataset='apt-public-repo', filesystemUuid=ARCH)]
         self.folders, self.unmounted = {}, set()
         self.unit_dir, self.fstab = self.tmp / 'units', self.tmp / 'fstab'      # never the real ones
+        self.apps_dir, self.chowned = self.tmp / 'apps', []
         for name in ('archive', 'dock', 'whole', 'system'):
             self.folders[name] = self.tmp / name
             self.folders[name].mkdir()
@@ -53,6 +54,7 @@ class Machine(sr.Io):
     def is_root(self): return self.root_user
     def which(self, program): return None       # a machine with no program on its path; never the real one
     def is_mount(self, path): return path not in self.unmounted
+    def chown(self, folder, user, group): self.chowned.append((user, group))      # never a real change of owner
     def now(self): return '2026-01-01T00:00:00+00:00'
     def say(self, line=''): self.said.append(line)
     def machine(self): return 'test-machine'

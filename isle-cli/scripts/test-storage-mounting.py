@@ -367,6 +367,18 @@ class Unmounting(Case):
         self.assertEqual(self.m.said[-1], 'Held on it: assets, images. What serves them does not start until it is mounted at %s again.' % self.at)
         self.assertEqual(sorted(p.name for p in self.m.unit_dir.iterdir()), [])
 
+    def test_a_partition_that_holds_a_storage_slot_needs_the_option_too(self):
+        doc = self.m.record()
+        doc['slots'] = {'kicad/projects': dict(role='scratch', filesystemUuid=SPARE, boundAt='2026-01-01T00:00:00+00:00'),
+                        'kicad/library': dict(role='assets', filesystemUuid=DOCK, boundAt='2026-01-01T00:00:00+00:00')}
+        self.m.records.write_text(json.dumps(doc))
+        self.m.bound.append(dict(dataset='images', filesystemUuid=SPARE))
+        self.keep()
+        self.refused(self.unmount(), 'it holds: images, the storage slot kicad/projects. What serves them is stopped when it is unmounted')
+        self.assertEqual(self.unmount('--with-datasets'), 0, self.m.text())
+        self.assertEqual(self.m.said[-1], 'Held on it: images, the storage slot kicad/projects. What serves them does not start until it is mounted at %s again.' % self.at)
+        self.assertEqual(self.m.record()['slots'], doc['slots'])                      # the binding stays: the slot is there again when the partition is
+
     def test_the_option_changes_nothing_for_a_partition_without_datasets(self):
         self.assertEqual(self.unmount('--with-datasets'), 0, self.m.text())
         self.assertEqual(len(self.m.said), 2)

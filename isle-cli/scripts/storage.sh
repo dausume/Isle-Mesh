@@ -8,9 +8,10 @@
 #   read-only verbs for anyone: list, check, check-path, guard-domain, status, domain-entry, fence-check,
 #     placement (prints the record), device list, partition list|check, role list|show (with --isle: what
 #     every machine reported to the core's device list), units check, kind list (the kinds of storage and whether this
-#     machine has what each needs), need list (the distribution needs), association list;
+#     machine has what each needs), need list (the distribution needs), association list, slot list|check (the storage
+#     slots the apps of this machine declare, and whether each is bound to a partition that is there);
 #   this machine's storage records (root, under the records' own lock; no dataset, so not journaled):
-#     device register|retire, partition assign|retire;
+#     device register|retire, partition assign|retire, slot declare|bind|unbind (bind makes one folder on the partition);
 #   partition create <serial> ...: reads the plan for anyone; with --expect <plan-id>, root: makes a filesystem on a partition that
 #     has none, or on a device that has no partition table (this erases it), and records it;
 #   partition mount <filesystem-identifier> --at <folder> | partition unmount <filesystem-identifier>: root; writes, starts, stops and
@@ -46,7 +47,7 @@ case "$verb" in
         fi
         case "${2:-}" in check|prove) ;; *) echo "Usage: isle storage units check [--dataset D] | apply --dataset D [--overrides keep|remove] | prove --dataset D" >&2; exit 1 ;; esac
         shift; exec python3 "$here/storage_units.py" "$@" ;;
-    device|partition|role|kind|need|association)  # what this machine has, by serial and by filesystem identifier, the role of each
+    device|partition|role|kind|need|association|slot)  # what this machine has, by serial and by filesystem identifier, the role of each
         # partition, and the fixed lists a role points at (kind of storage, distribution need, association)
         exec python3 "$here/storage_roles.py" "$@" ;;
     authorize-placement|accept-placement)

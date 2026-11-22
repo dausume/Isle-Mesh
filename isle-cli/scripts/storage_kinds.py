@@ -37,6 +37,8 @@ NEEDS = {
                'mount it with a cache'),
     'installed': ('a copy must sit on every device that runs it', 'run an install on each device'),
     'carried': ('moved by hand on a disk or a stick', 'nothing; a person carries it'),
+    'taken': ('a copy on one device that owes its edits back to its original; while it is out everyone still reads the '
+              'original and nobody else changes it', 'reserve the original, and apply the edits when the copy comes back'),
 }
 ASSOCIATIONS = {'isle': 'shared by every device of the isle', 'app': 'one app (its file space)',
                 'machine': 'one machine', 'release': 'one release (its packet)'}
@@ -47,7 +49,7 @@ ROLE = {
     'registry': ('image-registry', ('served', 'cached'), ('isle',)),
     'blob': ('file-pool', ('pooled',), ('isle', 'app')),
     'git': ('git', ('served',), ('isle',)),
-    'assets': ('file-pool', ('pooled', 'cached'), ('app', 'isle')),
+    'assets': ('file-pool', ('pooled', 'cached', 'taken'), ('app', 'isle')),
     'backup': ('plain-folder', ('kept',), ('machine',)),
     'scratch': ('plain-folder', ('kept',), ('machine',)),
     'transfer': ('plain-folder', ('carried',), ('isle',)),

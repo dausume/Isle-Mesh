@@ -671,6 +671,11 @@ isle storage role show <role> --isle --table
 isle storage kind list --table
 isle storage need list --table
 isle storage association list --table
+isle storage slot list --table
+isle storage slot check [--app <app>] --table
+sudo isle storage slot declare <app> --from <release.json>
+sudo isle storage slot bind <app> <slot> --partition <filesystem-identifier>
+sudo isle storage slot unbind <app> <slot>
 ```
 
 Without `--table` every listing is a JSON document. The `sudo` verbs print the command to type when they
@@ -715,7 +720,8 @@ more; `file-pool` needs the file store's one program `weed`, or Docker with an i
 and `git` need Docker with the registry's or the forge's image), and whether this machine has it: `ready`,
 `not ready`, or `not known` when Docker did not answer the user who asked. `need list` shows the distribution
 needs, which say how the data has to reach the devices that use it (`kept`, `served`, `pooled`, `cached`,
-`installed`, `carried`) and what a plan has to do for each. `association list` shows what data can belong to
+`installed`, `carried`, `taken`) and what a plan has to do for each. `taken` is a copy on one device that owes its
+edits back to its original; nothing takes or returns such a copy yet. `association list` shows what data can belong to
 (the isle, one app, one machine, one release). `role list` names the kind of each role, and `role show <role>`
 its kind, its distribution needs and what it belongs to.
 
@@ -809,11 +815,40 @@ written, or written and enabled, and the partition not mounted by it); the same 
 `partition unmount` stops that unit, disables it and removes the file. It only ever touches a unit that
 `partition mount` wrote (the first line of the file says so): a partition mounted another way is refused and
 left alone. A partition that holds a dataset of this machine is refused unless `--with-datasets` is typed,
-because what serves the dataset is bound to the mount and stops with it. The folder is left where it is, no data
+because what serves the dataset is bound to the mount and stops with it; a storage slot bound to the partition counts the same way. The folder is left where it is, no data
 is changed, and the storage records are not touched: the roles stay, and `partition check` shows the partition
 as not mounted. It also removes the unit of a disk that is away. When systemd cannot stop the mount (something
 on it is in use) it prints `FAILED:`, keeps the unit, and says that what depends on the mount may have been
 stopped.
+
+A storage slot is one storage need of one app: a folder the app sees, the role of the partition that has to hold
+it, and whether the app writes to it. A release declares its slots in the list `storageSlots` of its release manifest
+(`release.json`); each slot has a `name`, a `role` and a `target` (the plain absolute path of the folder inside
+the app), and may have `service` (which service of the app sees it; the first one when left out), `writable`
+(false when left out), `owner` (`<user>:<group>` as two numbers), `distribution` and `association` (one of those
+the role allows; `kind list`, `need list` and `association list` show them), `copies` (1 or 2), `lifetime`
+(`until-removed`, `release` or `scratch`) and `sizeBytes`. Any other key is refused.
+
+`slot declare` reads that list from a release manifest and keeps it with the app
+(`/etc/isle-mesh/apps/<app>/storage-slots.json`). It binds, makes and starts nothing. It refuses a release that
+drops a slot which is bound on this machine, or declares it with another role: unbind it first. `slot bind` places
+one declared slot on a partition of this machine that carries the slot's role. It makes one folder at the root
+of the partition, `isle-slots/<app>/<slot>`, owned as the slot says, and writes the binding into this machine's
+storage record beside the partition's roles. A folder that is there already is kept with what is in it and with
+its owner, so a disk carried from another machine is taken up as it is. It refuses, and changes nothing: a slot
+the app does not declare; a partition that is away, does not carry the role or needs attention in
+`partition check`; a slot that is written on a partition mounted read-only; less free space than `sizeBytes`;
+something at the folder's name that is not a folder of the partition itself (a link is never followed); and a
+slot that is bound to another partition already. `slot unbind` takes the binding out of the record and leaves
+the folder and its data where they are. No verb moves a slot's data between partitions yet, and nothing keeps a
+second copy yet: `copies: 2` is recorded and said, no more.
+
+`slot list` shows every slot an app of this machine declares and every slot this machine has bound, with its
+state: `ok`, `not bound`, `not declared`, `declaration cannot be read`, `partition away`,
+`partition needs attention`, `role taken away`, `declared with another role`, `folder missing` or
+`mounted read-only`. `slot check` shows the same and exits 1 unless every slot (of one app, with `--app`) is
+`ok`. `partition retire` refuses to take a role away while a slot is bound under it. Nothing starts an app with
+its slots yet: these verbs record and check, and the app's start does not read them.
 
 These records describe one machine, and each machine keeps its own. With `--isle`, `role list` and `role show`
 print what every machine of the isle reported, side by side, from any machine: each machine adds its partitions

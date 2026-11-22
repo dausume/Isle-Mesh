@@ -17,6 +17,7 @@ from device_backup_items import FOLDER as BACKUPS
 from operations import atomic
 import storage_devices
 import storage_roles as sr
+import storage_slots
 
 OPTIONS = ('--record-only', '--leave-data')
 
@@ -60,7 +61,7 @@ def partition(io, identifier, asked, record_only=False, leave_data=False):
     typed = 'sudo isle storage partition retire %s --role %s' % (identifier, asked)
     chosen = (' --record-only' if record_only else '') + (' --leave-data' if leave_data else '')
     try:
-        _, _, partitions = sr.survey(io)
+        records, _, partitions = sr.survey(io)
         rows = [p for p in partitions if p['filesystemUuid'] == identifier]
         present = [p for p in rows if p['state'] != 'not present']
         if not rows: return sr._refuse(io, what, 'this machine neither records nor sees a partition with the identifier %s (see: isle storage partition check --table)' % identifier)
@@ -84,6 +85,10 @@ def partition(io, identifier, asked, record_only=False, leave_data=False):
             return sr._refuse(io, what, '%s is mounted read-only, so its marker cannot be changed. To take %s out of the record of this machine only: %s --record-only%s' % (
                 name, _words_it(wanted), typed, chosen))
         left, keep = [r for r in recorded if r not in wanted], [r for r in marked if r not in wanted]
+        slots = storage_slots.bound_to(records, identifier, from_record)
+        if slots:
+            return sr._refuse(io, what, 'storage slots of apps are bound to it under %s: %s. First, for each: sudo isle storage slot unbind <app> <slot>' % (
+                sr._words([r for r in from_record if storage_slots.bound_to(records, identifier, [r])]), ', '.join(slots)))
         backups = kept_backups(row['wholeMount']) if 'backup' in from_record and row['wholeMount'] else None
         if backups and not leave_data:
             return sr._refuse(io, what, 'device-backups of this machine are kept on it (%s). Without the role, `isle backup` keeps new ones in the state folder of '

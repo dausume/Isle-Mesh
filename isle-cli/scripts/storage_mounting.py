@@ -18,6 +18,7 @@ import subprocess
 
 from storage_mount import _absolute, mount_unit_name
 import storage_roles as sr
+import storage_slots
 from storage_units import _write
 
 HEAD = '# Written by: isle storage partition mount %s'
@@ -190,6 +191,7 @@ def unmount(io, identifier, with_datasets=False):
         unit, folder = ours[0]
         if not folder or mount_unit_name(folder) != unit: raise Refused('the unit %s does not read as this verb wrote it' % unit)
         datasets = sorted(d['dataset'] for d in io.datasets() if d['filesystemUuid'] == identifier)
+        datasets += ['the storage slot %s' % slot for slot in storage_slots.bound_to(sr.read_records(io.records), identifier)]
         if datasets and not with_datasets:
             raise Refused('it holds: %s. What serves them is stopped when it is unmounted, and does not start until it is mounted at %s again. '
                           'To unmount it and let that stop: %s %s' % (', '.join(datasets), folder, typed, OPTION))
