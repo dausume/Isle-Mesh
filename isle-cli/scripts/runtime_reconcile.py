@@ -11,6 +11,7 @@ from operations import atomic
 CANONICAL=Path('/etc/isle-mesh/device-name')
 DESIRED=Path('/var/lib/isle-mesh/desired-release.json')
 OVERLAYS=Path('/var/lib/isle-mesh/runtime-overlays')
+PUBLISHED_RUNTIME='https://apt.isle/runtime/'
 def run(argv,**kwargs):return subprocess.run(argv,check=True,**kwargs)
 def inspect(name):return json.loads(run(['docker','inspect',name],capture_output=True,text=True).stdout)[0]
 def targets(release,mode,source=False):
@@ -31,7 +32,11 @@ def targets(release,mode,source=False):
         digest(image.get('configDigest'))
         if 'manifestDigest' in image:digest(image['manifestDigest'])
         if source:
-            if not isinstance(image.get('archive',{}).get('source'),str):raise ValueError('Runtime image source required')
+            # A manifest to publish names, for each image, a file beside it (`source`) or, for an image the
+            # release does not change, the file the core publishes already.
+            if not isinstance(image.get('archive',{}).get('source'),str):
+                kept=descriptor(image.get('archive'))
+                if kept['url']!=PUBLISHED_RUNTIME+kept['sha256']+'.tar':raise ValueError('Runtime image source required: a file beside the manifest, or the published file as '+PUBLISHED_RUNTIME+'<sha256>.tar')
         else:descriptor(image.get('archive'))
         timeout=item.get('readinessTimeoutSeconds',180)
         if type(timeout)is not int or not 30<=timeout<=600:raise ValueError('Invalid runtime readiness timeout')

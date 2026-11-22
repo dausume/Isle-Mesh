@@ -31,6 +31,7 @@ DESIRED_RELEASE = '/var/lib/isle-mesh/desired-release.json'
 APPS_DIR = '/etc/isle-mesh/apps'
 ARTIFACTS = '/var/lib/isle-mesh/artifacts'   # catalog_artifacts.CACHE: <manifest sha>/{manifest,admitted}.json
 MODE_FILE = '/etc/isle-mesh/agent/agent.mode'
+PUBLISHED_RUNTIME_DIR = '/etc/isle-mesh/apt/repo/runtime'     # catalog_publish.REPO / 'runtime'
 NOTICE_READ = ("import os,sys; from pathlib import Path; "
                "p=Path(os.environ['DATABASE_PATH']).parent/'isle-release.json'; "
                "sys.stdout.write(p.read_text() if p.exists() else '{}')")
@@ -103,6 +104,11 @@ class Deps:
         import names, operations   # noqa: F401
 
     def free_bytes(self, path): return shutil.disk_usage(path).free
+
+    def published_runtime_size(self, sha):
+        """The size of the runtime image file this core publishes under that sha256, or None when it has none."""
+        try: return os.stat(Path(PUBLISHED_RUNTIME_DIR) / (sha + '.tar')).st_size
+        except OSError: return None
 
     def read_text(self, path):
         try: return Path(path).read_text()
@@ -352,23 +358,36 @@ def hashed_file(directory, sums, rel, where):
     if actual != sums[rel]: raise PacketError('checksum mismatch for %s' % rel)
     return actual
 
+PUBLISHED_RUNTIME = 'https://apt.isle/runtime/'      # where the core serves a runtime image: <sha256>.tar
+
 def runtime_archives(manifest_rel, manifest):
-    """Packet-relative paths of every archive file a runtime manifest names (runtime_publish.py reads them from there)."""
+    """(packet-relative paths of every archive file a runtime manifest names, the rows it keeps as published).
+    runtime_publish.py reads the archives from there.  A row the release does not change carries no archive: it names
+    the file the core publishes already (url, sha256, size), and the core must have that file."""
     runtimes = manifest.get('runtimes') if isinstance(manifest, dict) else None
     if not isinstance(runtimes, dict) or set(runtimes) - {'core', 'remote'} or not runtimes:
         raise PacketError('%s must hold {"runtimes": {"core": [...], "remote": [...]}}' % manifest_rel)
-    found, base = [], posixpath.dirname(manifest_rel)
-    for mode, rows in runtimes.items():
+    found, kept, base = [], [], posixpath.dirname(manifest_rel)
+    for mode, rows in sorted(runtimes.items()):
         if not isinstance(rows, list): raise PacketError('%s: runtimes.%s must be a list' % (manifest_rel, mode))
         for item in rows:
-            try: source = item['image']['archive']['source']; container = item['container']
-            except (KeyError, TypeError): raise PacketError('%s: every runtime row needs container and image.archive.source' % manifest_rel)
+            try: archive = item['image']['archive']; container = item['container']; source = archive.get('source')
+            except (KeyError, TypeError, AttributeError): raise PacketError('%s: every runtime row needs container and image.archive' % manifest_rel)
+            if source is None and isinstance(container, str):
+                sha, size = archive.get('sha256'), archive.get('size')
+                if not isinstance(sha, str) or not HEX64.fullmatch(sha) or type(size) is not int or size <= 0 \
+                        or archive.get('url') != PUBLISHED_RUNTIME + sha + '.tar' or set(archive) != {'url', 'sha256', 'size'}:
+                    raise PacketError('%s: the row of %s carries no archive, so it has to name the file the core publishes: '
+                                      'url %s<sha256>.tar, sha256 and size, and nothing else' % (manifest_rel, container, PUBLISHED_RUNTIME))
+                kept.append({'mode': mode, 'container': container, 'sha256': sha, 'size': size})
+                continue
             if not isinstance(source, str) or not isinstance(container, str) or posixpath.isabs(source):
                 raise PacketError('%s: archive sources must be relative to the manifest' % manifest_rel)
             rel = safe_relpath(posixpath.normpath(posixpath.join(base, source)), manifest_rel + ' archive')
             if rel not in found: found.append(rel)
-    if not found: raise PacketError('%s names no runtime image' % manifest_rel)
-    return found
+    if not found:
+        raise PacketError('%s names no runtime image the packet carries; a packet that changes no runtime image has no runtime publication' % manifest_rel)
+    return found, kept
 
 def folder_files(directory, rel_dir, where):
     """The names in a packet directory, in order; the directory is inside the packet and holds regular files only."""
@@ -455,9 +474,9 @@ def load_packet(path):
             files[rel] = hashed_file(directory, sums, rel, where)
             try: manifest = json.loads((directory / rel).read_text())
             except ValueError: raise PacketError('%s is not valid JSON' % rel)
-            archives = runtime_archives(rel, manifest)
+            archives, kept = runtime_archives(rel, manifest)
             for a in archives: files[a] = hashed_file(directory, sums, a, rel + ' archive')
-            publications.append({'kind': 'runtime', 'manifest': rel, 'archives': archives,
+            publications.append({'kind': 'runtime', 'manifest': rel, 'archives': archives, 'kept': kept,
                                  'runtimes': {m: [r['container'] for r in rows] for m, rows in sorted(manifest['runtimes'].items())}})
             continue
         if item['kind'] == 'debs':
@@ -534,6 +553,9 @@ def summary_lines(record, run_id, publications=None):
             elif p['kind'] == 'runtime':
                 lines.append('  - runtime images from %s: %s (isle update publish-runtime)' % (p['manifest'], '; '.join(
                     '%s %s' % (m, ', '.join(c)) for m, c in p['runtimes'].items())))
+                if p.get('kept'):
+                    lines.append('    of these the packet carries no archive for: %s. They stay the images the core publishes now, and the '
+                                 'core must still have their files' % ', '.join('%s %s' % (k['mode'], k['container']) for k in p['kept']))
             elif p['kind'] == 'debs':
                 lines.append('  - %d package file(s) from %s: %s (isle apt-repo publish --from); this assigns the release id members update to'
                              % (len(p['files']), p['dir'], ', '.join(p['files'])))
@@ -1366,6 +1388,19 @@ def notice_problem(notice, started, runtime_rows):
         if have != {m: sorted(c) for m, c in runtime_rows.items()}: return 'the core release notice lists different runtime containers than this packet'
     return None
 
+def kept_runtime_here(deps, pk, receipt):
+    """A packet may leave out the archive of a runtime image the release does not change.  The core then has to
+    publish that file already; one that is missing stops the run here, before a dependency set or anything else is
+    published.  (publish-runtime checks the checksum of each of them again.)"""
+    if (receipt.entry('publish-runtime') or {}).get('state') == 'done': return
+    for p in pk.publications:
+        missing = sorted({'%s (%s.tar)' % (k['container'], k['sha256'][:12]) for k in p.get('kept') or []
+                          if deps.published_runtime_size(k['sha256']) != k['size']})
+        if missing:
+            raise Refused('publish-runtime', 'the packet carries no archive for %s and says the core publishes %s already, but this core '
+                          'does not have %s. Nothing was published; build the packet with every image in it (isle release build --all-images)'
+                          % (', '.join(missing), 'it' if len(missing) == 1 else 'them', 'that file' if len(missing) == 1 else 'those files'))
+
 def run_publish(deps, receipt, e, argv, name, data=None):
     code, _ = deps.run(argv, stream=True)
     if code:
@@ -1415,6 +1450,7 @@ def run_core(deps, pk, device, submitted_by=None):
     try:
         ensure_approval_key(deps)        # before anything is published: a run that cannot be approved must not start
         resolve_devices(deps, pk.doc, device)
+        kept_runtime_here(deps, pk, receipt)             # before anything is published
         src = pk
         if any((receipt.entry(publication_key(p)) or {}).get('state') != 'done' for p in pk.publications):
             src = prepared_copy(deps, pk, receipt)       # publish from a root-owned copy, never from the user's directory
@@ -1647,7 +1683,8 @@ def cmd_status(deps, run_id=None):
 
 HELP = """isle release - one reviewed release across the isle (slice 2)
   isle release build <out-dir> --previous <dir>          no sudo: build the packet of the next CLI release from one
-        commit of the isle repository (`isle release build help` for the rest); nothing is published or installed
+        commit of the isle repository (`isle release build help` for the rest); nothing is published or installed.
+        With --agents the packet also carries the two agent images, with the agent scripts of that commit
   isle release build <out-dir> --dependencies <set dir>  no sudo: a packet that holds one dependency set and nothing else
   isle release check <packet-dir> [--expect <run-id>]    read-only: validate the packet, say what would happen
   sudo isle release run <packet-dir> [--yes] [--expect <run-id>] [--wait <minutes> | --no-wait]

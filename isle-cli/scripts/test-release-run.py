@@ -1209,6 +1209,57 @@ def packet_refuses_two_entries_runtime_without_debs_and_unbound_published():
 
 PACKET_CORE_ORDER = ['confirm', 'publish-runtime', 'publish-debs', 'publish', 'install', 'update', 'notice']
 
+KEPT_SHA = 'e' * 64
+def kept_doc(**change):
+    """The agent's image comes with the packet; the backend's is kept as the core publishes it (no archive)."""
+    m = runtime_doc()
+    archive = dict({'url': 'https://apt.isle/runtime/%s.tar' % KEPT_SHA, 'sha256': KEPT_SHA, 'size': 77}, **change)
+    for mode in ('core', 'remote'): m['runtimes'][mode][0]['image']['archive'] = dict(archive)
+    return m
+
+def kept_packet(t, manifest=None):
+    d = full_packet(t); (d / 'runtime' / 'manifest.json').write_text(json.dumps(manifest or kept_doc())); write_sums(d)
+    return d
+
+@test
+def a_runtime_row_without_an_archive_names_the_published_file_and_the_summary_says_so():
+    with tmp() as t:
+        d = kept_packet(t); f = Fake(t)
+        assert rr.main(['check', str(d)], f) == 0, f.said
+        pub = rr.load_packet(d).publications[0]
+        assert pub['archives'] == ['runtime/images/backend.tar']
+        assert pub['kept'] == [{'mode': m, 'container': 'prf-isle-backend', 'sha256': KEPT_SHA, 'size': 77} for m in ('core', 'remote')]
+        text = '\n'.join(f.said)
+        assert 'carries no archive for: core prf-isle-backend, remote prf-isle-backend' in text and 'core must still have their files' in text
+    for change in ({'url': 'https://apt.isle/runtime/other.tar'}, {'url': 'https://elsewhere.isle/runtime/%s.tar' % KEPT_SHA},
+                   {'size': 0}, {'sha256': 'E' * 64}, {'note': 'one key more'}):
+        with tmp() as t:
+            d = kept_packet(t, kept_doc(**change)); f = Fake(t)
+            assert rr.main(['check', str(d)], f) == 1 and 'has to name the file the core publishes' in ' '.join(f.said), (change, f.said)
+    with tmp() as t:        # every row kept: the packet changes no runtime image, so it has no business publishing one
+        m = kept_doc(); m['runtimes']['remote'][1]['image']['archive'] = dict(m['runtimes']['core'][0]['image']['archive'])
+        d = kept_packet(t, m); f = Fake(t)
+        assert rr.main(['check', str(d)], f) == 1 and 'names no runtime image the packet carries' in ' '.join(f.said), f.said
+
+@test
+def the_core_refuses_a_kept_runtime_image_it_does_not_publish_before_anything_is_published():
+    for size in (None, 76):                      # no such file, and a file of another size
+        with tmp() as t:
+            d = kept_packet(t); f = Fake(t); f.update_rcs = [0]
+            f.published_runtime_size = lambda sha, size=size: size
+            assert rr.main(['run', str(d), '--yes'], f) == 1, f.said
+            text = ' '.join(f.said)
+            assert 'REFUSED: publish-runtime on core1' in text and 'prf-isle-backend (%s.tar)' % KEPT_SHA[:12] in text, f.said
+            assert 'Nothing was published' in text and '--all-images' in text
+            assert f.events == [] and not [a for a in f.argv if a[:1] == ['bash']], (f.events, f.argv)
+            assert f.notice == {'id': 'x' * 64, 'packages': [1], 'command': 'keep me'}
+    with tmp() as t:                             # the core has the file: the run goes on as any other
+        d = kept_packet(t); f = Fake(t); f.update_rcs = [0]; asked = []
+        f.published_runtime_size = lambda sha: asked.append(sha) or 77
+        assert rr.main(['run', str(d), '--yes'], f) == 0, f.said
+        assert set(asked) == {KEPT_SHA} and f.events == [e for e in PACKET_CORE_ORDER if e != 'confirm'], (asked, f.events)
+
+
 @test
 def full_run_executes_in_fixed_order_from_a_copy_and_signs_the_release_id():
     with tmp() as t:

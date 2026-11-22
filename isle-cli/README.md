@@ -184,7 +184,8 @@ other value before they change anything. The agent keeps the size on the app's e
 and writes it for that app only, together with passing the body on as it arrives; an app without a size is
 written exactly as before. A value in the agent's registry that does not read as a size is not written, and the
 default is kept. The size is part of the registration: a deploy typed again without it puts the default back.
-The effect needs an agent that carries the new generator, which is a new agent image.
+The effect needs an agent that carries the new generator, which is a new agent image: a release gets one with
+`isle release build --agents`.
 Tests: `python3 isle-cli/scripts/test-upload-size.py` and `test-store-build.py` (no Docker, no network).
 
 ### Member service certificates
@@ -380,8 +381,8 @@ archive per item and `device-backup.json`.
 
 ### Building the packet of a CLI release
 
-One command turns one commit of this repository into the folder `isle release run` takes. It needs no sudo, asks no
-core anything, and publishes and installs nothing:
+One command turns one commit of this repository into the folder `isle release run` takes. It needs no sudo, and
+publishes and installs nothing. It asks no core anything unless `--agents` is given (see below):
 
     isle release build <out-dir> --previous <dir>
     isle release build <out-dir> --dependencies <set dir>
@@ -402,6 +403,35 @@ core anything, and publishes and installs nothing:
 - It leaves `packet/` (copy this to where the run is typed), `members/` (the `--previous` of the next build),
   `source/`, `build.log`, and `build.json`: the commit, the versions and every checksum.
 - A folder that already holds something is never written over.
+
+`--agents` puts the two agent images into the release: the core's (`isle-vlan-agent`) and a member's
+(`isle-remote-agent`), each with the agent scripts of the commit.
+
+- An agent image is not built from its Dockerfile here, because that needs the network (the image it starts from,
+  its packages). Each is the image the core publishes now plus ONE layer that holds every file the Dockerfile
+  copies to `/usr/local/bin`, as the commit has it. Docker on the build machine makes it with the network off, names
+  it `<the same name>:release<n>` and saves it into the packet (`packet/runtime/`). Docker there keeps what it
+  loaded and built.
+- The build reads the list of runtime images the core serves (`https://apt.isle/runtime-release.json`, certificate
+  checked). An image it needs and does not find in Docker is taken from `--runtime-archives <dir>`, a folder of
+  published images named `<sha256>.tar` (on the core `/etc/isle-mesh/apt/repo/runtime`; a copy serves as well),
+  and from the core only when the folder does not hold it. Size and checksum are checked either way.
+- Each image made this way carries two labels: a checksum of its scripts and a checksum of every Dockerfile line
+  that is not a copy. An image whose scripts are the commit's already is left as it is; when both are, the packet
+  publishes no runtime image. When another line of a Dockerfile changed (the image it starts from, a package, the
+  entrypoint), the build refuses: that image has to be built whole from its Dockerfile and published once. An
+  image without the labels is taken as it is.
+- The packet's `runtime/manifest.json` lists every runtime image of the release. For an image the release does
+  not change (Polari's backend and frontend, for instance) it names the file the core publishes already, with no
+  archive in the packet. In the run, the core checks that it has each of those files before it publishes anything,
+  and `isle update publish-runtime` checks their checksums. A core reads such a row from the release after 91 on;
+  an older one refuses the packet as a whole. `--all-images` builds a packet any core takes: it carries the archive
+  of every runtime image (more than a GiB with Polari's).
+- In the run the core publishes the images (`isle update publish-runtime`, before the packages), and each device
+  loads its own with its update and starts its agent again from it. Every release that changes the scripts adds one
+  small layer to the image; building the image whole starts again.
+- Tests: `python3 isle-cli/scripts/test-agent-images.py` and `test-runtime-publish.py` (a made-up Docker and core;
+  no Docker, no network).
 
 The second form builds a packet that holds one dependency set and no package of the isle. Nothing is built for
 it: the set is checked and copied into the packet. `--dependencies <set dir>` can also be added to the first form,
@@ -484,9 +514,11 @@ hosting device restarts the hosting unit through systemd, reads that it is activ
 `sudo isle storage cutover` refuses until the core holds that report. `sudo isle storage units prove --dataset D`
 on the hosting device does it now instead of within the timer's 10 minutes, and `isle storage status --dataset D`
 shows the result as `unitProof`.
-An update does not rebuild/recreate the agent image or migrate core runtime
-images; those remain distinct coordinated release actions, not implied by package
-success. No general system upgrade or rejoin is performed.
+An update builds no image. It brings this device the runtime images the release
+names for it (the agent's among them, when the release carries one: `isle release
+build --agents`), loads them and starts those containers again from them. A release
+that names no runtime image leaves every container as it is. No general system
+upgrade or rejoin is performed.
 
 Native operation routes: `device.updatePlan`, `device.updateApply(releaseId)`,
 `device.reconcile`, `operation.status(id)`, and `operation.retry(id)` use fixed

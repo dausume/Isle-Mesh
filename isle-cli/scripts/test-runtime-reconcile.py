@@ -56,6 +56,14 @@ class Runtime(unittest.TestCase):
    self.assertEqual(run.call_count,3)
   with patch.object(runtime,'run',side_effect=error),patch.object(runtime.time,'monotonic',side_effect=[0,181]),patch.object(runtime.time,'sleep'):
    with self.assertRaisesRegex(RuntimeError,'180 seconds'):runtime.wait_route('https://api.polari.isle/api/health',180)
+ def test_a_manifest_to_publish_names_a_file_beside_it_or_the_published_file(self):
+  row=lambda archive:{'runtimes':{'core':[{'container':'agent','image':{'ref':'example/agent:v1','configDigest':'sha256:'+'a'*64,'archive':archive}}]}}
+  sha='b'*64
+  runtime.targets(row({'source':'images/agent.tar'}),'core',source=True)
+  runtime.targets(row({'url':'https://apt.isle/runtime/'+sha+'.tar','sha256':sha,'size':5}),'core',source=True)
+  for archive in ({},{'url':'https://apt.isle/elsewhere/'+sha+'.tar','sha256':sha,'size':5},{'url':'https://apt.isle/runtime/'+'c'*64+'.tar','sha256':sha,'size':5},
+                  {'url':'https://apt.isle/runtime/'+sha+'.tar','sha256':sha,'size':0}):
+   with self.subTest(archive=archive),self.assertRaises((ValueError,KeyError)):runtime.targets(row(archive),'core',source=True)
  def test_unknown_role_is_rejected(self):
   with self.assertRaises(ValueError):runtime.targets({'runtimes':{'foreign':[]}},'core')
 if __name__=='__main__':unittest.main()
