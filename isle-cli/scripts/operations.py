@@ -75,10 +75,18 @@ def _hotfix_names(args):
 def _backup_create(args):
     return args==['backup','create','--yes']
 
+def _backup_restore(args):
+    # backup restore <id> --apply --yes [--item <name>]...
+    rest=args[5:]
+    return len(args)>=5 and args[:2]==['backup','restore'] and bool(re.fullmatch(r'[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}',args[2])) \
+        and args[3:5]==['--apply','--yes'] and len(rest)%2==0 \
+        and all(rest[i]=='--item' and bool(NAME.match(rest[i+1])) for i in range(0,len(rest),2))
+
 def _backup_names(args):
-    # One device-backup of this machine at a time.
-    if not _backup_create(args): return None
-    return 'app-device-backup.lock','device-backup'
+    # One device-backup of this machine at a time, and no device-backup or drill while one is put back.
+    if _backup_create(args): return 'app-device-backup.lock','device-backup'
+    if _backup_restore(args): return 'app-device-backup.lock','device-backup-restore'
+    return None
 
 def _names(args):
     return _storage_names(args) or _module_names(args) or _hotfix_names(args) or _backup_names(args)
@@ -116,7 +124,8 @@ def request(args):
         if not _hotfix_apply(args): raise ValueError('Invalid hotfix parameters; use: hotfix apply <name> --yes')
         return list(args)
     if args[:1]==['backup']:
-        if not _backup_create(args): raise ValueError('Invalid backup parameters; use: backup create --yes')
+        if not (_backup_create(args) or _backup_restore(args)):
+            raise ValueError('Invalid backup parameters; use: backup create --yes | backup restore <id> --apply --yes [--item <name>]...')
         return list(args)
     if len(args)==3 and args[:2]==['update','apply'] and re.fullmatch('[a-f0-9]{64}',args[2]): return list(args)
     if args in (['reconcile','apply','device'], ['agent','restart','device']): return list(args)

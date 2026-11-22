@@ -367,6 +367,11 @@ archive per item and `device-backup.json`.
     sudo isle backup verify <id>       re-read every file of one against its record
     sudo isle backup release-hold      lower a write gate that an interrupted device-backup left up
     sudo isle backup restore <id> --drill   unpack one into a scratch folder, compare, change nothing
+    sudo isle backup restore <id> --apply [--item <name>]...         say what would be put back, change nothing
+    sudo isle backup restore <id> --apply --yes [--item <name>]...   journaled: put the data of the instances back
+    sudo isle backup before list [--json]   the data an instance had before a restore
+    sudo isle backup before drop <item> --yes    remove it
+    sudo isle backup before undo --yes      put a restore that did not finish back as it was
 
 - It holds the isle's settings folder (without the package store), the isle's state folder (without release files,
   operation journals and the device-backups themselves) and the data volume of every Polari instance the isle CLI
@@ -385,7 +390,24 @@ archive per item and `device-backup.json`.
   of each table. The scratch folder is always removed. The result is kept as `drill.json` in the device-backup's
   folder and `list` shows it (`drill: passed`, `failed`, `none`). It puts nothing back, stops no instance and
   raises no write gate. It needs free space for one unpacked copy plus 256 MiB.
-- Putting a device-backup back (`restore <id> --apply`) is not built.
+- `restore <id> --apply` puts the data of Polari instances back. A device-backup holds data, not programs; going
+  back to earlier programs is a release. Without `--yes` it says what it would do and changes nothing. With
+  `--yes` it is a journaled operation under the device-backup lock. It is refused before anything is touched when
+  the device-backup is incomplete, damaged or of another device, when it has no passed drill made with the CLI
+  version the machine runs now, when the instance is not deployed or uses another volume, when the volume is not
+  a plain local Docker volume, when Docker does not say which containers use it, and when there is no room for a
+  second copy of the data. For one instance: unpack beside the live data and compare with the archive; stop
+  every running container that uses the volume; two renames (the live data aside as
+  `before-<id>-<operation>`, the new folder into its place); start the containers and wait for the health answer;
+  open the databases read-only and compare their tables with those the drill read. A table or a database that is
+  gone, a database that is not whole and a table that held rows and holds none undo it; a count that only moved
+  is told. Undoing is the two renames back and the containers started on the data they had. The first instance
+  that cannot be put back ends the run; those before it stay put back.
+- The data an instance had stays beside its data until the next restore of that instance has succeeded or
+  `before drop` removes it; it takes that much room. A restore that was interrupted is put back as it was by
+  `before undo --yes`, and by the next `--apply --yes` before anything else.
+- Not built: putting back the isle's own two folders (it needs every isle service of the machine stopped), and
+  going back to the kept `before-` data after a restore that succeeded.
 - `isle release run` takes one as a device step: `{"verb": "backup"}`. The run stops there if it is not complete.
 
 ### Building the packet of a CLI release

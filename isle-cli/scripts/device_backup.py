@@ -12,7 +12,16 @@ A device-backup is one folder <home>/<device>/<id>/ with one archive per item an
                                      unpack one into a scratch folder beside it, compare every file with its
                                      archive, open every database in an instance's data, remove the scratch
                                      folder.  Nothing of the machine is changed; the result is kept beside the
-                                     device-backup (drill.json).  Putting one back (--apply) is not built.
+                                     device-backup (drill.json).
+  sudo isle backup restore <id> --apply [--yes] [--item <name>]...
+                                     put the data of the Polari instances back from one that passed a drill
+                                     (device_backup_apply.py).  Without --yes it says what it would do.
+  sudo isle backup before list [--json]
+  sudo isle backup before drop <item> --yes
+                                     the data an instance had before a restore, kept beside its data; removing it
+  sudo isle backup before undo --yes
+                                     put a restore that did not finish back as it was (the next --apply --yes
+                                     does the same before anything else)
 
 Home: the partition this machine records with the role `backup` (isle storage partition list).  A machine that
 records no such partition keeps them in its state folder.
@@ -41,7 +50,9 @@ ID = re.compile(r'[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}\Z')
 MiB = 1024 * 1024
 PACKAGES = ('isle-mesh-cli', 'isle-app-store', 'polari-complete-offline')
 USAGE = 'Usage: isle backup plan [--json] | sudo isle backup create --yes | sudo isle backup list [--json]\n' \
-        '       sudo isle backup verify <id> | sudo isle backup release-hold | sudo isle backup restore <id> --drill'
+        '       sudo isle backup verify <id> | sudo isle backup release-hold | sudo isle backup restore <id> --drill\n' \
+        '       sudo isle backup restore <id> --apply [--yes] [--item <name>]... | sudo isle backup before list [--json]\n' \
+        '       sudo isle backup before drop <item> --yes | sudo isle backup before undo --yes'
 
 
 class Refused(Exception):
@@ -57,6 +68,8 @@ class Deps:
     hold_limit = 1800       # seconds an instance may take to flush before the item fails
     poll_interval = 5
     reserve = 256 * MiB     # kept free on the home beyond twice the size of what is copied
+    stop_grace = 90         # seconds a container gets to stop before a restore replaces its data
+    start_limit = 300       # seconds an instance may take to answer after a restore started it
 
     def say(self, line=''): print(line, flush=True)
     def is_root(self): return os.geteuid() == 0
@@ -79,9 +92,9 @@ class Deps:
         import storage_migrate
         return storage_migrate.CurlHttp()
 
-    def docker(self, args):
+    def docker(self, args, timeout=60):
         try:
-            done = subprocess.run(['docker'] + list(args), capture_output=True, text=True, timeout=60)
+            done = subprocess.run(['docker'] + list(args), capture_output=True, text=True, timeout=timeout)
         except (OSError, subprocess.SubprocessError):
             return 127, ''
         return done.returncode, done.stdout
@@ -451,11 +464,11 @@ def _drill_item(deps, item, archive, rows, target):
 
 
 def restore(deps, argv):
-    if len(argv) != 2 or not ID.match(argv[0]) or argv[1] not in ('--drill', '--apply'):
+    if argv[1:2] == ['--apply']:
+        import device_backup_apply
+        return device_backup_apply.apply(deps, argv, sys.modules[__name__])
+    if len(argv) != 2 or not ID.match(argv[0]) or argv[1] != '--drill':
         deps.say(USAGE); return 2
-    if argv[1] == '--apply':
-        deps.say('Putting a device-backup back (--apply) is not built yet. The drill is: sudo isle backup restore %s --drill' % argv[0])
-        return 2
     if not deps.is_root():
         raise Refused('a device-backup can be read by root only. Type: sudo isle backup restore %s --drill' % argv[0])
     device = deps.device()
@@ -517,7 +530,13 @@ def restore(deps, argv):
         return 0 if passed else 1
 
 
-VERBS = {'plan': plan, 'create': create, 'list': listing_verb, 'verify': verify, 'release-hold': release_hold, 'restore': restore}
+def before(deps, argv):
+    import device_backup_apply
+    return device_backup_apply.before(deps, argv, sys.modules[__name__])
+
+
+VERBS = {'plan': plan, 'create': create, 'list': listing_verb, 'verify': verify, 'release-hold': release_hold, 'restore': restore,
+         'before': before}
 
 
 def main(argv=None, deps=None):

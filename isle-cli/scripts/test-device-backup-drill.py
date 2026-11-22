@@ -302,8 +302,8 @@ class Drill(unittest.TestCase):
                      ['restore', ident, '--yes'], ['restore', '--drill', ident]):
             self.assertEqual(self.w.run(*argv), 2, argv)
             self.assertIn('Usage', self.w.text())
-        self.assertEqual(self.w.run('restore', ident, '--apply'), 2)
-        self.assertIn('is not built yet', self.w.text())
+        self.assertEqual(self.w.run('restore', ident, '--apply'), 1)        # putting back needs a passed drill first
+        self.assertIn('has no passed drill of these archives (none is recorded)', self.w.text())
         self.w.root = False
         self.assertEqual(self.w.run('restore', ident, '--drill'), 1)
         self.assertIn('Refused: a device-backup can be read by root only. Type: sudo isle backup restore %s --drill' % ident, self.w.text())
