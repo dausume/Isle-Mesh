@@ -8,6 +8,11 @@ A device-backup is one folder <home>/<device>/<id>/ with one archive per item an
   sudo isle backup list [--json]     the device-backups of this machine: slot, time, complete or not
   sudo isle backup verify <id>       re-read every file of one against its device-backup.json
   sudo isle backup release-hold      lower a write gate that an interrupted device-backup left up
+  sudo isle backup restore <id> --drill
+                                     unpack one into a scratch folder beside it, compare every file with its
+                                     archive, open every database in an instance's data, remove the scratch
+                                     folder.  Nothing of the machine is changed; the result is kept beside the
+                                     device-backup (drill.json).  Putting one back (--apply) is not built.
 
 Home: the partition this machine records with the role `backup` (isle storage partition list).  A machine that
 records no such partition keeps them in its state folder.
@@ -23,18 +28,20 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import operations
+import device_backup_drill as drill
 import device_backup_items as items_module
 from device_backup_items import FOLDER, Gate, HOLD_PREFIX, ItemFailed
 
 KIND = 'isle.device-backup'
 MANIFEST = 'device-backup.json'
+DRILL, DRILL_KIND, SCRATCH = 'drill.json', 'isle.device-backup-drill', 'drill-'
 SLOTS = ('release', 'long-term')
 LONG_TERM_AGE = timedelta(days=7)
 ID = re.compile(r'[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}\Z')
 MiB = 1024 * 1024
 PACKAGES = ('isle-mesh-cli', 'isle-app-store', 'polari-complete-offline')
 USAGE = 'Usage: isle backup plan [--json] | sudo isle backup create --yes | sudo isle backup list [--json]\n' \
-        '       sudo isle backup verify <id> | sudo isle backup release-hold'
+        '       sudo isle backup verify <id> | sudo isle backup release-hold | sudo isle backup restore <id> --drill'
 
 
 class Refused(Exception):
@@ -108,6 +115,17 @@ class Deps:
         if code not in (0, 1):      # 1: a file changed while it was read; the archive is whole
             raise ItemFailed('tar ended with exit %s: %s' % (code, words[-300:] or 'no words'))
         return size, digest.hexdigest(), code == 1
+
+    def unpack(self, archive, target):
+        """Unpack one archive into an empty folder as a restore does: owners and permissions as they were recorded."""
+        argv = ['tar', '--extract', '--gzip', '--file', str(archive), '--directory', str(target), '--numeric-owner',
+                '--same-owner', '--preserve-permissions']
+        try:
+            done = subprocess.run(argv, capture_output=True, text=True, errors='replace', timeout=3600)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise ItemFailed('tar could not unpack it (%s)' % exc)
+        if done.returncode != 0:
+            raise ItemFailed('tar ended with exit %s: %s' % (done.returncode, done.stderr.strip()[-300:] or 'no words'))
 
 
 # ---------------------------------------------------------------- where they live
@@ -347,13 +365,15 @@ def listing_verb(deps, argv):
     if rows is None:
         raise Refused('the device-backups can be read by root only. Type: sudo isle backup list')
     out = [dict(id=folder.name, state=state, slot=doc['slot'] if doc else None, createdAt=doc['createdAt'] if doc else None,
-                sizeBytes=sum(i.get('sizeBytes') or 0 for i in doc['items']) if doc else None) for folder, doc, state in rows]
+                sizeBytes=sum(i.get('sizeBytes') or 0 for i in doc['items']) if doc else None,
+                drill=drilled(folder, doc)['state'] if state == 'complete' else None) for folder, doc, state in rows]
     if argv:
         deps.say(json.dumps(dict(home=str(base), deviceBackups=out), indent=2)); return 0
     deps.say('Device-backups in %s' % base)
     for row in out:
-        deps.say('  %s  %-9s  %-10s  %s' % (row['id'], row['slot'] or '-', row['state'],
-                                            '%.1f MiB' % (row['sizeBytes'] / MiB) if row['sizeBytes'] is not None else ''))
+        deps.say('  %s  %-9s  %-10s  %s%s' % (row['id'], row['slot'] or '-', row['state'],
+                                              '%.1f MiB' % (row['sizeBytes'] / MiB) if row['sizeBytes'] is not None else '',
+                                              '  drill: ' + row['drill'] if row['drill'] else ''))
     if not out: deps.say('  none')
     return 0
 
@@ -394,7 +414,110 @@ def release_hold(deps, argv):
     return 1 if failed else 0
 
 
-VERBS = {'plan': plan, 'create': create, 'list': listing_verb, 'verify': verify, 'release-hold': release_hold}
+# ---------------------------------------------------------------- the restore drill
+
+def drilled(folder, manifest):
+    """The last drill of a device-backup: {state: 'none'|'passed'|'failed'|'unreadable', at, cliVersions}.
+    A record of other archives than the ones the device-backup names now is not a drill of it."""
+    try: text = (Path(folder) / DRILL).read_text()
+    except FileNotFoundError: return dict(state='none')
+    except OSError: return dict(state='unreadable')
+    try:
+        doc = json.loads(text)
+        if doc['kind'] != DRILL_KIND or doc['version'] != 1 or doc['id'] != manifest['id'] or _when(doc['at']) is None:
+            return dict(state='unreadable')
+        if doc['archives'] != {item.get('file'): item.get('sha256') for item in manifest['items']}:
+            return dict(state='none')
+        return dict(state='passed' if doc['passed'] is True else 'failed', at=doc['at'], cliVersions=doc.get('cliVersions'))
+    except (ValueError, KeyError, TypeError):
+        return dict(state='unreadable')
+
+
+def _drill_item(deps, item, archive, rows, target):
+    """Unpack one archive into its scratch folder and compare.  Returns the item's row of the drill record."""
+    entries, files, size = drill.totals(rows)
+    row = dict(name=item.get('name'), kind=item.get('kind'), file=item['file'], entries=entries, files=files, bytes=size, wrong=[])
+    try:
+        deps.unpack(archive, target)
+    except ItemFailed as exc:
+        row['wrong'] = [str(exc)]
+        return row
+    row['wrong'] = drill.compare(target, rows)
+    if item.get('kind') == 'polari-volume':     # after the comparison: SQLite may write its own side files beside a database
+        row['databases'] = drill.databases(target)
+        row['wrong'] += ['%s: the database is not whole (%s)' % (found['path'], found['integrity'])
+                         for found in row['databases'] if found['integrity'] != 'ok']
+    return row
+
+
+def restore(deps, argv):
+    if len(argv) != 2 or not ID.match(argv[0]) or argv[1] not in ('--drill', '--apply'):
+        deps.say(USAGE); return 2
+    if argv[1] == '--apply':
+        deps.say('Putting a device-backup back (--apply) is not built yet. The drill is: sudo isle backup restore %s --drill' % argv[0])
+        return 2
+    if not deps.is_root():
+        raise Refused('a device-backup can be read by root only. Type: sudo isle backup restore %s --drill' % argv[0])
+    device = deps.device()
+    base = Path(home(deps)['path']) / device
+    folder = base / argv[0]
+    if not folder.is_dir(): raise Refused('no device-backup %s in %s' % (argv[0], base))
+    Path(deps.lock_file).parent.mkdir(parents=True, exist_ok=True)
+    with open(deps.lock_file, 'a+') as lock:
+        try: fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError: raise Refused('a device-backup or another drill is running now; nothing was unpacked')
+        doc, state = read_manifest(folder, device)
+        if doc is None or state != 'complete':
+            deps.say('%s is %s: it is not offered for a restore, and not for a drill.' % (argv[0], state)); return 1
+        wrong = reread(folder, doc)
+        if wrong:
+            for line in wrong: deps.say('  ' + line)
+            deps.say('%s DOES NOT MATCH its record. Nothing was unpacked.' % argv[0]); return 1
+        try:
+            listings = {item['file']: drill.contents(folder / item['file']) for item in doc['items']}
+        except drill.DrillFailed as exc:
+            deps.say('%s: %s. Nothing was unpacked.' % (argv[0], exc)); return 1
+        need = sum(drill.totals(rows)[2] for rows in listings.values())
+        free = deps.free(base)
+        if free < need + deps.reserve:
+            raise Refused('the scratch copy needs %d MiB beside the device-backup (%d MiB kept free), and %d MiB are free in %s'
+                          % ((need + deps.reserve) // MiB + 1, deps.reserve // MiB, free // MiB, base))
+        scratch = base / (SCRATCH + argv[0])
+        if scratch.is_symlink() or (scratch.exists() and not scratch.is_dir()):
+            raise Refused('%s is in the way and is not a scratch folder of a drill; nothing was unpacked' % scratch)
+        if scratch.exists(): shutil.rmtree(scratch)       # left by a drill that was interrupted
+        deps.say('Drill of device-backup %s of %s' % (argv[0], device))
+        rows = []
+        try:
+            scratch.mkdir(mode=0o700)
+            for item in doc['items']:
+                target = scratch / item['file'][:-len('.tar.gz')]
+                target.mkdir(mode=0o700)
+                rows.append(_drill_item(deps, item, folder / item['file'], listings[item['file']], target))
+        except OSError as exc:
+            raise Refused('the scratch folder %s could not be written (%s); the drill did not run' % (scratch, exc.strerror or exc))
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
+        left = scratch.exists()
+        for row in rows:
+            held_rows = sum(sum(found['tables'].values()) for found in row.get('databases', []))
+            words = '' if 'databases' not in row else '; no database in it' if not row['databases'] else \
+                '; %d database%s opened whole, %d rows' % (len(row['databases']), '' if len(row['databases']) == 1 else 's', held_rows)
+            deps.say('  %-28s %6d files %8.1f MiB  %s' % (row['name'], row['files'], row['bytes'] / MiB,
+                     'NOT what the archive holds' if row['wrong'] else 'unpacked and equal to its archive' + words))
+            for line in row['wrong'][:drill.SHOWN]: deps.say('      ' + line)
+            if len(row['wrong']) > drill.SHOWN: deps.say('      and %d more' % (len(row['wrong']) - drill.SHOWN))
+        passed = not any(row['wrong'] for row in rows)
+        for row in rows: row.update(wrongCount=len(row['wrong']), wrong=row['wrong'][:100])
+        operations.atomic(folder / DRILL, dict(kind=DRILL_KIND, version=1, id=doc['id'], device=device, at=deps.now().isoformat(),
+                          cliVersions=deps.versions(), passed=passed, items=rows,
+                          archives={item['file']: item['sha256'] for item in doc['items']}), 0o600)
+        deps.say('The drill %s. Nothing on this machine was changed and the scratch copy %s; the result is kept in %s.'
+                 % ('passed' if passed else 'FAILED', 'COULD NOT BE REMOVED (%s)' % scratch if left else 'is removed', folder / DRILL))
+        return 0 if passed else 1
+
+
+VERBS = {'plan': plan, 'create': create, 'list': listing_verb, 'verify': verify, 'release-hold': release_hold, 'restore': restore}
 
 
 def main(argv=None, deps=None):

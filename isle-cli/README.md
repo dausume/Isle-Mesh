@@ -356,6 +356,7 @@ archive per item and `device-backup.json`.
     sudo isle backup list [--json]     the device-backups of this machine
     sudo isle backup verify <id>       re-read every file of one against its record
     sudo isle backup release-hold      lower a write gate that an interrupted device-backup left up
+    sudo isle backup restore <id> --drill   unpack one into a scratch folder, compare, change nothing
 
 - It holds the isle's settings folder (without the package store), the isle's state folder (without release files,
   operation journals and the device-backups themselves) and the data volume of every Polari instance the isle CLI
@@ -367,6 +368,14 @@ archive per item and `device-backup.json`.
   and `long-term` (the previous one takes that place when the long-term one is 7 days old or older, otherwise the
   previous one is deleted). Nothing is deleted before the new one is complete.
 - Nothing is encrypted and nothing is sent anywhere.
+- `restore <id> --drill` shows that a device-backup can be unpacked whole. It re-reads every file against the
+  record, reads what each archive holds, unpacks each one with its owners and permissions into
+  `drill-<id>/` beside the device-backup, and compares every unpacked file, folder and link with the archive. In
+  an instance's data it opens every SQLite database read-only, runs SQLite's own check on it and counts the rows
+  of each table. The scratch folder is always removed. The result is kept as `drill.json` in the device-backup's
+  folder and `list` shows it (`drill: passed`, `failed`, `none`). It puts nothing back, stops no instance and
+  raises no write gate. It needs free space for one unpacked copy plus 256 MiB.
+- Putting a device-backup back (`restore <id> --apply`) is not built.
 - `isle release run` takes one as a device step: `{"verb": "backup"}`. The run stops there if it is not complete.
 
 ### Building the packet of a CLI release

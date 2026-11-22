@@ -30,7 +30,7 @@ const commands = {
   operation: { script: 'operation.sh', desc: 'Durable shared operation status/retry <id>' },
   release: { script: 'release.sh', desc: 'One reviewed release across the isle: check/run (core)/follow (member)/status/setting' },
   hotfix: { script: 'hotfix.sh', desc: 'Named, idempotent repairs of state already on this device: list/status/check/apply <name>' },
-  backup: { script: 'backup.sh', desc: 'Device-backups of this machine: plan/create/list/verify <id>/release-hold (two kept: release, long-term)' },
+  backup: { script: 'backup.sh', desc: 'Device-backups of this machine: plan/create/list/verify <id>/release-hold/restore <id> --drill (two kept: release, long-term)' },
   // Namespace modules (dispatch their own subcommands)
   app:      { script: 'app.sh',      desc: 'Mesh application management', docker: true },
   router:   { script: 'router.sh',   desc: 'Router and network management' },

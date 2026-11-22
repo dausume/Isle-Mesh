@@ -5,6 +5,7 @@
 #   sudo isle backup list [--json]     the device-backups of this machine
 #   sudo isle backup verify <id>       re-read every file of one against its record
 #   sudo isle backup release-hold      lower a write gate that an interrupted device-backup left up
+#   sudo isle backup restore <id> --drill   unpack one into a scratch folder, compare, remove it (changes nothing)
 # Also a step of `isle release run` (step kind "backup").
 set -u
 DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
