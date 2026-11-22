@@ -1,7 +1,8 @@
-"""isle storage role list|show --isle, and the fact each machine reports for them (storage_isle.py).
+"""isle storage role list|show --isle, kind list --isle, and the facts each machine reports for them (storage_isle.py).
 
 Fixtures only: the machines are the made-up one of test-storage-roles.py, the core's device list is a made-up
-answer, and the one command that would ask the core (curl) is replaced.  No disk, record or network is touched.
+answer, and the one command that would ask the core (curl) is replaced.  Which programs are on the path and which
+images Docker holds are made up too.  No disk, record, Docker or network is touched.
 """
 import importlib.util
 import json
@@ -17,6 +18,7 @@ from unittest.mock import patch
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import storage_isle as si
+import storage_kinds as sk
 import storage_roles as sr
 
 
@@ -41,10 +43,20 @@ class Machine(roles_test.Machine):
         return types.SimpleNamespace(returncode=self.curl_code, stdout=body, stderr='')
 
 
-def device(name, value=None, at=AT, status='observed', **more):
+def device(name, value=None, at=AT, status='observed', kinds=None, kinds_at=AT, **more):
     facts = {} if value is None else {si.FACT: dict(status=status, source='fixture', observed_at=at,
                                                     value=value if isinstance(value, str) else json.dumps(value))}
+    if kinds is not None:
+        facts[si.KINDS_FACT] = dict(status='observed', source='fixture', observed_at=kinds_at,
+                                    value=kinds if isinstance(kinds, str) else json.dumps(kinds))
     return dict(dict(name=name, is_mock=False, capability_evidence=dict(schema_version=1, facts=facts)), **more)
+
+
+def kinds(**states):
+    """A machine's report of its kinds: ready for every kind, except what is named (file_pool='not ready')."""
+    each = {kind: sk.READY for kind in sk.KINDS}
+    each.update({name.replace('_', '-'): state for name, state in states.items()})
+    return dict(schemaVersion=1, kinds={kind: state for kind, state in each.items() if state is not None})
 
 
 def part(role='git', identifier='aaaa-0001', **more):
@@ -137,6 +149,97 @@ class TheFact(Case):
         def boom(): raise RuntimeError('x')
         for module in (fake(lambda: None), fake(lambda: {'a': 1}), fake(None), fake(boom), None):
             self.assertNotIn(si.FACT, facts(module))
+
+
+class TheKindsFact(Case):
+    """Which kinds this machine is ready to hold, on a made-up path and a made-up Docker."""
+
+    def setUp(self):
+        super().setUp()
+        self.programs, self.images, self.docker, self.commands = set(), [], 0, []
+        self.m.which = lambda program: '/made/up/' + program if program in self.programs else None
+        self.m.run = self.docker_says
+
+    def docker_says(self, command, **options):
+        self.commands.append(command)
+        if isinstance(self.docker, BaseException): raise self.docker
+        return subprocess.CompletedProcess(command, self.docker, stdout=''.join(i + '\n' for i in self.images if i == command[-1]) if not self.docker else '',
+                                           stderr='permission denied' if self.docker else '')
+
+    def said(self):
+        return json.loads(si.kinds_fact(self.m))
+
+    def test_it_is_one_word_for_each_kind(self):
+        self.assertEqual(self.said(), dict(schemaVersion=1, kinds={'plain-folder': 'ready', 'file-pool': 'not ready',
+                                                                   'image-registry': 'not ready', 'git': 'not ready'}))
+        self.assertEqual(self.commands, [])                                     # no Docker on the path: it is not asked
+        self.programs, self.images = {'docker'}, ['registry']
+        self.assertEqual(self.said()['kinds'], {'plain-folder': 'ready', 'file-pool': 'not ready', 'image-registry': 'ready', 'git': 'not ready'})
+        self.programs = {'weed'}
+        self.assertEqual(self.said()['kinds']['file-pool'], 'ready')            # the program alone is one whole way
+        text = si.kinds_fact(self.m)
+        self.assertEqual(sorted(json.loads(text)['kinds']), sorted(sk.KINDS))
+        for never in ('weed', 'docker', 'registry:', 'made/up', str(self.m.tmp)): self.assertNotIn(never, text)   # states only: no program, image or path
+        self.assertEqual(si.read_kinds(dict(status='observed', observed_at=AT, value=text))[0], json.loads(text)['kinds'])   # the reader takes what is sent
+
+    def test_a_docker_that_does_not_answer_is_not_known(self):
+        self.programs, self.docker = {'docker'}, 1
+        self.assertEqual(self.said()['kinds'], {'plain-folder': 'ready', 'file-pool': 'not known', 'image-registry': 'not known', 'git': 'not known'})
+        self.docker = subprocess.TimeoutExpired('docker', 15)
+        self.assertEqual(self.said()['kinds']['image-registry'], 'not known')
+
+    def test_it_only_looks_and_never_raises(self):
+        self.programs, self.images = {'docker'}, ['registry']
+        before = {p: p.read_bytes() for p in self.m.tmp.rglob('*') if p.is_file()}
+        self.said()
+        self.assertEqual({p: p.read_bytes() for p in self.m.tmp.rglob('*') if p.is_file()}, before)
+        for command in self.commands: self.assertEqual(command[:3], ['docker', 'image', 'ls'], command)
+        def boom(program): raise RuntimeError('x')
+        self.m.which = boom
+        self.assertIsNone(si.kinds_fact(self.m))
+
+    def test_the_device_report_carries_it_as_a_string_or_leaves_it_out(self):
+        probe = load('probe_kinds', 'capabilities.py')
+        def facts(module):
+            with patch.dict(sys.modules, {'storage_isle': module, 'release_run': None}), \
+                    patch.object(probe, 'run', return_value=(0, '200', '')), patch.object(probe.shutil, 'which', return_value='/bin/tool'):
+                return probe.collect('fixture')['capability_evidence']['facts']
+        def fake(fn):
+            module = types.ModuleType('storage_isle')
+            module.report_fact = lambda: '{"schemaVersion":1}'
+            if fn: module.kinds_fact = fn
+            return module
+        got = facts(fake(lambda: '{"schemaVersion":1,"kinds":{}}'))
+        sent = got[si.KINDS_FACT]
+        self.assertEqual((sent['status'], sent['value']), ('observed', '{"schemaVersion":1,"kinds":{}}'))
+        self.assertIn(si.FACT, got)
+        def boom(): raise RuntimeError('x')
+        for module in (fake(lambda: None), fake(lambda: {'a': 1}), fake(None), fake(boom)):
+            got = facts(module)
+            self.assertNotIn(si.KINDS_FACT, got)
+            self.assertIn(si.FACT, got)                                         # the partitions are reported all the same
+
+
+class ReadingKinds(unittest.TestCase):
+    def read(self, value, **more):
+        return si.read_kinds(dict(dict(status='observed', observed_at=AT, value=value if isinstance(value, str) else json.dumps(value)), **more))
+
+    def test_a_good_report_is_read(self):
+        each, at = self.read(kinds(file_pool='not ready', git='not known'))
+        self.assertEqual((each, at.isoformat()), ({'plain-folder': 'ready', 'file-pool': 'not ready', 'image-registry': 'ready', 'git': 'not known'}, AT))
+        each, _ = self.read(dict(schemaVersion=1, kinds={'git': 'ready', 'tape; rm': 'ready', 'cold-store': 'x\x1b[31m'}))
+        self.assertEqual(each, {'plain-folder': 'not reported', 'file-pool': 'not reported', 'image-registry': 'not reported', 'git': 'ready'})   # a kind this version does not know is left out; one not named is not reported
+
+    def test_anything_else_is_not_read(self):
+        for bad in ('{not json', '[]', kinds(git='fine'), kinds(git='x\x1b[31m'), kinds(git=['ready']), kinds(git=True), kinds(git='not reported '),
+                    dict(schemaVersion=2, kinds={}), dict(schemaVersion=1), dict(schemaVersion=1, kinds=['git']), dict(schemaVersion=1, kinds='git')):
+            self.assertIsNone(self.read(bad), bad)
+        good = kinds()
+        self.assertIsNotNone(self.read(good))
+        self.assertIsNone(self.read(good, status='error'))
+        self.assertIsNone(self.read(good, observed_at='yesterday'))
+        self.assertIsNone(self.read(good, observed_at='2025-12-31T23:50:00'))
+        self.assertIsNone(si.read_kinds('a string')); self.assertIsNone(si.read_kinds({}))
 
 
 class Reading(unittest.TestCase):
@@ -254,7 +357,8 @@ class TheIsle(Case):
         self.assertEqual(self.m.said, ['The device list of the core cannot be read from this machine.'])
 
     def test_other_words_with_isle_are_usage(self):
-        for argv in (('partition', 'check', '--isle'), ('device', 'list', '--isle'), ('role', '--isle'), ('partition', 'assign', ARCH, '--role', 'git', '--isle')):
+        for argv in (('partition', 'check', '--isle'), ('device', 'list', '--isle'), ('role', '--isle'), ('partition', 'assign', ARCH, '--role', 'git', '--isle'),
+                     ('need', 'list', '--isle'), ('association', 'list', '--isle'), ('kind', 'show', '--isle'), ('kind', 'list', 'git', '--isle'), ('kind', '--isle')):
             self.assertEqual(self.m.call(*argv), 2, argv)
             self.assertIn('Usage:', self.m.text())
         self.assertIsNone(self.m.asked); self.assertIsNone(self.m.record())
@@ -268,6 +372,99 @@ class TheIsle(Case):
         result = subprocess.run(['node', str(roles_test.ENTRY), 'storage', 'role', 'show', 'git', '--isle'], env=env, capture_output=True, text=True, timeout=20)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual([(p['device'], p['filesystemUuid']) for p in json.loads(result.stdout)['result']['partitions']], [('pol', 'aaaa-0001')])
+
+
+class TheKindsOfTheIsle(Case):
+    def setUp(self):
+        super().setUp()
+        self.m.listing = [
+            device('pol', fact(part('registry', 'aaaa-0001'), part('assets', 'aaaa-0001'), part('backup', 'bbbb-0002')),
+                   kinds=kinds(image_registry='not ready', file_pool='not known')),
+            device('core1', fact(part('registry', 'cccc-0003'), part('git', 'cccc-0003')), kinds=kinds(file_pool='not ready', git=None),
+                   kinds_at='2025-12-31T23:00:00+00:00'),
+            device('econ', fact(part('git', 'ffff-0006'))),                     # an older CLI: partitions, no word on kinds
+            device('odd', kinds='{not json'),
+            device('ghost', kinds=kinds(), is_mock=True),
+            device('Bad Name', kinds=kinds())]
+
+    def test_kind_list_says_which_machine_is_ready_for_what(self):
+        code, doc = self.isle('kind', 'list', '--isle')
+        self.assertEqual((code, doc['ok'], doc['scope'], doc['readOnly'], doc['operation']), (0, True, 'isle', True, 'storage.kind.list'))
+        by = {r['kind']: r for r in doc['result']['kinds']}
+        self.assertEqual(list(by), list(sk.KINDS))
+        self.assertEqual((by['plain-folder']['ready'], by['plain-folder']['notReady'], by['plain-folder']['notKnown']), (['core1', 'pol'], [], []))
+        self.assertEqual((by['image-registry']['ready'], by['image-registry']['notReady']), (['core1'], ['pol']))
+        self.assertEqual((by['file-pool']['ready'], by['file-pool']['notReady'], by['file-pool']['notKnown']), ([], ['core1'], ['pol']))
+        self.assertEqual((by['git']['ready'], by['git']['notReady'], by['git']['notKnown']), (['pol'], [], []))   # core1 named no state for it: in no list
+        self.assertEqual((by['image-registry']['roles'], by['image-registry']['requires']), (['registry'], sk.requires('image-registry')))
+        self.assertEqual([(d['device'], d['state'], d.get('ageSeconds')) for d in doc['result']['devices']],
+                         [('core1', 'reported', 3600), ('econ', si.NO_REPORT, None), ('odd', si.NOT_READABLE, None), ('pol', 'reported', 600)])
+        self.assertEqual(doc['result']['devices'][0]['each']['git'], si.NOT_REPORTED)
+        self.assertNotIn('ghost', self.m.said[0]); self.assertNotIn('Bad Name', self.m.said[0])
+        self.assertEqual(len(self.m.asked), 1)                                  # the core is asked once, and only read
+        self.assertEqual(self.m.asked[0][-1], 'https://api.polari.isle/api/islemesh/devices')
+        self.assertFalse(self.m.records.exists())
+
+    def test_a_machine_that_reports_kinds_and_no_partitions_is_still_shown(self):
+        self.m.listing = [device('fresh', kinds=kinds(git='not ready')), device('odd', '{not json', kinds=kinds())]
+        code, doc = self.isle('kind', 'list', '--isle')
+        self.assertEqual({r['kind']: r['ready'] for r in doc['result']['kinds']}['plain-folder'], ['fresh', 'odd'])
+        self.assertEqual(self.isle('kind', 'list', '--isle', '--table')[0], 0)
+        self.assertEqual([line.split()[0] for line in self.m.text().splitlines()[1:3]], ['fresh', 'odd'])
+        code, doc = self.isle('role', 'list', '--isle')
+        self.assertEqual([(d['device'], d['state'], d['kinds']['state']) for d in doc['result']['devices']],
+                         [('fresh', si.NO_REPORT, 'reported'), ('odd', si.NOT_READABLE, 'reported')])
+
+    def test_the_table_has_a_line_for_each_machine(self):
+        self.assertEqual(self.isle('kind', 'list', '--isle', '--table')[0], 0)
+        text = self.m.text()
+        lines = text.splitlines()
+        self.assertEqual(lines[0].split(), ['DEVICE'] + list(sk.KINDS) + ['REPORTED'])
+        self.assertEqual([' '.join(line.split()) for line in lines[1:3]],
+                         ['core1 ready not ready ready not reported 60 min ago', 'pol ready not known not ready ready 10 min ago'])
+        for words in ('econ: no report of its kinds of storage yet (its isle CLI may be older than this view).',
+                      'odd: its report of kinds cannot be read by this version of the isle CLI.',
+                      'This is what each machine last reported, not a check.', 'on the machine itself: isle storage kind list --table'):
+            self.assertIn(words, text)
+        self.assertNotIn('ghost', text)
+        self.m.listing = [device('econ', fact(part()))]
+        self.assertEqual(self.isle('--isle', 'kind', 'list', '--table')[0], 0)
+        self.assertIn('No machine reports which kinds of storage it is ready to hold.', self.m.text())
+        self.assertNotIn('DEVICE', self.m.text())
+
+    def test_a_role_row_says_whether_its_machine_is_ready_for_its_kind(self):
+        code, doc = self.isle('role', 'list', '--isle')
+        self.assertEqual(sorted((p['device'], p['role'], p['kind'], p['kindOnDevice']) for p in doc['result']['partitions']),
+                         sorted([('pol', 'registry', 'image-registry', 'not ready'), ('pol', 'assets', 'file-pool', 'not known'),
+                                 ('pol', 'backup', 'plain-folder', 'ready'), ('core1', 'registry', 'image-registry', 'ready'),
+                                 ('core1', 'git', 'git', 'not reported'), ('econ', 'git', 'git', 'not reported')]))
+        self.assertEqual(self.isle('role', 'list', '--isle', '--table')[0], 0)
+        text = self.m.text()
+        self.assertIn('pol holds a partition for storage of the kind image-registry and reported that it is not ready for it.', text)
+        self.assertIn('pol holds a partition for storage of the kind file-pool and reported that it could not tell whether it is ready for it.', text)
+        self.assertIn('What it lacks, on that machine: isle storage kind list --table', text)
+        self.assertEqual(text.count('holds a partition for storage of the kind'), 2)   # nothing about a ready machine, or one that said nothing
+        self.assertEqual(self.isle('role', 'show', 'backup', '--isle', '--table')[0], 0)
+        self.assertNotIn('holds a partition for storage', self.m.text())
+        self.assertNotIn('What it lacks', self.m.text())
+        self.assertEqual(self.isle('role', 'show', 'registry', '--isle', '--table')[0], 0)
+        self.assertEqual(self.m.text().count('holds a partition for storage of the kind'), 1)   # only the role that is shown
+
+    def test_a_list_that_cannot_be_read_says_so(self):
+        self.m.listing = '{not json'
+        code, doc = self.isle('kind', 'list', '--isle')
+        self.assertEqual((code, doc['ok'], doc['operation']), (1, False, 'storage.kind.list'))
+        self.assertIn('device list of the core cannot be read', doc['error'])
+
+    def test_through_the_public_dispatch(self):
+        tools = self.m.tmp / 'bin'
+        tools.mkdir()
+        (tools / 'curl').write_text('#!/usr/bin/env python3\nprint(' + repr(json.dumps(dict(devices=self.m.listing))) + ')\n')
+        (tools / 'curl').chmod(0o755)
+        env = dict(os.environ, PATH=str(tools) + ':' + os.environ['PATH'])
+        result = subprocess.run(['node', str(roles_test.ENTRY), 'storage', 'kind', 'list', '--isle'], env=env, capture_output=True, text=True, timeout=20)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual({r['kind']: r['ready'] for r in json.loads(result.stdout)['result']['kinds']}['image-registry'], ['core1'])
 
 
 if __name__ == '__main__':

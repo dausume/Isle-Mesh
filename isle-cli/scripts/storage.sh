@@ -8,7 +8,7 @@
 #   read-only verbs for anyone: list, check, check-path, guard-domain, status, domain-entry, fence-check,
 #     placement (prints the record), device list, partition list|check, role list|show (with --isle: what
 #     every machine reported to the core's device list), units check, kind list (the kinds of storage and whether this
-#     machine has what each needs), need list (the distribution needs), association list, slot list|check (the storage
+#     machine has what each needs; with --isle: what every machine reported about it), need list (the distribution needs), association list, slot list|check (the storage
 #     slots the apps of this machine declare, and whether each is bound to a partition that is there);
 #   this machine's storage records (root, under the records' own lock; no dataset, so not journaled):
 #     device register|retire, partition assign|retire, slot declare|bind|unbind (bind makes one folder on the partition);

@@ -58,6 +58,7 @@ USAGE = ('Usage: isle storage device list [--table] | isle storage partition lis
          '       isle storage role list [--table] | isle storage role show <role> [--table]\n'
          '       isle storage role list --isle [--table] | isle storage role show <role> --isle [--table]\n'
          '       isle storage kind list [--table] | isle storage need list [--table] | isle storage association list [--table]\n'
+         '       isle storage kind list --isle [--table]\n'
          '       isle storage slot list [--table] | isle storage slot check [--app <app>] [--table]\n'
          '       sudo isle storage slot declare <app> --from <release.json>\n'
          '       sudo isle storage slot bind <app> <slot> --partition <filesystem-identifier> | sudo isle storage slot unbind <app> <slot>\n'

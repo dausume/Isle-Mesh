@@ -712,6 +712,7 @@ isle storage role show <role> --table
 isle storage role list --isle --table
 isle storage role show <role> --isle --table
 isle storage kind list --table
+isle storage kind list --isle --table
 isle storage need list --table
 isle storage association list --table
 isle storage slot list --table
@@ -770,6 +771,15 @@ needs, which say how the data has to reach the devices that use it (`kept`, `ser
 edits back to its original; nothing takes or returns such a copy yet. `association list` shows what data can belong to
 (the isle, one app, one machine, one release). `role list` names the kind of each role, and `role show <role>`
 its kind, its distribution needs and what it belongs to.
+
+Each machine adds one more fact to the device report it already sends to the core, `isle.storage_kinds`: one
+word for each kind (`ready`, `not ready`, `not known`). It names no program, no image and no path. `isle
+storage kind list --isle [--table]` reads the core's device list and prints one line for each machine, so that
+it can be seen from any machine which one can hold a registry or a file pool. `role list --isle` and `role show
+<role> --isle` add to each partition the kind of its role and what its machine said about that kind
+(`kindOnDevice`), and the table names a machine that holds a partition for a kind it is not ready for. What a
+machine lacks is asked on that machine (`isle storage kind list --table`). A machine with an older isle CLI is
+shown as having said nothing. This is a report, not a check, and nothing is installed or refused because of it.
 
 After `partition assign` and `partition create` have given a partition its roles, they say what this machine
 does not have for the kinds of those roles. That is never a refusal: the roles are recorded all the same, the

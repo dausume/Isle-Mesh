@@ -128,6 +128,13 @@ def collect(device, images=()):
         if isinstance(fact, str) and fact: record('isle.storage_partitions', fact, 'local storage records and partition markers')
     except Exception:
         pass
+    try:
+        # Which kinds of storage this machine is ready to hold (isle storage kind list --isle). Any failure just omits the fact.
+        from storage_isle import kinds_fact
+        fact = kinds_fact()
+        if isinstance(fact, str) and fact: record('isle.storage_kinds', fact, 'programs on the path and images in Docker')
+    except Exception:
+        pass
     for endpoint, url in [('whoami','https://whoami.isle/'),('polari','https://api.polari.isle/api/health'),('polari-frontend','https://polari.isle/')]:
         code, output, _ = run(['curl','--http1.1','--silent','--show-error','--max-time','6','--output','/dev/null','--write-out','%{http_code}',url])
         # A completed TLS exchange and HTTP response proves access, not an app's
