@@ -306,7 +306,7 @@ def create(io, serial, identifier, asked, label=None, expect=None):
     io.say('Partition %s of device %s now holds one %s filesystem, identifier %s. What was there before is gone.' % (name, serial, FILESYSTEM, fresh))
     io.say('It carries %s: the marker is at its root and this machine records it.' % sr._words(wanted))
     io.say('It is not mounted. See: isle storage partition check --table')
-    return 0
+    return sr._lacks(io, wanted)
 
 
 def _left(stage, serial, name, new_partition, fresh, wanted, asked, label):

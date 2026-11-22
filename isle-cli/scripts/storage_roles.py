@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """isle storage device register | partition assign | partition check | role list | role show
-(`partition retire` and `device retire`, which take these away again, are in storage_retire.py.)
+(`partition retire` and `device retire`, which take these away again, are in storage_retire.py; the kind of storage,
+the distribution needs and the associations a role allows are in storage_kinds.py.)
 
 The storage records of one machine.  A device is declared by its hardware serial with a class (fixed, dock or
 flash).  A partition is given one role or more than one.  Its roles are written in two places: in a marker file
@@ -18,6 +19,7 @@ import os
 from pathlib import Path
 import re
 import shlex
+import shutil
 import stat
 import subprocess
 import sys
@@ -54,6 +56,7 @@ USAGE = ('Usage: isle storage device list [--table] | isle storage partition lis
          '       sudo isle storage partition unmount <filesystem-identifier> [--with-datasets]\n'
          '       isle storage role list [--table] | isle storage role show <role> [--table]\n'
          '       isle storage role list --isle [--table] | isle storage role show <role> --isle [--table]\n'
+         '       isle storage kind list [--table] | isle storage need list [--table] | isle storage association list [--table]\n'
          'Roles: %s') % ('|'.join(CLASSES), ', '.join(ROLES))
 
 
@@ -69,6 +72,7 @@ class Io:
     def datasets(self): return storage_devices.local_datasets(self.root)[0]
     def usage(self, path): return storage_devices._usage(path)
     def is_root(self): return os.geteuid() == 0
+    def which(self, program): return shutil.which(program)
     def is_mount(self, path): return os.path.ismount(path)
     def node(self, name): return '/dev/' + name
     def sleep(self, seconds): time.sleep(seconds)
@@ -317,7 +321,8 @@ def assign(io, identifier, asked):
                 + '. To take a role away instead: sudo isle storage partition retire %s --role <role>' % identifier)
         mark = sorted(marked) != sorted(target)                  # the marker has to be written (again)
         if row['roleState'] == 'ok' and recorded == target:
-            io.say('Partition %s (%s) already carries %s. Nothing was changed.' % (row['name'], identifier, _words(wanted))); return 0
+            io.say('Partition %s (%s) already carries %s. Nothing was changed.' % (row['name'], identifier, _words(wanted)))
+            return _lacks(io, wanted)
         if not io.is_root():
             io.say('This changes the storage records of this machine. Type: sudo isle storage partition assign %s --role %s' % (identifier, asked)); return 1
         if row['mountedReadOnly'] and mark: return _refuse(io, what, 'partition %s is mounted read-only' % row['name'])
@@ -350,6 +355,13 @@ def assign(io, identifier, asked):
             row['marker'].get('assignedAt'), row['marker'].get('assignedOn'), _words(marked)))
     elif row['marker'] and sorted(marked) != sorted(recorded): io.say('Its marker named %s before.' % _words(marked))
     if row['datasets']: io.say('Datasets already on it: %s.' % ', '.join(row['datasets']))
+    return _lacks(io, target)
+
+
+def _lacks(io, roles):
+    """Say what this machine does not have for the kinds of storage of these roles.  Never a refusal: 0."""
+    import storage_kinds
+    for line in storage_kinds.notice(io, roles): io.say(line)
     return 0
 
 
@@ -396,13 +408,14 @@ def report(io, argv):
             io.say('%d of %d need attention.' % (len(bad), len(held)) if bad else 'Nothing needs attention.')
             return 1 if bad else 0
         return answer(not bad, result=dict(partitions=[_public(p) for p in held], needAttention=[p['filesystemUuid'] for p in bad]))
+    import storage_kinds
     if words == ['role', 'list']:
-        rows = [dict(role=role, partitions=[p['filesystemUuid'] for p in held if role in p['roles']],
+        rows = [dict(role=role, kind=storage_kinds.ROLE[role][0], partitions=[p['filesystemUuid'] for p in held if role in p['roles']],
                      datasets=sorted(d for p in held if role in p['roles'] for d in p['datasets']),
                      availableBytes=sum(p.get('availableBytes', 0) for p in held if role in p['roles'] and p['roleState'] == 'ok'))
                 for role in ROLES]
         if plain:
-            io.say(_table(('ROLE', 'PARTITIONS', 'FREE', 'DATASETS'), [(r['role'], len(r['partitions']),
+            io.say(_table(('ROLE', 'KIND', 'PARTITIONS', 'FREE', 'DATASETS'), [(r['role'], r['kind'], len(r['partitions']),
                    storage_devices._size(r['availableBytes']) if r['partitions'] else '-', ', '.join(r['datasets']) or '-') for r in rows]))
             if shared: io.say(shared)
             return 0
@@ -410,10 +423,13 @@ def report(io, argv):
     role = words[2]
     if role not in ROLES: return answer(False, error='Unknown role: %s. Roles: %s.' % (role, ', '.join(ROLES)))
     mine = [p for p in held if role in p['roles']]
+    allows = storage_kinds.of(role)
     if plain:
+        io.say('Role %s: storage of the kind %s; distribution: %s; belongs to: %s.' % (
+            role, allows['kind'], ', '.join(allows['distribution']), ', '.join(allows['association'])))
         io.say(_partition_table(mine) if mine else 'No partition of this machine carries the role %s.' % role)
         return 0
-    return answer(True, result=dict(role=role, partitions=[_public(p) for p in mine]))
+    return answer(True, result=dict(role=role, partitions=[_public(p) for p in mine], **allows))
 
 
 def from_records(io):
@@ -447,6 +463,9 @@ def main(argv=None, io=None):
     if words[:2] == ['device', 'health']:
         import storage_health
         return storage_health.main(io, argv)
+    if words[:1] in (['kind'], ['need'], ['association']):
+        import storage_kinds
+        return storage_kinds.main(io, argv)
     if words[:1] in (['device'], ['partition']) and (len(words) < 2 or words[1] not in storage_devices.RECORD_VERBS[words[0]]):
         return storage_devices.main(argv, run=io.run, root=io.root, usage=io.usage, out=io.say, records=from_records(io))
     if len(words) == 5 and words[:2] == ['device', 'register'] and words[3] == '--class' and '--table' not in argv:

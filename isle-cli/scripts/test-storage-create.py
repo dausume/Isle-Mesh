@@ -33,6 +33,13 @@ WHOLE = dict(kind='isle.storage.partition.create', version=1, deviceSerial='S5',
              layout='whole-device', shownPartitionSizes=[1000000] * 4, filesystem='ext4', reservePercent=1, roles=['registry', 'assets'], label=None)
 UUID4 = r'[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}'
 EXT4 = dict(TYPE='ext4', UUID='old-one')
+#: what the verb adds after it made a partition for registry and assets on the made-up machine, which has no program
+LACKS = ['The role registry is storage of the kind image-registry. A machine that holds it needs: the program docker and an image of registry in Docker.',
+         '  This machine does not have: the program docker; an image of registry in Docker.',
+         'The role assets is storage of the kind file-pool. A machine that holds it needs: the program weed; or the program docker and an image of '
+         'chrislusf/seaweedfs in Docker.',
+         '  This machine does not have: the program weed; the program docker; an image of chrislusf/seaweedfs in Docker.',
+         'Nothing was installed. See: isle storage kind list --table']
 
 
 def ident(plan):
@@ -246,7 +253,7 @@ class OnAPartition(Case):
         self.assertEqual(self.m.said, [
             'Partition sdc3 of device S3 now holds one ext4 filesystem, identifier %s. What was there before is gone.' % made,
             'It carries the roles registry, assets: the marker is at its root and this machine records it.',
-            'It is not mounted. See: isle storage partition check --table'])
+            'It is not mounted. See: isle storage partition check --table'] + LACKS)
         # the marker that was made is one `partition check` accepts, once the filesystem is seen and mounted
         self.m.disks[2]['children'][2].update(fstype='ext4', uuid=made, mountpoints=[str(self.m.folders['whole'])])
         self.m.disks[3]['mountpoints'] = [None]
@@ -338,7 +345,7 @@ class OnAWholeDevice(Case):
             'Device S5 now has a GPT partition table with one partition, sde1 (partition identifier %s).' % new,
             'Partition sde1 of device S5 now holds one ext4 filesystem, identifier %s. What was there before is gone.' % made,
             'It carries the roles registry, assets: the marker is at its root and this machine records it.',
-            'It is not mounted. See: isle storage partition check --table'])
+            'It is not mounted. See: isle storage partition check --table'] + LACKS)
         self.assertEqual(self.slept, [])
 
     def test_the_device_and_every_partition_shown_on_it_are_probed_first(self):

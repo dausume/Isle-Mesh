@@ -51,6 +51,7 @@ class Machine(sr.Io):
     def datasets(self): return self.bound
     def usage(self, path): return 1000, 400
     def is_root(self): return self.root_user
+    def which(self, program): return None       # a machine with no program on its path; never the real one
     def is_mount(self, path): return path not in self.unmounted
     def now(self): return '2026-01-01T00:00:00+00:00'
     def say(self, line=''): self.said.append(line)
@@ -569,7 +570,7 @@ class Roles(Case):
         self.assertEqual(self.m.call('role', 'list'), 0)
         rows = json.loads(self.m.said[0])['result']['roles']
         self.assertEqual([r['role'] for r in rows], list(sr.ROLES))
-        self.assertEqual(rows[0], dict(role='package-repo', partitions=[ARCH], datasets=['apt-public-repo'], availableBytes=400))
+        self.assertEqual(rows[0], dict(role='package-repo', kind='plain-folder', partitions=[ARCH], datasets=['apt-public-repo'], availableBytes=400))
         self.assertEqual(rows[1]['partitions'], [])
         self.assertEqual(self.m.call('role', 'list', '--table'), 0)
         self.assertEqual(len(self.m.text().splitlines()), 1 + len(sr.ROLES))

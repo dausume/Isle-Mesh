@@ -668,6 +668,9 @@ isle storage role list --table
 isle storage role show <role> --table
 isle storage role list --isle --table
 isle storage role show <role> --isle --table
+isle storage kind list --table
+isle storage need list --table
+isle storage association list --table
 ```
 
 Without `--table` every listing is a JSON document. The `sudo` verbs print the command to type when they
@@ -704,6 +707,22 @@ that is away is reported and is not an error. The marker and the record agree wh
 in any order. `role show <role>` lists the partitions that carry a role with their device, free space and the
 datasets bound on them; a partition with several roles is listed under each, and `role list` counts its free
 space under each (it is one space, and the listing says so).
+
+A role is only a purpose. Three more things are named apart from it, each a short fixed list, and a fixed table
+in the CLI says which of them a role allows. No record and no marker holds them. `kind list` shows the kinds of
+storage: what serves the data and so what the machine that holds it must have (`plain-folder` needs nothing
+more; `file-pool` needs the file store's one program `weed`, or Docker with an image of it; `image-registry`
+and `git` need Docker with the registry's or the forge's image), and whether this machine has it: `ready`,
+`not ready`, or `not known` when Docker did not answer the user who asked. `need list` shows the distribution
+needs, which say how the data has to reach the devices that use it (`kept`, `served`, `pooled`, `cached`,
+`installed`, `carried`) and what a plan has to do for each. `association list` shows what data can belong to
+(the isle, one app, one machine, one release). `role list` names the kind of each role, and `role show <role>`
+its kind, its distribution needs and what it belongs to.
+
+After `partition assign` and `partition create` have given a partition its roles, they say what this machine
+does not have for the kinds of those roles. That is never a refusal: the roles are recorded all the same, the
+exit status stays 0, and nothing is installed. The look is two questions and nothing else: is a program on the
+path, and does `docker image ls` show an image of a repository (any tag).
 
 `partition retire` takes roles away again: afterwards neither the marker nor this machine's record names the
 roles typed. A role that is not typed stays where it is, in the marker and in the record. When no role is left,

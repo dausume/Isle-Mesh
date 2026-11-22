@@ -51,6 +51,7 @@ class Machine(sr.Io):
     def datasets(self): return []
     def usage(self, path): return 1000, 400
     def is_root(self): return True
+    def which(self, program): return None       # a machine with no program on its path; never the real one
     def is_mount(self, path): return True
     def now(self): return '2026-01-01T00:00:00+00:00'
     def say(self, line=''): self.said.append(line)
