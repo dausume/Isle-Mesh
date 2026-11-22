@@ -144,6 +144,19 @@ class Artifacts(unittest.TestCase):
   _,c=self.install_domain({},{'twin-board-engines':{'domain':'old.isle'}},'twin-board-engines');self.assertEqual(used(c),'old.isle')
   _,c=self.install_domain({},{},'twin-board-engines');self.assertEqual(used(c),'twin-board-engines.isle')
   _,c=self.install_domain({},{},'twin-board-engines-2');self.assertEqual(used(c),'twin-board-engines-2.isle')
+ def test_the_upload_size_of_a_release_reaches_the_deploy(self):
+  _,calls=self.install_domain(dict(maxUpload='2g'),{},'alpha',name='alpha')
+  deploy=calls[-1];self.assertEqual(deploy[deploy.index('--max-upload')+1],'2g')
+  _,calls=self.install_domain({},{},'alpha',name='alpha');self.assertNotIn('--max-upload',calls[-1])   # none declared: the agent's default
+ def test_an_unreadable_upload_size_is_refused_when_validated_and_when_published(self):
+  artifacts.validate_manifest(dict(deploy=dict(service='web',port=80,maxUpload='64m'),images=[]))
+  for bad in ('64M','2g;','',None,64):
+   with self.assertRaisesRegex(ValueError,'upload size'):artifacts.validate_manifest(dict(deploy=dict(service='web',port=80,maxUpload=bad),images=[]))
+  path,m=self.fixture('alpha');m['deploy']['maxUpload']='2 g';path.write_text(json.dumps(m))
+  with self.assertRaisesRegex(ValueError,'upload size'):publish(path,self.root/'repo')
+  self.assertFalse((self.root/'repo/catalog').exists())   # refused before anything is written
+  m['deploy']['maxUpload']='2g';path.write_text(json.dumps(m));publish(path,self.root/'repo')
+  self.assertEqual(json.loads(next((self.root/'repo/catalog/alpha/v1').glob('*.json')).read_text())['deploy']['maxUpload'],'2g')
  SLOT=dict(name='projects',role='assets',target='/home/app/projects',writable=True)
  def test_install_keeps_the_storage_slots_before_it_deploys(self):
   code,calls=self.install_domain({},{},'alpha',name='alpha',slots=[self.SLOT])

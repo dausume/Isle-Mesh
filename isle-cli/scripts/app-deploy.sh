@@ -6,6 +6,7 @@
 #   isle app deploy <name> --compose <file> [--service <svc>]
 #                   [--port <p>] [--domain <name>.isle]
 #                   [--health-path /] [--protocol http] [--engine <kind>[@<url>]]
+#                   [--max-upload <size>]
 #                   [--staged] [--bind ISLE_DATASET_PATH=<abs dir> --dataset <ds>]
 #
 # --staged  deploy a storage-migrated hosting app WITHOUT publishing its domain
@@ -13,6 +14,12 @@
 #           cutover operation).  --bind mounts a proven dataset dir read-only
 #           at /data (storage-migration contract sections 2.2, 4).  --dataset names
 #           the dataset whose `storage check` gates every compose up of a bound app.
+#
+# --max-upload <size>  the largest request body the app takes through this
+#           device's agent: 0 (no limit) or a whole number with k, m or g
+#           (64m, 2g).  Without it the agent's default holds: 1 MiB.  The size
+#           is part of the registration, so a deploy typed again without it
+#           puts the default back.
 #
 # --engine business-ops            → https://<app-domain> (auto, Isle-wide)
 # --engine business-ops@http://x   → explicit url (no <> chars)
@@ -41,7 +48,7 @@ die(){ echo -e "${R}[FAIL]${N} $*"; exit 1; }
 
 NAME="${1:-}"; shift || true
 [ -n "$NAME" ] && [ "${NAME#-}" = "$NAME" ] || die "usage: isle app deploy <name> --compose <file> [--service <svc>] [--port <p>] [--domain <d>] [--engine <kind>=<url>]"
-COMPOSE=""; IMAGE=""; SERVICE=""; PORT=""; DOMAIN="$NAME.isle"; PROTOCOL="http"; ENGINE=""; HEALTH_PATH="/"; STAGED=0; BIND=""; DATASET=""
+COMPOSE=""; IMAGE=""; SERVICE=""; PORT=""; DOMAIN="$NAME.isle"; PROTOCOL="http"; ENGINE=""; HEALTH_PATH="/"; STAGED=0; BIND=""; DATASET=""; MAX_UPLOAD=""
 while [ $# -gt 0 ]; do case "$1" in
     --compose) COMPOSE="$2"; shift 2 ;;
     --image) IMAGE="$2"; shift 2 ;;
@@ -51,12 +58,18 @@ while [ $# -gt 0 ]; do case "$1" in
     --protocol) PROTOCOL="$2"; shift 2 ;;
     --engine) ENGINE="$2"; shift 2 ;;
     --health-path) HEALTH_PATH="$2"; shift 2 ;;
+    --max-upload) MAX_UPLOAD="${2:-}"; shift 2 || die "--max-upload needs a size" ;;
     --staged) STAGED=1; shift ;;
     --bind) BIND="${2:-}"; shift 2 || die "--bind needs PARAM=PATH" ;;
     --dataset) DATASET="${2:-}"; shift 2 || die "--dataset needs a name" ;;
     *) die "unknown arg: $1" ;;
 esac; done
 python3 "$SCRIPT_DIR/health_probe.py" "$HEALTH_PATH" || die "invalid health path"
+UPLOAD_ARGS=()
+if [ -n "$MAX_UPLOAD" ]; then
+    python3 "$SCRIPT_DIR/upload_size.py" "$MAX_UPLOAD" || die "invalid --max-upload; nothing was changed"
+    UPLOAD_ARGS=(--max-body "$MAX_UPLOAD")
+fi
 # --image <ref> synthesizes a one-service compose (the catalog's
 # bare-image path); --compose is the file path otherwise.
 if [ -z "$COMPOSE" ] && [ -n "$IMAGE" ]; then
@@ -188,7 +201,7 @@ CONTAINER=$(sudo env "${BIND_ENV[@]+"${BIND_ENV[@]}"}" docker compose -p "isle-$
 
 # ---- 2+3. register (leaf issuance rides the hook)
 sudo bash "$AGENT_MANAGER" register --name "$NAME" --domain "$DOMAIN" \
-    --container "$CONTAINER" --port "$PORT" --protocol "$PROTOCOL" \
+    --container "$CONTAINER" --port "$PORT" --protocol "$PROTOCOL" "${UPLOAD_ARGS[@]+"${UPLOAD_ARGS[@]}"}" \
     || die "agent registration failed"
 
 # Make the new local app reachable from the core desktop immediately.

@@ -1,0 +1,10 @@
+# registry: the isle's image registry, an app like any other. Its images live in the storage slot "images"
+# (role registry), which the device binds to one of its partitions; the app is never started without it.
+# The image name below is a placeholder; `isle store build` writes the built name in its place.
+# PIN-AT-BUILD (this marker line is dropped from built output)
+services:
+  registry:
+    image: registry/registry:PIN-AT-BUILD
+    restart: "no"
+    expose:
+      - "5000"

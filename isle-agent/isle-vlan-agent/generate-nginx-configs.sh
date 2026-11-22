@@ -10,6 +10,7 @@
 #       "domain": "myapp.local",
 #       "services": [
 #         { "name": "api", "subdomain": "api", "container": "myapp-api-1", "port": 3000, "protocol": "http" }
+#         (optional "maxBody": "0" | "<n>[kmg]" - the largest request body the service takes; none = nginx's 1 MiB)
 #       ],
 #       "modes": ["local"],
 #       "updated_at": "..."
@@ -87,6 +88,7 @@ EOF
         SVC_CONTAINER=$(jq -r ".apps.\"$APP_NAME\".services[$SERVICE_INDEX].container // \"\"" "$REGISTRY_FILE")
         SVC_PORT=$(jq -r ".apps.\"$APP_NAME\".services[$SERVICE_INDEX].port // 80" "$REGISTRY_FILE")
         SVC_PROTOCOL=$(jq -r ".apps.\"$APP_NAME\".services[$SERVICE_INDEX].protocol // \"http\"" "$REGISTRY_FILE")
+        SVC_MAX_BODY=$(jq -r ".apps.\"$APP_NAME\".services[$SERVICE_INDEX].maxBody // \"\" | tostring" "$REGISTRY_FILE")
 
         if [ -z "$SVC_CONTAINER" ] || [ "$SVC_CONTAINER" = "null" ]; then
             echo "    Warning: No container for service $SVC_NAME, skipping"
@@ -107,6 +109,28 @@ EOF
             SERVER_NAME_DIRECTIVE="${SERVER_NAME} ${ISLE_DOMAIN}"
         else
             SERVER_NAME_DIRECTIVE="${SERVER_NAME}"
+        fi
+
+        # A declared request-body size: written only when it reads as one. Anything else keeps the default (1 MiB).
+        BODY_SERVER=""
+        BODY_LOCATION=""
+        if [ -n "$SVC_MAX_BODY" ]; then
+            BODY_OK=0
+            case "$SVC_MAX_BODY" in
+                *[!0-9kmg]*) ;;   # any other character, a line break among them: grep reads line by line
+                *) ! printf '%s\n' "$SVC_MAX_BODY" | grep -Eqx '0|[1-9][0-9]{0,5}[kmg]?' || BODY_OK=1 ;;
+            esac
+            if [ "$BODY_OK" = 1 ]; then
+                BODY_SERVER="
+    # The largest request body this service declared (isle app deploy --max-upload)
+    client_max_body_size ${SVC_MAX_BODY};"
+                BODY_LOCATION="
+
+        # A declared upload is passed on as it arrives, never first kept whole by the agent
+        proxy_request_buffering off;"
+            else
+                echo "    Warning: service $SVC_NAME has an unreadable maxBody; the default (1 MiB) is kept"
+            fi
         fi
 
         # Sanitize upstream name
@@ -140,7 +164,7 @@ server {
 
     # SSL certificates
     ssl_certificate /etc/nginx/ssl/certs/${APP_DOMAIN}.crt;
-    ssl_certificate_key /etc/nginx/ssl/keys/${APP_DOMAIN}.key;
+    ssl_certificate_key /etc/nginx/ssl/keys/${APP_DOMAIN}.key;${BODY_SERVER}
 
     # Proxy to backend
     location / {
@@ -168,7 +192,7 @@ server {
         proxy_buffering on;
         proxy_buffer_size 4k;
         proxy_buffers 8 4k;
-        proxy_busy_buffers_size 8k;
+        proxy_busy_buffers_size 8k;${BODY_LOCATION}
     }
 }
 EOF

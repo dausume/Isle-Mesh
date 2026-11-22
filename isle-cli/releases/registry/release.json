@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "name": "registry",
+  "version": "2026.11.1",
+  "category": "infrastructure",
+  "images": [
+    {
+      "ref": "registry/registry:PIN-AT-BUILD",
+      "buildFrom": "registry:2",
+      "archive": {"source": "images/registry.tar"},
+      "configDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "manifestDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ],
+  "compose": {"source": "docker-compose.yml"},
+  "deploy": {"service": "registry", "port": 5000, "maxUpload": "0"},
+  "health": {"path": "/v2/"},
+  "storageSlots": [
+    {"name": "images", "role": "registry", "target": "/var/lib/registry", "service": "registry", "writable": true}
+  ]
+}

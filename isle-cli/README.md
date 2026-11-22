@@ -144,6 +144,49 @@ verified against the medium. This supports later Isle-published apps without
 treating offline mode as a ban on the Isle's own local supply; it does not
 automatically publish images or choose a compatible app version.
 
+### The registry as a store app, `isle store build`, and an app's upload size
+
+Source-tested only: nothing below is installed on a machine yet.
+
+**The registry as an app.** `releases/registry/` defines the same plain registry as a store release, so it can
+be installed on any device of the isle like any other app. It answers at `registry.isle` through that device's
+agent, with the app's own certificate and on the usual port (`registry.isle/<image>`, no `:5000`). It has no
+sign-in. Its images live in one storage slot, `images`, of the role `registry`: the app is started only on a
+device that has bound that slot to a partition carrying the role (see storage slots below). It takes the same
+name as `isle registry setup`: use one of the two, not both.
+
+**`isle store build <definition> <output folder> [--pull]`** makes the folder that `isle store publish` takes.
+`<definition>` is a folder, or the name of a definition this CLI carries (`isle store build registry <folder>`).
+A definition is a `release.json`, its compose file and its files, in which each image is written as
+`<release name>/<label>:PIN-AT-BUILD` with digests of zeros and names the image it is built from (`buildFrom`).
+The build names that image `<release name>/<label>:<version>`, saves it for linux/amd64, reads its identity
+out of the saved archive, and writes copies of `release.json` and the compose file that carry the real name
+and digests. It prints the `manifestSha256` that publish must print as well. It needs Docker and no root, and it
+publishes and starts nothing.
+
+- Nothing is downloaded: an image that is not on the machine stops the build. `--pull` is the explicit choice to
+  fetch every `buildFrom` image first.
+- The definition is read whole before Docker is asked anything, and what an install would refuse (a storage slot,
+  an upload size, a port, an image the compose file runs and the release does not hold) is refused there.
+- An archive that holds several platforms is refused. `release.json` is written last, so a build that stops
+  leaves nothing that can be published. The definition itself is never changed.
+
+`releases/isle-content-host/` keeps its own `build-release.sh`, which also writes the nginx file of that release.
+
+**An app's upload size.** A device's agent refuses a request body above 1 MiB (nginx's default; seen on a
+member: 200 for half a MiB, 413 for 2 MiB). An app that needs more says so as data:
+
+- a release, in its manifest: `"deploy": {"service": ..., "port": ..., "maxUpload": "2g"}`;
+- a deploy by hand: `isle app deploy <name> ... --max-upload 2g`.
+
+A size is `0` (no limit) or a whole number with `k`, `m` or `g`. Publish, install and deploy each refuse any
+other value before they change anything. The agent keeps the size on the app's entry in its registry (`maxBody`)
+and writes it for that app only, together with passing the body on as it arrives; an app without a size is
+written exactly as before. A value in the agent's registry that does not read as a size is not written, and the
+default is kept. The size is part of the registration: a deploy typed again without it puts the default back.
+The effect needs an agent that carries the new generator, which is a new agent image.
+Tests: `python3 isle-cli/scripts/test-upload-size.py` and `test-store-build.py` (no Docker, no network).
+
 ### Member service certificates
 
 Normal app deployment uses authenticated automatic enrollment. On the core,

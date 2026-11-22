@@ -5,6 +5,7 @@ from pathlib import Path
 from catalog_artifacts import sha,NAME
 from image_identity import verify_archive
 from health_probe import validate_path
+import upload_size
 from repository_lock import publication_lock
 import storage_placement
 REPO=Path('/etc/isle-mesh/apt/repo')
@@ -36,6 +37,7 @@ def _publish(source, repo):
     source=Path(source).resolve();m=json.loads(source.read_text());m=copy.deepcopy(m)
     if m.get('schemaVersion')!=1 or not NAME.fullmatch(m.get('name','')) or not re.fullmatch(r'[a-zA-Z0-9.+_-]{1,80}',m.get('version','')):raise ValueError('Invalid release identity')
     validate_path(m.get('health',{'path':'/'}).get('path'))
+    if 'maxUpload' in m.get('deploy',{}):upload_size.validate(m['deploy']['maxUpload'])   # an unreadable upload size is not published
     if 'storageSlots' in m:   # a release whose storage slots cannot be read is not published
         from storage_slots import declared
         declared(m['storageSlots'])

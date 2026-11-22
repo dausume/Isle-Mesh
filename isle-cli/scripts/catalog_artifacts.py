@@ -5,6 +5,7 @@ from pathlib import Path,PurePosixPath
 from urllib.parse import urlsplit
 from operations import atomic,stage,NAME
 from health_probe import validate_path
+import upload_size
 from image_identity import verify_archive,admit_installed,digest
 CACHE=Path('/var/lib/isle-mesh/artifacts')
 SCRIPTS=Path(__file__).resolve().parent
@@ -63,6 +64,7 @@ def validate_manifest(m):
         if not isinstance(d['domain'],str) or not isinstance(d['parent'],str) or not NAME.fullmatch(d['parent']) or not DOMAIN.fullmatch(d['domain']):raise ValueError('Invalid deploy.domain/deploy.parent')
     path=m.get('health',{'path':'/'}).get('path')
     validate_path(path)
+    if 'maxUpload' in d:upload_size.validate(d['maxUpload'])   # the largest request body the app takes through its agent
     if 'storageSlots' in m:   # the storage slots of the release (isle storage slot): refused here, before anything is fetched
         from storage_slots import declared
         declared(m['storageSlots'])
@@ -150,6 +152,7 @@ def install(catalog,instance,staged=False,binds=(),dataset=None,served=None):
     path=health.get('path')
     validate_path(path)
     args+=['--health-path',path]
+    if 'maxUpload' in d:args+=['--max-upload',upload_size.validate(d['maxUpload'])]
     if staged:args+=['--staged']
     for bind in binds:
         if not BIND.fullmatch(bind) or '..' in bind.split('/'):raise ValueError('Invalid --bind value')

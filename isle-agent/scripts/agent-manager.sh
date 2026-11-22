@@ -1409,7 +1409,7 @@ verify_setup() {
 
 # Register an app with the agent
 register_app() {
-    local app_name="" domain="" container="" port="80" protocol="http"
+    local app_name="" domain="" container="" port="80" protocol="http" max_body=""
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -1418,6 +1418,7 @@ register_app() {
             --container) container="$2"; shift 2 ;;
             --port) port="$2"; shift 2 ;;
             --protocol) protocol="$2"; shift 2 ;;
+            --max-body) max_body="${2:-}"; shift 2 || { log_error "--max-body needs a size"; return 1; } ;;
             *) log_error "Unknown option: $1"; return 1 ;;
         esac
     done
@@ -1425,7 +1426,7 @@ register_app() {
     # Validate required args
     if [[ -z "$app_name" ]]; then
         log_error "Missing required --name argument"
-        echo "Usage: register --name <name> --domain <domain> --container <container> [--port <port>] [--protocol <protocol>]"
+        echo "Usage: register --name <name> --domain <domain> --container <container> [--port <port>] [--protocol <protocol>] [--max-body <size>]"
         return 1
     fi
     if [[ -z "$domain" ]]; then
@@ -1434,6 +1435,13 @@ register_app() {
     fi
     if [[ -z "$container" ]]; then
         log_error "Missing required --container argument"
+        return 1
+    fi
+    # The largest request body the app takes through this agent: 0 (no limit) or a whole number with k, m or g.
+    # An app that names none keeps the agent's default (1 MiB). The same rule is in isle-cli/scripts/upload_size.py
+    # and in generate-nginx-configs.sh.
+    if [[ -n "$max_body" && ! "$max_body" =~ ^(0|[1-9][0-9]{0,5}[kmg]?)$ ]]; then
+        log_error "Invalid --max-body '$max_body' (0, or a whole number with k, m or g: 64m, 2g); registry unchanged"
         return 1
     fi
 
@@ -1476,11 +1484,13 @@ register_app() {
        --arg container "$container" \
        --argjson port "$port" \
        --arg protocol "$protocol" \
+       --arg maxBody "$max_body" \
        --arg now "$now" \
        '.apps[$name] = {
          "domain": $domain,
          "services": [
-           { "name": $name, "subdomain": "", "container": $container, "port": $port, "protocol": $protocol }
+           ({ "name": $name, "subdomain": "", "container": $container, "port": $port, "protocol": $protocol }
+            + (if $maxBody == "" then {} else { "maxBody": $maxBody } end))
          ],
          "modes": ["local"],
          "updated_at": $now
@@ -1556,6 +1566,7 @@ register_app() {
     echo "  Container: ${container}"
     echo "  Port:      ${port}"
     echo "  Protocol:  ${protocol}"
+    [[ -z "$max_body" ]] || echo "  Max body:  ${max_body}"
     echo ""
 }
 

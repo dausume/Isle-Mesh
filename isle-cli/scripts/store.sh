@@ -9,6 +9,13 @@
 # the backend; the store proposes, the host executes (knobs +
 # mover-on-host).
 #
+#   isle store build <definition> <output folder> [--pull]
+#                                   make the folder `publish` takes out of a
+#                                   release definition: a folder, or the name
+#                                   of one this CLI carries (releases/<name>).
+#                                   Downloads nothing without --pull.
+#   isle store publish <release.json>   on the core: put a built release
+#                                   into the catalog
 #   isle store list                 browse published entries
 #   isle store show <name>          entry detail + its install plan
 #   isle store install <name>       run the plan (asks first)
@@ -38,6 +45,13 @@ case "${1:-list}" in
         [[ "${2:-}" == 1 ]] || { echo 'Unsupported store protocol'; exit 1; }; exit 0 ;;
     publish)
         exec python3 "$SCRIPT_DIR/catalog_publish.py" "${2:?usage: isle store publish <release.json>}" ;;
+    build)
+        shift
+        # A bare name is a definition this CLI carries; anything with a / is a folder.
+        if [[ "${1:-}" =~ ^[a-z0-9][a-z0-9-]{0,63}$ && -d "$SCRIPT_DIR/../releases/$1" ]]; then
+            DEFINITION="$SCRIPT_DIR/../releases/$1"; shift; set -- "$DEFINITION" "$@"
+        fi
+        exec python3 "$SCRIPT_DIR/catalog_build.py" "$@" ;;
     list)
         api_get /api/islemesh/catalog | python3 -c '
 import json, sys
@@ -246,5 +260,5 @@ else:
             [ "$MESH" = true ] && echo "  preserved: /etc/isle-mesh/apps/$NAME + DNS ${NAME}.isle (a reinstall reuses them)"
         fi
         ;;
-    *) echo "usage: isle store [list|show <name>|install <name> [--yes]|uninstall <name> [--purge] [--yes]]"; exit 1 ;;
+    *) echo "usage: isle store [list|show <name>|install <name> [--yes]|uninstall <name> [--purge] [--yes]|build <definition> <output folder> [--pull]|publish <release.json>]"; exit 1 ;;
 esac
