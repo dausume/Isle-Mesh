@@ -32,7 +32,8 @@ KINDS = {
 NEEDS = {
     'kept': ('used only on the machine it sits on', 'nothing'),
     'served': ('one copy, and every device reads it by an isle name', 'give it an isle name'),
-    'pooled': ('pieces on several machines behind one isle name', 'start a storage process for each partition'),
+    'pooled': ('in a file store on its partition, one store for each partition; every device reads it by the isle name '
+               'of that store', 'start a store for each partition'),
     'cached': ('the primary stays where it is; a device keeps a bounded copy while it uses it and drops it by itself',
                'mount it with a cache'),
     'installed': ('a copy must sit on every device that runs it', 'run an install on each device'),

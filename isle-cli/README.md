@@ -155,8 +155,17 @@ sign-in. Its images live in one storage slot, `images`, of the role `registry`: 
 device that has bound that slot to a partition carrying the role (see storage slots below). It takes the same
 name as `isle registry setup`: use one of the two, not both.
 
+**The file store as an app.** `releases/file-store/` defines one small, complete file store on one partition: the
+stock SeaweedFS image as one process, with its index and its content in one storage slot, `files`, of the role
+`blob`. Each install answers at `<instance>.isle` (the first at `file-store.isle`) through its device's agent, and
+what answers is the store's S3 door, with no sign-in and no upload limit. A file is kept once, on the partition of
+its store, and every device reads it by that name; an isle has one store for each partition that holds files this
+way. Only the door is open to other containers; the rest of the program listens inside its container. Not in it
+yet: a link from one store to a file space of another, and a folder of the machine that shows a file space.
+
 **`isle store build <definition> <output folder> [--pull]`** makes the folder that `isle store publish` takes.
-`<definition>` is a folder, or the name of a definition this CLI carries (`isle store build registry <folder>`).
+`<definition>` is a folder, or the name of a definition this CLI carries (`isle store build registry <folder>`,
+`isle store build file-store <folder>`).
 A definition is a `release.json`, its compose file and its files, in which each image is written as
 `<release name>/<label>:PIN-AT-BUILD` with digests of zeros and names the image it is built from (`buildFrom`).
 The build names that image `<release name>/<label>:<version>`, saves it for linux/amd64, reads its identity

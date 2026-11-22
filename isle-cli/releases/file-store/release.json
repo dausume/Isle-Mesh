@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "name": "file-store",
+  "version": "2026.11.1",
+  "category": "infrastructure",
+  "images": [
+    {
+      "ref": "file-store/seaweedfs:PIN-AT-BUILD",
+      "buildFrom": "chrislusf/seaweedfs:4.47",
+      "archive": {"source": "images/seaweedfs.tar"},
+      "configDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "manifestDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ],
+  "compose": {"source": "docker-compose.yml"},
+  "deploy": {"service": "store", "port": 8333, "maxUpload": "0"},
+  "health": {"path": "/healthz"},
+  "storageSlots": [
+    {"name": "files", "role": "blob", "target": "/data", "service": "store", "writable": true,
+     "owner": "1000:1000", "association": "isle"}
+  ]
+}

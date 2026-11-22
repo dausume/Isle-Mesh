@@ -1,0 +1,2 @@
+This definition carries placeholder image names and digests of zeros (docker-compose.yml, release.json).
+`isle store build` writes the real ones into an output folder and never copies this file.
