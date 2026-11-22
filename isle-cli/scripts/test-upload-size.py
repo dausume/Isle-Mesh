@@ -217,5 +217,51 @@ class Deploy(unittest.TestCase):
         self.assertEqual(DEPLOY.count('"$AGENT_MANAGER" register'), 1)
 
 
+class PolarisOwnNames(unittest.TestCase):
+    """isle-polari-deploy.sh registers the engine's address with a size and the pages' address without one."""
+    TEXT = (HERE / 'isle-polari-deploy.sh').read_text()
+
+    def registrations(self, **env):
+        part = 'step "2/5' + self.TEXT.split('step "2/5', 1)[1].split("# record the CORE's modules", 1)[0]
+        setting = [line for line in self.TEXT.splitlines() if line.startswith('API_MAX_UPLOAD=')]
+        self.assertEqual(len(setting), 1)
+        with tempfile.TemporaryDirectory() as temp:
+            calls = Path(temp, 'calls')
+            done = subprocess.run(['bash', '-c', 'step(){ :; }; ok(){ echo "OK $*"; }; die(){ echo "DIE $*"; exit 1; }\n'
+                                   'sudo(){ printf "%s|" "$@" >> "$CALLS"; printf "\\n" >> "$CALLS"; }\n' + setting[0] + '\n' + part],
+                                  cwd=HERE, env=dict(os.environ, CALLS=str(calls), **env), capture_output=True, text=True, timeout=20)
+            return done, (calls.read_text().splitlines() if calls.exists() else [])
+
+    def test_syntax(self):
+        subprocess.run(['bash', '-n', str(HERE / 'isle-polari-deploy.sh')], check=True)
+
+    def test_the_engine_gets_a_size_and_the_pages_do_not(self):
+        done, calls = self.registrations()
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertEqual(len(calls), 2)
+        pages, engine = calls
+        self.assertIn('|--domain|polari.isle|', pages)
+        self.assertNotIn('--max-body', pages)
+        self.assertIn('|--domain|api.polari.isle|', engine)
+        self.assertTrue(engine.endswith('|--max-body|64m|'), engine)
+        self.assertIn('OK api.polari.isle (uploads up to 64m)', done.stdout)
+
+    def test_the_default_is_above_the_file_size_the_engine_takes(self):
+        default = self.TEXT.split('API_MAX_UPLOAD="${POLARI_API_MAX_UPLOAD:-', 1)[1].split('}', 1)[0]
+        self.assertEqual(upload_size.validate(default), default)
+        self.assertGreater(int(default[:-1]) * {'m': 2 ** 20, 'g': 2 ** 30}[default[-1]], 52428800)
+
+    def test_the_setting_changes_it(self):
+        _, calls = self.registrations(POLARI_API_MAX_UPLOAD='0')
+        self.assertTrue(calls[1].endswith('|--max-body|0|'), calls)
+
+    def test_a_setting_that_is_no_size_registers_nothing(self):
+        for value in ('64M', '2g;echo', ' '):
+            done, calls = self.registrations(POLARI_API_MAX_UPLOAD=value)
+            self.assertNotEqual(done.returncode, 0, value)
+            self.assertIn('nothing was registered', done.stdout)
+            self.assertEqual(calls, [])
+
+
 if __name__ == '__main__':
     unittest.main()

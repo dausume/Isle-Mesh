@@ -13,8 +13,16 @@
 #   ssh <core> isle-polari-deploy --pull      # pull + retag + deploy
 #
 #   isle-polari-deploy.sh [--modules <csv>] [--pull]
+#
+# POLARI_API_MAX_UPLOAD: the largest request body the core's agent passes on
+# to api.polari.isle (0 = no limit, or a whole number with k, m or g).  The
+# default, 64m, is above the engine's own limit for one file (50 MB,
+# files.max_file_size); without a size the agent keeps nginx's 1 MiB and the
+# engine never sees a larger file.  polari.isle (the pages) takes no uploads
+# and keeps the 1 MiB.
 set -u
 MODULES="${POLARI_ISLE_MODULES:-islemesh,polariapps}"
+API_MAX_UPLOAD="${POLARI_API_MAX_UPLOAD:-64m}"
 REGISTRY="${ISLE_REGISTRY:-registry.isle:5000}"
 PULL=0
 while [ $# -gt 0 ]; do case "$1" in
@@ -86,10 +94,13 @@ ok "prf-isle containers up (modules: $MODULES)"
 
 step "2/5 register polari.isle + api.polari.isle (leaf issuance rides the hook)"
 AM=/usr/share/isle-mesh/isle-agent/scripts/agent-manager.sh
+python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/upload_size.py" "$API_MAX_UPLOAD" >/dev/null \
+    || die "POLARI_API_MAX_UPLOAD '$API_MAX_UPLOAD' is not a size (0, or a whole number with k, m or g); nothing was registered"
 sudo bash "$AM" register --name polari --domain polari.isle \
     --container prf-isle-frontend --port 4200 --protocol http >/dev/null 2>&1 && ok "polari.isle"
 sudo bash "$AM" register --name polari-api --domain api.polari.isle \
-    --container prf-isle-backend --port 3000 --protocol http >/dev/null 2>&1 && ok "api.polari.isle"
+    --container prf-isle-backend --port 3000 --protocol http --max-body "$API_MAX_UPLOAD" >/dev/null 2>&1 \
+    && ok "api.polari.isle (uploads up to $API_MAX_UPLOAD)"
 
 # record the CORE's modules in its registry entry (modes are
 # schema-tolerant) — the store/coherence surface them per instance
