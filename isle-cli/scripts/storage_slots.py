@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""isle storage slot list | check | declare | bind | unbind
+"""isle storage slot list | check | declare | bind | unbind      (ready | gate | ungate: storage_slot_gate.py)
 
 A slot is one storage need of one app: a folder the app sees, the role of the partition that has to hold it, and
 whether the app writes to it.  A release declares its slots in the list `storageSlots` of its release manifest.
@@ -381,18 +381,24 @@ def report(io, argv):
     def answer(ok, **body):
         io.say(json.dumps(dict(ok=ok, evaluatedAt=io.now(), operation='storage.slot.' + words[1], readOnly=True, **body)))
         return 0 if ok else 1
-    try: found = [r for r in rows(io) if app is None or r['app'] == app]
+    try:
+        import storage_slot_gate
+        found = [r for r in rows(io) if app is None or r['app'] == app]
+        late = storage_slot_gate.out_of_date(io, found)
     except ERRORS as exc: return answer(False, error=str(exc) or exc.__class__.__name__)
     bad = [r for r in found if r['state'] != OK]
     if not plain:
-        return answer(not (check and bad), result=dict(slots=found, needAttention=[key(r['app'], r['slot'] or '') for r in bad]))
+        return answer(not (check and bad), result=dict(slots=found, needAttention=[key(r['app'], r['slot'] or '') for r in bad], unitsOutOfDate=late))
     io.say(_table(found) if found else 'The app %s declares no storage slot.' % app if app else 'No app of this machine declares a storage slot.')
     for r in bad:
         if r['state'] == NOT_BOUND:
             io.say('Slot %s of %s is not bound. Type: sudo isle storage slot bind %s %s --partition <filesystem-identifier>   (those with its role: isle storage role show %s --table)' % (
                 r['slot'], r['app'], r['app'], r['slot'], r['role']))
         elif r['problem']: io.say('The app %s: %s.' % (r['app'], r['problem']))
-    if check: io.say('%d of %d need attention.' % (len(bad), len(found)) if bad else 'Nothing needs attention.')
+    for name in late:
+        io.say('The unit that starts and stops %s with its partitions does not name the partitions its slots are bound to now. '
+               'Type: sudo isle storage slot gate %s' % (name, name))
+    if check: io.say('%d of %d need attention.' % (len(bad), len(found)) if bad else 'The slots themselves need no attention.' if late else 'Nothing needs attention.')
     return 1 if check and bad else 0
 
 
@@ -401,5 +407,8 @@ def main(io, argv):
     if len(argv) == 5 and argv[1] == 'declare' and argv[3] == '--from': return declare(io, argv[2], argv[4])
     if len(argv) == 6 and argv[1] == 'bind' and argv[4] == '--partition': return bind(io, argv[2], argv[3], argv[5])
     if len(argv) == 4 and argv[1] == 'unbind': return unbind(io, argv[2], argv[3])
+    if argv[1:2] in (['ready'], ['gate'], ['ungate']):
+        import storage_slot_gate
+        return storage_slot_gate.main(io, argv)
     io.say(sr.USAGE)
     return 2

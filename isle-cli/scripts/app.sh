@@ -189,6 +189,11 @@ case $COMMAND in
     undeploy)
         NAME="${1:?usage: isle app undeploy <name>}"
         python3 "$SCRIPT_DIR/removal_guard.py" "$NAME" || exit 1
+        # ---- storage slots: a unit of `isle storage slot gate` would start the app again when its partition is next mounted
+        GATE_UNIT="/etc/systemd/system/isle-app-$NAME.service"
+        if [ -f "$GATE_UNIT" ] && [ ! -L "$GATE_UNIT" ] && [ "$(head -n 1 "$GATE_UNIT")" = "# Written by: isle storage slot gate $NAME" ]; then
+            sudo python3 "$SCRIPT_DIR/storage_roles.py" slot ungate "$NAME" || { echo "$NAME was not taken down: the unit that starts it with its partitions could not be removed"; exit 1; }
+        fi
         sudo docker compose -p "isle-$NAME" -f "/etc/isle-mesh/apps/$NAME/docker-compose.yml" -f "/etc/isle-mesh/apps/$NAME/isle-overlay.yml" down 2>/dev/null
         sudo bash "$SCRIPT_DIR/../../isle-agent/scripts/agent-manager.sh" unregister --name "$NAME" 2>/dev/null || true
         echo "undeployed $NAME (DNS entry remains; isle dns unregister to drop)"

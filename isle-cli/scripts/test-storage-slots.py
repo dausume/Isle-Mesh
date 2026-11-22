@@ -618,7 +618,7 @@ class Report(Case):
         self.assertEqual(self.m.said, ['No app of this machine declares a storage slot.'])
         self.assertEqual(self.m.call('slot', 'check', '--table'), 0)
         self.assertEqual(self.rows('check'), (0, dict(ok=True, evaluatedAt='2026-01-01T00:00:00+00:00', operation='storage.slot.check', readOnly=True,
-                                                      result=dict(slots=[], needAttention=[]))))
+                                                      result=dict(slots=[], needAttention=[], unitsOutOfDate=[]))))
 
     def test_nothing_is_changed_by_looking(self):
         self.assertEqual(self.bind(), 0)

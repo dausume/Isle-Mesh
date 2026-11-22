@@ -12,6 +12,9 @@
 #     slots the apps of this machine declare, and whether each is bound to a partition that is there);
 #   this machine's storage records (root, under the records' own lock; no dataset, so not journaled):
 #     device register|retire, partition assign|retire, slot declare|bind|unbind (bind makes one folder on the partition);
+#   slot ready <app> (read-only: may the app be started with its slots as it is deployed), slot gate|ungate <app> (root: writes
+#     or removes the unit isle-app-<app>.service, which stops the app when a partition of its slots goes away and starts it
+#     when they are there again; ungate leaves the app as it is);
 #   partition create <serial> ...: reads the plan for anyone; with --expect <plan-id>, root: makes a filesystem on a partition that
 #     has none, or on a device that has no partition table (this erases it), and records it;
 #   partition mount <filesystem-identifier> --at <folder> | partition unmount <filesystem-identifier>: root; writes, starts, stops and

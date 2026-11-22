@@ -676,6 +676,9 @@ isle storage slot check [--app <app>] --table
 sudo isle storage slot declare <app> --from <release.json>
 sudo isle storage slot bind <app> <slot> --partition <filesystem-identifier>
 sudo isle storage slot unbind <app> <slot>
+isle storage slot ready <app>
+sudo isle storage slot gate <app>
+sudo isle storage slot ungate <app>
 ```
 
 Without `--table` every listing is a JSON document. The `sudo` verbs print the command to type when they
@@ -859,9 +862,24 @@ starts anything, and the app's overlay then gives each slot's folder to its serv
 the slot is `writable`; Docker is told never to make a missing folder. Two folders at one place in one service
 are refused. `isle reconcile` does not restart an app whose slots are not all `ok`, or whose overlay does not give
 exactly the folders that are bound now: deploy or install it again. An app without `storage-slots.json` is
-started as before. Not built: a unit that stops the app when its partition goes away and starts it when it
-returns; until then a partition that is unmounted under a running app leaves the app running on a folder that
-is gone; `partition unmount` names the slots bound to the partition and asks for `--with-datasets`.
+started as before.
+
+`slot gate` makes a deployed app stop when a partition of its slots goes away and start when they are there
+again. It writes one unit, `isle-app-<app>.service`, bound to the mounts of the partitions the app's slots are
+bound to, enables it and starts it; an app that is not running is started by that. The unit is wanted by those
+mounts and not by the start of the machine, so a disk that is away holds nothing up. Before each start the unit
+runs `slot ready <app>`, which exits 0 only when every slot of the app is `ok` and its overlay gives exactly the
+folders that are bound now. A stop by the unit stops the app's containers and removes nothing. `slot gate`
+refuses, and changes nothing: an app that declares no slot, an app that is not deployed on this machine, an app
+that `slot ready` would not start, an app that hosts a dataset (the unit of the dataset starts and stops it
+already), and a unit of that name it did not write. `slot ungate` removes the unit and leaves the app as it is,
+running or not. `isle app undeploy` does that first. When a slot was bound to another partition since,
+`slot list` and `slot check` say that the unit is out of date and name the command; `slot check` does not fail
+for it. Without the unit, a partition that is unmounted under a running app leaves the app running on a folder
+that is gone; `partition unmount` names the slots bound to the partition and asks for `--with-datasets`. Limits:
+no app is gated by an install or a deploy, the verb is typed once per app; a partition that is mounted by hand
+(not by its mount unit being started) does not start the app again, `sudo isle storage slot gate <app>` does;
+and the unit has run only against a made-up `systemctl` in the tests, on no machine yet.
 
 These records describe one machine, and each machine keeps its own. With `--isle`, `role list` and `role show`
 print what every machine of the isle reported, side by side, from any machine: each machine adds its partitions
@@ -875,7 +893,7 @@ cannot read. It is a report, not a check: whether a partition is really there is
 The roles are not yet part of the core's placement record, and no verb reads a role to decide where data goes.
 Not built: adding a partition to a partition table that is there.
 Tests: `python3 isle-cli/scripts/test-storage-roles.py`, `test-storage-retire.py`, `test-storage-health.py`, `test-storage-create.py`,
-`test-storage-mounting.py`, `test-storage-kinds.py`, `test-storage-slots.py`, `test-storage-slot-start.py`, `test-storage-isle.py` and `test-storage-devices.py` (fixtures; `systemctl` is never started by them; `test-storage-create.py` also runs the real `sfdisk`, `blkid` and
+`test-storage-mounting.py`, `test-storage-kinds.py`, `test-storage-slots.py`, `test-storage-slot-start.py`, `test-storage-slot-gate.py`, `test-storage-isle.py` and `test-storage-devices.py` (fixtures; `systemctl` is never started by them; `test-storage-create.py` also runs the real `sfdisk`, `blkid` and
 `mkfs.ext4` on image files it makes in a temporary folder, and never on a device).
 
 ### Storage migration contract (stm-1)
