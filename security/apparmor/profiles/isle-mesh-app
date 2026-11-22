@@ -22,7 +22,7 @@ profile isle-mesh-app /usr/bin/isle-manager-app flags=(complain) {
   #include if exists <local/isle-mesh-app>
 
   # Isle-Mesh base rules
-  include "/home/detts/Isle-Mesh/security/apparmor/abstractions/isle-mesh-base"
+  include <abstractions/isle-mesh-base>
 
   # --- Java runtime ---
   /usr/lib/jvm/**                       r,

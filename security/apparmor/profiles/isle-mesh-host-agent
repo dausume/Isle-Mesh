@@ -20,7 +20,7 @@ profile isle-mesh-host-agent /usr/local/bin/isle-mesh/isle-host-agent-relay.sh f
   #include if exists <local/isle-mesh-host-agent>
 
   # Isle-Mesh base rules
-  include "/home/detts/Isle-Mesh/security/apparmor/abstractions/isle-mesh-base"
+  include <abstractions/isle-mesh-base>
 
   # --- Filesystem: read ---
   /etc/isle-mesh/agent/                 r,

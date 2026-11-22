@@ -6,7 +6,7 @@
 
 set -e
 
-PROJECT_ROOT="/home/detts/Isle-Mesh"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENT_DIR="${PROJECT_ROOT}/isle-agent"
 APP_DIR="${PROJECT_ROOT}/test-mesh-apps/local-agent-app"
 

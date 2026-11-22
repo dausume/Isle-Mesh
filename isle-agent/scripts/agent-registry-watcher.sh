@@ -20,7 +20,7 @@ NC='\033[0m'
 
 # Configuration
 AGENT_REGISTRY="${AGENT_REGISTRY:-/etc/isle-mesh/agent/registry.json}"
-SYNC_SCRIPT="${SYNC_SCRIPT:-/home/detts/Isle-Mesh/isle-agent/scripts/sync-lh-mdns-and-agent-registry.sh}"
+SYNC_SCRIPT="${SYNC_SCRIPT:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/sync-lh-mdns-and-agent-registry.sh}"
 WATCH_INTERVAL="${WATCH_INTERVAL:-5}"
 USE_INOTIFY="${USE_INOTIFY:-auto}"
 
@@ -198,7 +198,7 @@ ${BOLD}Environment Variables:${NC}
                          (default: /etc/isle-mesh/agent/registry.json)
 
   SYNC_SCRIPT            Path to sync script
-                         (default: /home/detts/Isle-Mesh/isle-agent/scripts/sync-lh-mdns-and-agent-registry.sh)
+                         (default: sync-lh-mdns-and-agent-registry.sh beside this script)
 
   WATCH_INTERVAL         Polling interval in seconds (default: 5)
 

@@ -1,5 +1,5 @@
 # AppArmor profile for router setup scripts
-# Binary: /home/detts/Isle-Mesh/openwrt-router/scripts/setup-isle-mesh-router.sh
+# Binary: /usr/share/isle-mesh/openwrt-router/scripts/setup-isle-mesh-router.sh
 #         (and child scripts sourced from router-init-lib/, isle-vlan-router-config-lib/)
 #
 # Purpose: Initial router VM provisioning - creates bridges, starts VM,
@@ -17,18 +17,18 @@
 
 #include <tunables/global>
 
-profile isle-mesh-router-setup /home/detts/Isle-Mesh/openwrt-router/scripts/setup-isle-mesh-router.sh flags=(complain) {
+profile isle-mesh-router-setup /usr/share/isle-mesh/openwrt-router/scripts/setup-isle-mesh-router.sh flags=(complain) {
   #include <abstractions/base>
   #include <abstractions/bash>
   #include <abstractions/nameservice>
   #include if exists <local/isle-mesh-router-setup>
 
   # Isle-Mesh base rules
-  include "/home/detts/Isle-Mesh/security/apparmor/abstractions/isle-mesh-base"
+  include <abstractions/isle-mesh-base>
 
   # --- Filesystem: project source (read-only) ---
-  /home/detts/Isle-Mesh/openwrt-router/**   r,
-  /home/detts/Isle-Mesh/config/**           r,
+  /usr/share/isle-mesh/openwrt-router/**   r,
+  /usr/share/isle-mesh/config/**           r,
 
   # --- Filesystem: isle-mesh config ---
   /etc/isle-mesh/                           r,

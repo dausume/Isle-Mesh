@@ -26,7 +26,7 @@ profile isle-mesh-cli /usr/local/bin/isle flags=(complain) {
   #include if exists <local/isle-mesh-cli>
 
   # Isle-Mesh base rules
-  include "/home/detts/Isle-Mesh/security/apparmor/abstractions/isle-mesh-base"
+  include <abstractions/isle-mesh-base>
 
   # --- Filesystem: isle-mesh config (full access) ---
   /etc/isle-mesh/                       r,

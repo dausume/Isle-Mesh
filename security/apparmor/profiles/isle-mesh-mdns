@@ -21,7 +21,7 @@ profile isle-mesh-mdns /usr/local/bin/isle-mesh/mesh-mdns-broadcast.sh flags=(co
   #include if exists <local/isle-mesh-mdns>
 
   # Isle-Mesh base rules
-  include "/home/detts/Isle-Mesh/security/apparmor/abstractions/isle-mesh-base"
+  include <abstractions/isle-mesh-base>
 
   # --- Filesystem: read-only ---
   /usr/local/etc/mesh-mdns.conf             r,
