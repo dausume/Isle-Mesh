@@ -36,6 +36,9 @@ def _publish(source, repo):
     source=Path(source).resolve();m=json.loads(source.read_text());m=copy.deepcopy(m)
     if m.get('schemaVersion')!=1 or not NAME.fullmatch(m.get('name','')) or not re.fullmatch(r'[a-zA-Z0-9.+_-]{1,80}',m.get('version','')):raise ValueError('Invalid release identity')
     validate_path(m.get('health',{'path':'/'}).get('path'))
+    if 'storageSlots' in m:   # a release whose storage slots cannot be read is not published
+        from storage_slots import declared
+        declared(m['storageSlots'])
     destination=repo/'catalog'/m['name']/m['version'];destination.mkdir(parents=True,exist_ok=True)
     def asset(d):return publish_asset(d,source.parent,destination,repo)
     for image in m['images']:

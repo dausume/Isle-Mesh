@@ -131,6 +131,15 @@ if [ -n "$BIND_PATH" ]; then
         || die "storage check failed for dataset $DATASET; refusing to start $NAME: $(python3 "$SCRIPT_DIR/storage_cli.py" check "${CHECK_ARGS[@]}" 2>&1 | head -c 600)"
 fi
 
+# ---- storage slots: an app whose release declares storage slots is started only when every slot is bound and its
+# partition is there (isle storage slot check).  The overlay then gives each slot's folder to its service.
+SLOTS=0
+if [ -e "$APPS_DIR/$NAME/storage-slots.json" ] || [ -L "$APPS_DIR/$NAME/storage-slots.json" ]; then
+    SLOTS=1
+    python3 "$SCRIPT_DIR/storage_roles.py" slot check --app "$NAME" --table >/dev/null \
+        || die "the storage slots of $NAME are not ready; refusing to start it: $(python3 "$SCRIPT_DIR/storage_roles.py" slot check --app "$NAME" --table 2>&1 | tail -n 4 | head -c 900)"
+fi
+
 echo "deploying '$NAME' -> https://$DOMAIN (service $SERVICE:$PORT, ${#SERVICES[@]} service(s))"
 
 sudo python3 "$SCRIPT_DIR/member_preflight.py" --hosting --migrate || die "membership/hosting preflight failed"
@@ -159,6 +168,7 @@ sudo mkdir -p "$APPS_DIR/$NAME"
 sudo cp "$COMPOSE" "$APPS_DIR/$NAME/docker-compose.yml"
 OVERLAY_ARGS=()
 [ -z "$BIND_PATH" ] || OVERLAY_ARGS=(--service "$SERVICE" --bind-path "$BIND_PATH")
+[ "$SLOTS" != 1 ] || OVERLAY_ARGS+=(--service "$SERVICE" --slots-of "$NAME")
 python3 "$SCRIPT_DIR/app_overlay.py" "$COMPOSE" "${OVERLAY_ARGS[@]+"${OVERLAY_ARGS[@]}"}" \
     | sudo tee "$APPS_DIR/$NAME/isle-overlay.yml" > /dev/null || die "overlay generation failed"
 [ "${PIPESTATUS[0]}" = 0 ] || die "overlay generation failed"

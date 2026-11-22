@@ -63,6 +63,9 @@ def validate_manifest(m):
         if not isinstance(d['domain'],str) or not isinstance(d['parent'],str) or not NAME.fullmatch(d['parent']) or not DOMAIN.fullmatch(d['domain']):raise ValueError('Invalid deploy.domain/deploy.parent')
     path=m.get('health',{'path':'/'}).get('path')
     validate_path(path)
+    if 'storageSlots' in m:   # the storage slots of the release (isle storage slot): refused here, before anything is fetched
+        from storage_slots import declared
+        declared(m['storageSlots'])
     for image in m['images']:
         ref=image['ref']
         if not isinstance(ref,str) or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_./:@-]{0,255}',ref):raise ValueError('Invalid image reference')
@@ -97,6 +100,8 @@ def prepare(release, expected_name, instance=None):
     services=config.get('services',{})
     if not services or any('build' in v for v in services.values()):raise ValueError('Published compose must use release images, not source builds')
     if m['deploy']['service'] not in services:raise ValueError('Release ingress service missing from Compose')
+    for slot in m.get('storageSlots',[]):
+        if (slot.get('service') or m['deploy']['service']) not in services:raise ValueError('Storage slot '+slot['name']+' names a service missing from Compose')
     declared={i['ref']:i for i in m['images']}
     if len(declared)!=len(m['images']) or any(v.get('image') not in declared for v in services.values()):raise ValueError('Every service image must have an artifact identity')
     admitted={}
@@ -114,6 +119,11 @@ def prepare(release, expected_name, instance=None):
     return m,directory/'resolved.json'
 
 BIND=re.compile(r'[A-Z][A-Z0-9_]{0,63}=/[A-Za-z0-9_.+@:/-]*\Z')
+
+def declare_slots(instance,listed):
+    """Keep the storage slots the release declares and refuse, before any deploy, an app that cannot be given them."""
+    import storage_roles,storage_slot_start
+    return storage_slot_start.at_install(storage_roles.Io(),instance,listed)
 
 def install(catalog,instance,staged=False,binds=(),dataset=None,served=None):
     if os.geteuid()!=0:raise PermissionError('Use sudo isle store install')
@@ -147,6 +157,7 @@ def install(catalog,instance,staged=False,binds=(),dataset=None,served=None):
     if dataset:
         if not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,63}',dataset):raise ValueError('Invalid --dataset value')
         args+=['--dataset',dataset]
+    declare_slots(instance,m.get('storageSlots'))
     stage(ident,'deploying-verified-release')
     result=subprocess.run(args).returncode
     installed=Path('/etc/isle-mesh/apps')/instance

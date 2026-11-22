@@ -847,8 +847,21 @@ second copy yet: `copies: 2` is recorded and said, no more.
 state: `ok`, `not bound`, `not declared`, `declaration cannot be read`, `partition away`,
 `partition needs attention`, `role taken away`, `declared with another role`, `folder missing` or
 `mounted read-only`. `slot check` shows the same and exits 1 unless every slot (of one app, with `--app`) is
-`ok`. `partition retire` refuses to take a role away while a slot is bound under it. Nothing starts an app with
-its slots yet: these verbs record and check, and the app's start does not read them.
+`ok`. `partition retire` refuses to take a role away while a slot is bound under it.
+
+An app that declares slots is started only with them. `isle store publish` refuses a release whose `storageSlots`
+cannot be read, and `isle store install` refuses one that names a service its compose file lacks. An install
+keeps what the release declares (as `slot declare` does) and then, before anything is deployed, refuses unless
+every slot is `ok`. On the first install of such an app that is a refusal: the list is kept, so type
+`sudo isle storage slot bind <app> <slot> --partition <filesystem-identifier>` for each slot and install again.
+No partition is chosen for a slot by the CLI. `isle app deploy` runs `slot check --app <app>` before it writes or
+starts anything, and the app's overlay then gives each slot's folder to its service at `target`, read-only unless
+the slot is `writable`; Docker is told never to make a missing folder. Two folders at one place in one service
+are refused. `isle reconcile` does not restart an app whose slots are not all `ok`, or whose overlay does not give
+exactly the folders that are bound now: deploy or install it again. An app without `storage-slots.json` is
+started as before. Not built: a unit that stops the app when its partition goes away and starts it when it
+returns; until then a partition that is unmounted under a running app leaves the app running on a folder that
+is gone; `partition unmount` names the slots bound to the partition and asks for `--with-datasets`.
 
 These records describe one machine, and each machine keeps its own. With `--isle`, `role list` and `role show`
 print what every machine of the isle reported, side by side, from any machine: each machine adds its partitions
@@ -862,7 +875,7 @@ cannot read. It is a report, not a check: whether a partition is really there is
 The roles are not yet part of the core's placement record, and no verb reads a role to decide where data goes.
 Not built: adding a partition to a partition table that is there.
 Tests: `python3 isle-cli/scripts/test-storage-roles.py`, `test-storage-retire.py`, `test-storage-health.py`, `test-storage-create.py`,
-`test-storage-mounting.py`, `test-storage-isle.py` and `test-storage-devices.py` (fixtures; `systemctl` is never started by them; `test-storage-create.py` also runs the real `sfdisk`, `blkid` and
+`test-storage-mounting.py`, `test-storage-kinds.py`, `test-storage-slots.py`, `test-storage-slot-start.py`, `test-storage-isle.py` and `test-storage-devices.py` (fixtures; `systemctl` is never started by them; `test-storage-create.py` also runs the real `sfdisk`, `blkid` and
 `mkfs.ext4` on image files it makes in a temporary folder, and never on a device).
 
 ### Storage migration contract (stm-1)

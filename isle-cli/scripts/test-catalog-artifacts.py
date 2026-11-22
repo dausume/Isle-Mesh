@@ -119,21 +119,22 @@ class Artifacts(unittest.TestCase):
   for extra in (dict(domain='x',parent='alpha'),dict(domain='twin.alpha.isle',parent='Bad'),dict(domain=5,parent='alpha')):
    m=dict(deploy=dict(service='web',port=80),images=[]);m['deploy'].update(extra)
    with self.assertRaises(ValueError):artifacts.validate_manifest(m)
- def install_domain(self,deploy,registry,instance,served=None,name='twin-board-engines',health=None,staged=False):
-  m=dict(name=name,version='v1',deploy=dict(service='web',port=80,**deploy),**({'health':health} if health else {}));calls=[]
+ def install_domain(self,deploy,registry,instance,served=None,name='twin-board-engines',health=None,staged=False,slots=None,declare=None):
+  m=dict(name=name,version='v1',deploy=dict(service='web',port=80,**deploy),**({'health':health} if health else {}),**({'storageSlots':slots} if slots is not None else {}));calls=self.calls=[]
   reg=self.root/'registry.json';reg.write_text(json.dumps({'apps':registry}))
   real=artifacts.Path
   class P(type(real())):
    def __new__(cls,*a):return real(str(reg)) if a==('/etc/isle-mesh/agent/registry.json',) else real(*a)
   catalog=self.root/'catalog.json';catalog.write_text(json.dumps({'entry':{'name':name,'install_plan':{'release':{'sha256':'a'*64}}}}))
   def run(argv,**kw):calls.append(argv);return subprocess.CompletedProcess(argv,0)
-  with patch.object(artifacts,'Path',P),patch.object(artifacts.os,'geteuid',return_value=0),patch.dict(os.environ,ISLE_OPERATION_ID='a'*32,ISLE_OPERATION_DIR=str(self.root)),patch.object(artifacts,'stage'),patch.object(artifacts,'atomic'),patch.object(artifacts,'wait_ready',return_value=0),patch.object(artifacts,'prepare',return_value=(m,self.root/'c.yml')),patch.object(artifacts.subprocess,'run',side_effect=run):
+  def slots_of(*a):calls.append(('slots',)+a);return (declare or (lambda *a:[]))(*a)   # never the records of this machine
+  with patch.object(artifacts,'declare_slots',side_effect=slots_of),patch.object(artifacts,'Path',P),patch.object(artifacts.os,'geteuid',return_value=0),patch.dict(os.environ,ISLE_OPERATION_ID='a'*32,ISLE_OPERATION_DIR=str(self.root)),patch.object(artifacts,'stage'),patch.object(artifacts,'atomic'),patch.object(artifacts,'wait_ready',return_value=0),patch.object(artifacts,'prepare',return_value=(m,self.root/'c.yml')),patch.object(artifacts.subprocess,'run',side_effect=run):
    code=artifacts.install(catalog,instance,served=served,staged=staged)
   return code,calls
  def test_install_domain_precedence(self):
   parent={'board-engines':{'domain':'board-engines.isle'}}
   decl=dict(domain='twin.board-engines.isle',parent='board-engines')
-  def used(calls):return calls[0][calls[0].index('--domain')+1]
+  def used(calls):return calls[-1][calls[-1].index('--domain')+1]
   _,c=self.install_domain(decl,parent,'twin-board-engines');self.assertEqual(used(c),'twin.board-engines.isle')
   _,c=self.install_domain(decl,parent,'twin-board-engines',served='apt.isle');self.assertEqual(used(c),'apt.isle')
   _,c=self.install_domain(decl,{},'twin-board-engines',served='apt.isle');self.assertEqual(used(c),'apt.isle')  # served skips the parent rule
@@ -143,12 +144,53 @@ class Artifacts(unittest.TestCase):
   _,c=self.install_domain({},{'twin-board-engines':{'domain':'old.isle'}},'twin-board-engines');self.assertEqual(used(c),'old.isle')
   _,c=self.install_domain({},{},'twin-board-engines');self.assertEqual(used(c),'twin-board-engines.isle')
   _,c=self.install_domain({},{},'twin-board-engines-2');self.assertEqual(used(c),'twin-board-engines-2.isle')
+ SLOT=dict(name='projects',role='assets',target='/home/app/projects',writable=True)
+ def test_install_keeps_the_storage_slots_before_it_deploys(self):
+  code,calls=self.install_domain({},{},'alpha',name='alpha',slots=[self.SLOT])
+  self.assertEqual(code,0);self.assertEqual(calls[0],('slots','alpha',[self.SLOT]))
+  self.assertEqual(calls[1][:4],['bash',str(artifacts.SCRIPTS/'app.sh'),'deploy','alpha']);self.assertEqual(len(calls),2)
+  _,calls=self.install_domain({},{},'alpha-2',name='alpha',slots=[self.SLOT]);self.assertEqual(calls[0],('slots','alpha-2',[self.SLOT]))   # the slots are the instance's
+  _,calls=self.install_domain({},{},'alpha',name='alpha');self.assertEqual(calls[0],('slots','alpha',None))   # a release without the list: said as it is
+ def test_install_stops_before_any_deploy_when_a_slot_cannot_be_given(self):
+  def refuse(*a):raise ValueError('the storage slot projects of alpha cannot be used: not bound')
+  with self.assertRaisesRegex(ValueError,'cannot be used: not bound'):self.install_domain({},{},'alpha',name='alpha',slots=[self.SLOT],declare=refuse)
+  self.assertEqual(self.calls,[('slots','alpha',[self.SLOT])])   # no app.sh deploy, nothing started
+ def test_storage_slots_of_a_release_are_read_when_it_is_validated_and_published(self):
+  m=dict(deploy=dict(service='web',port=80),images=[],storageSlots=[self.SLOT]);artifacts.validate_manifest(m)
+  artifacts.validate_manifest(dict(m,storageSlots=[]))
+  artifacts.validate_manifest(dict(deploy=dict(service='web',port=80),images=[],storage=dict(bindParameter='ISLE_DATASET_PATH',mount='/data',readOnly=True)))   # the dataset bind of a hosting app is another key
+  for bad in ([dict(self.SLOT,role='attic')],[dict(self.SLOT,target='relative')],[self.SLOT,self.SLOT],dict(self.SLOT),None,'projects'):
+   with self.subTest(bad=bad):
+    with self.assertRaises(ValueError):artifacts.validate_manifest(dict(m,storageSlots=bad))
+    source,definition=self.fixture('alpha');source.write_text(json.dumps(dict(definition,storageSlots=bad)))
+    with patch('catalog_publish.publish_asset') as asset,patch('catalog_publish.verify_archive') as verify:
+     with self.assertRaises(ValueError):publish(source,self.root/'repo')
+     asset.assert_not_called();verify.assert_not_called()
+  source,definition=self.fixture('bravo');source.write_text(json.dumps(dict(definition,storageSlots=[self.SLOT])))
+  _,release=publish(source,self.root/'repo')
+  self.assertEqual(json.loads(next((self.root/'repo/catalog/bravo/v1').glob('*.json')).read_text())['storageSlots'],[self.SLOT])   # published as declared
+ def test_a_slot_for_a_service_the_compose_file_lacks_is_refused_before_any_image(self):
+  repo=self.root/'repo';loads=[]
+  def run(argv,**kw):
+   if argv[0]=='curl':
+    Path(argv[argv.index('--output')+1]).write_bytes((repo/argv[-1].split('https://apt.isle/',1)[1]).read_bytes());return subprocess.CompletedProcess(argv,0)
+   if argv[:2]==['docker','compose']:return subprocess.CompletedProcess(argv,0,json.dumps({'services':{'web':{'image':'example/alpha:v1'}}}))
+   loads.append(argv);return subprocess.CompletedProcess(argv,0,images['manifestDigest']+'\n')
+  for slot,words in ((dict(self.SLOT,service='editor'),'Storage slot projects names a service missing from Compose'),(dict(self.SLOT,service='web'),None),(self.SLOT,None)):
+   with self.subTest(slot=slot):
+    source,definition=self.fixture('alpha');images=definition['images'][0];source.write_text(json.dumps(dict(definition,storageSlots=[slot])))
+    _,release=publish(source,repo);loads.clear()
+    with patch.object(artifacts,'CACHE',self.root/'cache'),patch.object(artifacts.subprocess,'run',side_effect=run):
+     if words:
+      with self.assertRaisesRegex(ValueError,words):artifacts.prepare(release,'alpha')
+      self.assertEqual(loads,[])
+     else:self.assertEqual(artifacts.prepare(release,'alpha')[0]['storageSlots'],[slot])
  def test_staged_install_probes_the_release_health_path(self):
   # Storage fix-list item 5: the staged probe (app-deploy.sh, by --resolve) asks for the path the release declares.
   where='/.well-known/isle-storage/current'
-  def path(calls):return calls[0][calls[0].index('--health-path')+1]
+  def path(calls):return calls[-1][calls[-1].index('--health-path')+1]
   _,c=self.install_domain({},{},'isle-content-host',served='apt.isle',name='isle-content-host',health={'path':where},staged=True)
-  self.assertEqual(path(c),where);self.assertIn('--staged',c[0])
+  self.assertEqual(path(c),where);self.assertIn('--staged',c[-1])
   _,c=self.install_domain({},{},'isle-content-host',served='apt.isle',name='isle-content-host',staged=True)
   self.assertEqual(path(c),'/')   # a release that declares none is probed at /
   release=json.loads((Path(__file__).resolve().parent.parent/'releases'/'isle-content-host'/'release.json').read_text())

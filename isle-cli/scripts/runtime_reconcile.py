@@ -54,6 +54,13 @@ def storage_gate(directory,name):
         return 'storage check could not run for '+name+': '+str(e)
     return None if code==0 else 'storage check failed for dataset '+dataset+' (app '+name+'): '+json.dumps(found,sort_keys=True)
 
+def slot_gate(directory):
+    """An app that declares storage slots is never (re)started unless every slot is bound, its partition is there,
+    and its overlay gives the folders that are bound now.  Returns None when the app may start."""
+    if not (Path(directory)/'storage-slots.json').exists():return None
+    import storage_slot_start
+    return storage_slot_start.gate(directory)
+
 def reconcile(release,mode):
     rows=targets(release,mode)
     if not rows:return
@@ -68,7 +75,7 @@ def reconcile(release,mode):
         directory=Path(labels['com.docker.compose.project.working_dir'])
         files=[Path(p) for p in labels['com.docker.compose.project.config_files'].split(',')]
         if not re.fullmatch(r'[a-z0-9][a-z0-9_-]{0,127}',project) or not directory.is_dir() or not files or any(not p.is_absolute() or not p.is_file() for p in files):raise ValueError('Existing Compose deployment metadata is incomplete')
-        why=storage_gate(directory,name)
+        why=storage_gate(directory,name) or slot_gate(directory)
         if why:
             print('runtime reconcile: refusing to restart '+name+': '+why,file=sys.stderr);refused.append(name);continue
         overlay=OVERLAYS/(project+'.json');files=[p for p in files if p!=overlay]
