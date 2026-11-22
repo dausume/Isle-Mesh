@@ -219,10 +219,9 @@ def rebuild(io, out, src, agent, row, number, folder, log):
                                         archiveSha256=file_sha256(archive), archiveBytes=archive.stat().st_size)
 
 
-def build(io, out, src, release, number, log, folder=None, whole=False):
-    """Both agents, and the manifest of the release's runtime images in the packet.  -> (manifest or None, records).
-    None: both published images hold the commit's scripts already, and the packet publishes no runtime image."""
-    manifest, records, changed = copy.deepcopy(release), [], 0
+def rebuild_all(io, out, src, manifest, number, log, folder=None):
+    """Both agents, written into the manifest (changed in place).  -> (the records, how many images changed)."""
+    records, changed = [], 0
     for agent in AGENTS:
         rows = manifest['runtimes'][agent['mode']]
         at = next(i for i, row in enumerate(rows) if row['container'] == agent['container'])
@@ -230,7 +229,11 @@ def build(io, out, src, release, number, log, folder=None, whole=False):
         row, record = rebuild(io, out, src, agent, rows[at], number, folder, log)
         records.append(record)
         if row is not None: rows[at] = row; changed += 1
-    if not changed: return None, records
+    return records, changed
+
+
+def finish(io, out, manifest, folder=None, whole=False):
+    """The manifest of the release's runtime images, into the packet."""
     if whole:        # for a core whose CLI does not read a row that names the published file
         for rows in manifest['runtimes'].values():
             for row in rows:
@@ -242,4 +245,12 @@ def build(io, out, src, release, number, log, folder=None, whole=False):
                     shutil.copyfile(published_archive(io, out, row, folder), target)
                 row['image']['archive'] = {'source': 'images/' + target.name}
     (out / 'packet' / MANIFEST).write_text(json.dumps(manifest, indent=1) + '\n')
-    return manifest, records
+    return manifest
+
+
+def build(io, out, src, release, number, log, folder=None, whole=False):
+    """Both agents, and the manifest of the release's runtime images in the packet.  -> (manifest or None, records).
+    None: both published images hold the commit's scripts already, and the packet publishes no runtime image."""
+    manifest = copy.deepcopy(release)
+    records, changed = rebuild_all(io, out, src, manifest, number, log, folder)
+    return (finish(io, out, manifest, folder, whole) if changed else None), records

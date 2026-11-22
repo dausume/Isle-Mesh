@@ -3,7 +3,8 @@
 
   isle release build <out-dir> --previous <dir> [--source <checkout>] [--commit <ref>] [--combined-builder <file>]
                      [--dependencies <set dir>] [--device <name>]... [--verify <url>]... [--backup]
-                     [--agents [--all-images] [--runtime-archives <dir>]]
+                     [--agents] [--runtime-image <container>=<image>]... [--all-images] [--runtime-archives <dir>]
+                     [--module-add <device>:<instance>:<module>]...
   isle release build <out-dir> --dependencies <set dir> [--device <name>]... [--verify <url>]...
 
   <out-dir>            made by this command; it must not exist yet, or be empty
@@ -30,12 +31,22 @@
                        holds those scripts; nothing is downloaded from outside the isle (agent_images.py says how,
                        and when an image has to be built whole instead).  Docker on this machine builds them, and
                        keeps what it loaded and built.  An image whose scripts are the commit's already is left out
-  --all-images         with --agents: the packet carries the archive of EVERY runtime image the core publishes,
+  --runtime-image <container>=<image>
+                       the packet carries this image, which Docker on this machine holds, as the image of a runtime
+                       container the core's release names (the Polari backend and frontend: prf-isle-backend,
+                       prf-isle-frontend; `pol build image` makes them).  It is taken as it is (named_images.py).
+                       Each device starts that container again from it with its update, and a Polari instance on a
+                       member follows on that member's update
+  --module-add <device>:<instance>:<module>
+                       after its update, the device adds the module to its Polari instance (`isle polari module
+                       add <module> --to <instance>`, recorded so that it stays through later updates).  The run
+                       stops on that device when the module is not recorded afterwards
+  --all-images         with --agents or --runtime-image: the packet carries the archive of EVERY runtime image the core publishes,
                        also the ones this release does not change.  Without it the packet names those by the file
                        the core publishes already, which a core reads from the release after 91 on; an older core
                        refuses such a packet as a whole
   --runtime-archives <dir>
-                       with --agents: a folder that holds runtime images as the core publishes them, each named
+                       with --agents or --runtime-image: a folder that holds runtime images as the core publishes them, each named
                        <sha256>.tar (on the core: /etc/isle-mesh/apt/repo/runtime; a copy of it serves as well).
                        An image that is needed and not in Docker here is taken from it, and from the core only
                        when the folder does not hold it
@@ -47,11 +58,12 @@ It leaves in <out-dir>:
   build.json   what was built from what: the commit, the versions, every checksum
   build.log    what the builders printed
 (a packet that holds only a dependency set: packet/ and build.json)
-Nothing is installed, published or sent, and nothing needs sudo.  Without --agents a core is not asked anything;
-with it the build reads the list of runtime images the core serves, and fetches from the core an image it needs
-and finds neither in Docker here nor in --runtime-archives.
+Nothing is installed, published or sent, and nothing needs sudo.  Without --agents and --runtime-image a core is
+not asked anything; with one of them the build reads the list of runtime images the core serves, and fetches from the
+core an image it needs and finds neither in Docker here nor in --runtime-archives.
 """
 from datetime import datetime, timezone
+import copy
 import json
 import os
 from pathlib import Path
@@ -65,6 +77,7 @@ SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS))
 import release_run as rr
 import agent_images
+import named_images
 from agent_images import Refused        # one kind of refusal for the whole build
 
 VERSION = re.compile(r'(\d+)\.(\d+)\.(\d+)\+release(\d+)\Z')
@@ -226,7 +239,23 @@ def set_record(pk, chosen):
             'bytes': chosen['bytes'], 'sha256': pk.files[chosen['dir'] + '/']}
 
 
-def plan(io, previous, source, commit, builder, devices, verify, backup, chosen=None):
+def module_steps(values, devices):
+    """['device:instance:module', ...] -> {device: [the module-add steps]}; a device the packet does not name is refused."""
+    out = {}
+    for value in values:
+        parts = value.split(':')
+        if len(parts) != 3 or not all(rr.NAME.fullmatch(part) for part in parts):
+            raise Refused('--module-add wants <device>:<instance>:<module>, not %r' % value)
+        device, instance, module = parts
+        if devices and device not in devices:
+            raise Refused('--module-add names the device %s, which this packet does not name (--device %s)' % (device, device))
+        step = {'verb': 'module-add', 'instance': instance, 'module': module}
+        if step in out.get(device, []): raise Refused('--module-add says %s twice' % value)
+        out.setdefault(device, []).append(step)
+    return out
+
+
+def plan(io, previous, source, commit, builder, devices, verify, backup, chosen=None, modules=()):
     """Everything that can refuse, before anything is written.  Returns what the build does."""
     members = previous_members(io, previous)
     cli, number = next_version(field(io, members[CLI], 'Version'), CLI)
@@ -247,7 +276,9 @@ def plan(io, previous, source, commit, builder, devices, verify, backup, chosen=
     served = VERIFY + (('https://apt.isle/deps/%s/InRelease' % chosen['release'],) if chosen else ())
     doc = {'schemaVersion': 1, 'name': 'cli-release-%d' % number,
            'publish': [{'kind': 'debs', 'dir': 'debs'}] + ([{'kind': 'dependencies', 'dir': chosen['dir']}] if chosen else []),
-           'devices': {name: steps for name in (devices or ['*'])}, 'verify': checks(served, verify)}
+           'devices': {name: list(steps) for name in (devices or ['*'])}, 'verify': checks(served, verify)}
+    for device, more in module_steps(modules, devices).items():        # a run gives a device the steps of "*" and then its own
+        doc['devices'].setdefault(device, []).extend(more)
     rr.validate_doc(doc)
     return {'number': number, 'cli': cli, 'store': store, 'commit': sha.strip(), 'members': members, 'doc': doc, 'set': chosen,
             'uncommitted': len([line for line in changed.splitlines() if line.strip()]) if status == 0 else None}
@@ -307,15 +338,22 @@ def build(io, out, source, builder, p):
         if wrong: raise Refused('%s does not hold the commit: %d of %d files differ or are missing (first: %s)'
                                 % (built[name][0].name, len(wrong), len(names), wrong[0]))
     for name in (CLI, STORE, COMBINED): shutil.copy2(built[name][0], packet / 'debs' / built[name][0].name)
-    wanted = p.get('agents')
-    if wanted:
-        manifest, wanted['made'] = agent_images.build(io, out, src, wanted['release'], p['number'], log, wanted['folder'], wanted['whole'])
-        if manifest is not None: p['doc']['publish'].append({'kind': 'runtime', 'manifest': agent_images.MANIFEST})
+    wanted, images = p.get('agents'), p.get('images')
+    if images:
+        manifest, changed = copy.deepcopy(images['release']), 0
+        if wanted is not None: wanted['made'], changed = agent_images.rebuild_all(io, out, src, manifest, p['number'], log, images['folder'])
+        if images['named']:
+            images['made'] = named_images.place(io, out, manifest, images['named'], log)
+            changed += len([made for made in images['made'] if not made['kept']])
+        if changed:
+            agent_images.finish(io, out, manifest, images['folder'], images['whole'])
+            p['doc']['publish'].append({'kind': 'runtime', 'manifest': agent_images.MANIFEST})
     if p['set']: io.say('  the dependency set of %s, as it is in %s' % (p['set']['system'], p['set']['folder']))
     pk = pack(packet, p['doc'], p['set'])
     record = {'schemaVersion': 1, 'release': p['number'], 'runId': pk.run_id, 'builtAt': io.now(),
               **({'dependencySet': set_record(pk, p['set'])} if p['set'] else {}),
-              **({'agentImages': wanted['made']} if wanted else {}),
+              **({'agentImages': wanted['made']} if wanted is not None else {}),
+              **({'namedImages': images['made']} if images and images['named'] else {}),
               'source': {'commit': p['commit'], 'uncommittedFilesLeftOut': p['uncommitted'], 'comparedFiles': len(names)},
               'combinedBuilder': {'file': builder.name, 'sha256': rr.sha256_file(builder)},
               'packages': [{'name': name, 'version': field(io, deb, 'Version'), 'file': deb.name, 'sha256': rr.sha256_file(deb),
@@ -328,7 +366,7 @@ def build(io, out, source, builder, p):
 def parse(argv):
     one = {'--previous': None, '--source': None, '--commit': None, '--combined-builder': None, '--dependencies': None,
            '--runtime-archives': None}
-    many = {'--device': [], '--verify': []}
+    many = {'--device': [], '--verify': [], '--runtime-image': [], '--module-add': []}
     flags, rest, i = set(), [], 0
     while i < len(argv):
         word = argv[i]
@@ -344,12 +382,13 @@ def parse(argv):
     if len(rest) != 1 or not (one['--previous'] or one['--dependencies']):
         raise ValueError('one <out-dir> is needed, and --previous <dir> (a release) or --dependencies <set dir> (a set alone)')
     if not one['--previous']:
-        said = sorted(flags | {word for word in ('--source', '--commit', '--combined-builder', '--runtime-archives') if one[word]})
+        said = sorted(flags | {word for word in ('--source', '--commit', '--combined-builder', '--runtime-archives') if one[word]}
+                      | {word for word in ('--runtime-image', '--module-add') if many[word]})
         if said: raise ValueError('%s is for a release, which needs --previous <dir>; a packet that holds only a dependency '
                                   'set builds no package and has no step for a device' % ', '.join(said))
-    if '--agents' not in flags:
+    if '--agents' not in flags and not many['--runtime-image']:
         said = sorted(({'--all-images'} & flags) | ({'--runtime-archives'} if one['--runtime-archives'] else set()))
-        if said: raise ValueError('%s is about the agent images, which a build makes with --agents' % ', '.join(said))
+        if said: raise ValueError('%s is about the runtime images, which a build makes with --agents or takes with --runtime-image' % ', '.join(said))
     return rest[0], one, many, flags
 
 
@@ -370,10 +409,13 @@ def main(argv, io=None):
             started = True
             return only_a_set(io, out, chosen, doc, many['--device'])
         p = plan(io, Path(os.path.abspath(one['--previous'])), source, one['--commit'] or 'HEAD', builder,
-                 many['--device'], many['--verify'], '--backup' in flags, chosen)
-        if '--agents' in flags:
+                 many['--device'], many['--verify'], '--backup' in flags, chosen, many['--module-add'])
+        if '--agents' in flags or many['--runtime-image']:
             folder = Path(os.path.abspath(one['--runtime-archives'])) if one['--runtime-archives'] else None
-            p['agents'] = {'release': agent_images.prepare(io, folder), 'folder': folder, 'whole': '--all-images' in flags}
+            release = agent_images.prepare(io, folder)
+            p['images'] = {'release': release, 'folder': folder, 'whole': '--all-images' in flags,
+                           'named': named_images.parse(io, many['--runtime-image'], release)}
+            if '--agents' in flags: p['agents'] = {}
         io.say('Release %d from the commit %s:' % (p['number'], p['commit'][:12]))
         if p['uncommitted']:
             io.say('  NOT in this build: %d changed or new files in the checkout that are not committed.' % p['uncommitted'])
@@ -394,20 +436,38 @@ def main(argv, io=None):
     if '--backup' not in flags:
         io.say('No device takes a device-backup in this run (build with --backup to have each one take it first).')
     if p['set']: set_words(io, p['set'])
-    if p.get('agents'): agent_words(io, out, p['agents'], pk)
+    if p.get('images'): image_words(io, p, pk)
+    module_words(io, p['doc'])
     io.say('It is built only: nothing is published or installed. To run it, on the core:')
     io.say('  sudo isle release run <the folder packet, copied there> --expect %s' % pk.run_id)
     io.say('The next build: isle release build <out-dir> --previous %s' % (out / 'members'))
     return 0
 
 
-def agent_words(io, out, wanted, pk):
-    for made in wanted['made']:
+def module_words(io, doc):
+    for device, steps in sorted(doc['devices'].items()):
+        for step in steps:
+            if step['verb'] == 'module-add':
+                io.say('After its update, %s adds the module %s to its Polari instance %s.' % (device, step['module'], step['instance']))
+
+
+def image_words(io, p, pk):
+    for made in (p.get('agents') or {}).get('made', []):
         if made['kept']:
             io.say('The image of %s holds the agent scripts of the commit already (%s). The release leaves it as it is.' % (made['container'], made['ref']))
         else:
             io.say('The image of %s: %s. It is %s and one layer more, with %d files of the commit; %d MiB in the packet.'
                    % (made['container'], made['ref'], made['builtFrom']['ref'], len(made['files']), made['archiveBytes'] >> 20))
+    for made in p['images'].get('made', []):
+        if made['kept']:
+            io.say('The image of %s: %s is the image the core publishes already. The release leaves it as it is.' % (made['container'], made['ref']))
+        else:
+            same = made['sharedLayers']
+            io.say('The image of %s: %s, taken as Docker here holds it (%s; %s); %d MiB in the packet. It replaces %s.'
+                   % (made['container'], made['ref'], made['configDigest'][:19],
+                      'the published image is not in Docker here, so what it shares with it is not known' if same is None
+                      else '%d of its %d layers are the published image\'s' % (same, made['layers']),
+                      made['archiveBytes'] >> 20, made['replaces']['ref']))
     runtime = [pub for pub in pk.publications if pub['kind'] == 'runtime']
     if not runtime:
         io.say('So the packet publishes no runtime image, and no agent is started again by this release.'); return
@@ -423,6 +483,9 @@ def agent_words(io, out, wanted, pk):
                'it keeps its runs.' % (carried >> 20, rr.Deps.copy_reserve >> 20))
     io.say('The core publishes them as a step of the run (isle update publish-runtime), and each device takes its own with its '
            'update: its agent is started again from the new image.')
+    if any(not made['kept'] for made in p['images'].get('made', [])):
+        io.say('A container whose image was named is started again from it on the core, and every Polari instance of a member is '
+               'put onto the new backend and frontend by that member\'s update, with the modules its record names.')
     io.say('Docker on this machine keeps the images this build loaded and built (docker image ls).')
 
 

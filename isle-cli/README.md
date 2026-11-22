@@ -461,8 +461,18 @@ publishes and installs nothing. It asks no core anything unless `--agents` is gi
 - In the run the core publishes the images (`isle update publish-runtime`, before the packages), and each device
   loads its own with its update and starts its agent again from it. Every release that changes the scripts adds one
   small layer to the image; building the image whole starts again.
-- Tests: `python3 isle-cli/scripts/test-agent-images.py` and `test-runtime-publish.py` (a made-up Docker and core;
-  no Docker, no network).
+- `--runtime-image <container>=<image>` puts an image that was built elsewhere into the release, as the image of
+  a runtime container the core's release names: Polari's backend and frontend (`prf-isle-backend`,
+  `prf-isle-frontend`), which `pol build image backend|frontend` makes from a commit with the network off. Docker
+  on the build machine holds it under the name given; the build saves it into the packet as it is. It is refused
+  when Docker does not hold it, when it is for another platform, and when the name is the one the core publishes
+  already with other contents. In the run the core starts that container again from it, and every Polari
+  instance of a member moves onto it with that member's update, with the modules its record names. It goes
+  with `--agents` or without, and `--all-images` and `--runtime-archives` mean the same for it.
+- `--module-add <device>:<instance>:<module>` gives one device a step after its update: add the module to its
+  Polari instance (`isle polari module add <module> --to <instance>`), recorded so that later updates keep it.
+- Tests: `python3 isle-cli/scripts/test-agent-images.py`, `test-named-images.py` and `test-runtime-publish.py`
+  (a made-up Docker and core; no Docker, no network).
 
 The second form builds a packet that holds one dependency set and no package of the isle. Nothing is built for
 it: the set is checked and copied into the packet. `--dependencies <set dir>` can also be added to the first form,

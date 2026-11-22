@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Announce local engine declarations and sync core registry to local providers."""
-import json, re, subprocess, sys
+import json, re, subprocess, sys, time
 from pathlib import Path
 from urllib.parse import urlsplit
 from member_preflight import identity
@@ -12,7 +12,8 @@ def origin(url):
     if u.scheme!='https' or not (u.hostname or '').endswith('.isle') or u.username or u.password or u.path not in ('','/') or u.query or u.fragment:
         raise ValueError('Engine/provider requires a trusted Isle HTTPS origin')
     return url.rstrip('/')
-def request(url,payload=None,post=False):
+NOT_READY_WAIT=180
+def request(url,payload=None,post=False,wait=NOT_READY_WAIT,sleep=time.sleep,clock=time.monotonic):
     # Registry publication can durably write many rows on constrained hosts.
     # A timed-out POST may still finish on the server: never blindly replay it
     # here. Surface failure to the shared operation journal for explicit retry.
@@ -20,7 +21,15 @@ def request(url,payload=None,post=False):
     argv=['curl','--http1.1','--fail','--silent','--show-error','--connect-timeout','10','--max-time',limit,url]
     if post:argv+=['--request','POST']
     if payload is not None:argv+=['-H','Content-Type: application/json','--data-binary',json.dumps(payload)]
-    p=subprocess.run(argv,capture_output=True,text=True,check=True)
+    # 503 is the server's own answer that it takes no requests yet (a backend that is up and still loads its
+    # modules, as right after an update gave it a new image): it did nothing, so asking again repeats nothing.
+    # That is waited out for a bounded time.  Every other failure, a timeout above all, stays as it was.
+    deadline=clock()+wait
+    while True:
+        try:p=subprocess.run(argv,capture_output=True,text=True,check=True);break
+        except subprocess.CalledProcessError as e:
+            if e.returncode!=22 or 'error: 503' not in (e.stderr or '') or clock()>=deadline:raise
+            sleep(3)
     d=json.loads(p.stdout)
     if d.get('ok') is not True:raise ValueError('Engine registry refused operation at '+url)
     return d

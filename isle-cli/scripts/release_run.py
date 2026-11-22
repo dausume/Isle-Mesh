@@ -1684,7 +1684,9 @@ def cmd_status(deps, run_id=None):
 HELP = """isle release - one reviewed release across the isle (slice 2)
   isle release build <out-dir> --previous <dir>          no sudo: build the packet of the next CLI release from one
         commit of the isle repository (`isle release build help` for the rest); nothing is published or installed.
-        With --agents the packet also carries the two agent images, with the agent scripts of that commit
+        With --agents the packet also carries the two agent images, with the agent scripts of that commit;
+        with --runtime-image <container>=<image>, an image built elsewhere (Polari's backend or frontend);
+        with --module-add <device>:<instance>:<module>, a module that device adds to its Polari instance
   isle release build <out-dir> --dependencies <set dir>  no sudo: a packet that holds one dependency set and nothing else
   isle release check <packet-dir> [--expect <run-id>]    read-only: validate the packet, say what would happen
   sudo isle release run <packet-dir> [--yes] [--expect <run-id>] [--wait <minutes> | --no-wait]
