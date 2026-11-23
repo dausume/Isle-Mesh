@@ -1,0 +1,13 @@
+# esp-engines: the ESP32-C3 engines worker of the Electronics app. It takes batch requests and never flashes.
+# The image name below is a placeholder; `isle store build` writes the built name in its place.
+# PIN-AT-BUILD (this marker line is dropped from built output)
+services:
+  esp-engines:
+    image: esp-engines/esp-engines:PIN-AT-BUILD
+    restart: unless-stopped
+    mem_limit: 2048m
+    cpus: 3.0
+    pids_limit: 512
+    environment:
+      WORKER_KEEPALIVE_S: "20"
+      WORKER_MAX_MB: "16"

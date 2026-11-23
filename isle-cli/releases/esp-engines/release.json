@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "name": "esp-engines",
+  "version": "2026.11.22-1",
+  "images": [
+    {
+      "ref": "esp-engines/esp-engines:PIN-AT-BUILD",
+      "buildFrom": "prf-esp-engines:noble",
+      "archive": {"source": "images/esp-engines.tar"},
+      "configDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "manifestDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ],
+  "compose": {"source": "docker-compose.yml"},
+  "deploy": {"service": "esp-engines", "port": 9850, "engine": "esp", "maxUpload": "32m"},
+  "health": {"path": "/capability"}
+}
