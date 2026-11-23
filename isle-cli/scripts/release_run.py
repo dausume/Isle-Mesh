@@ -83,6 +83,7 @@ class Deps:
     wait_limit = 2400        # the apt.isle replica pulls on a 10-minute timer, then has to transfer; a rerun resumes the wait
     poll_interval = 15
     modules_limit = 300
+    instance_limit = 600     # a member's Polari instance starts again with its modules: about 250 s on the smallest member
     runs_dir = Path('/var/lib/isle-mesh/release-runs')
     ca_dir = Path('/etc/isle-mesh/ca')
     approval_dir = Path('/etc/isle-mesh/ca/release-approval')
@@ -537,7 +538,7 @@ def describe_step(step):
         return 'apply hotfix %s (isle hotfix apply; idempotent, backs up what it replaces)' % step['name']
     if verb == 'backup':
         return 'take a device-backup of this device (isle backup create; the run stops here if it is not complete)'
-    return 'add module %s to instance %s (isle polari module add, then check it is recorded and the backend is ready)' % (step['module'], step['instance'])
+    return 'add module %s to instance %s (isle polari module add, then check it is recorded and online in the backend of that instance)' % (step['module'], step['instance'])
 
 def summary_lines(record, run_id, publications=None):
     doc = record['packet']
@@ -747,11 +748,16 @@ def exec_store_install(deps, step, e):
     installed_release_ok(deps, step, op)
     return op, 'installed %s %s' % (step['app'], step['version'])
 
-def modules_ready(deps):
-    status, body = deps.http(API + '/api/modules/status')
-    try: ok = status == 200 and json.loads(body).get('ok') is True
-    except ValueError: ok = False
-    return [] if ok else ['backend modules/status is not ok yet (answered %s)' % status]
+def modules_ready(deps, api=API, module=None):
+    """The backend at `api` says its modules are up; with `module`, also that this one is online there."""
+    status, body = deps.http(api + '/api/modules/status')
+    try: doc = json.loads(body) if status == 200 else {}
+    except ValueError: doc = {}
+    if not isinstance(doc, dict) or doc.get('ok') is not True: return ['backend modules/status is not ok yet (answered %s)' % status]
+    if module is None: return []
+    row = doc.get('modules', {}).get(module) if isinstance(doc.get('modules'), dict) else None
+    state = row.get('status') if isinstance(row, dict) else None
+    return [] if state == 'online' else ['%s does not say module %s is online yet (it says: %s)' % (api, module, state or 'nothing of it')]
 
 def retry_once(deps, name, op, why):
     deps.say('%s; waiting for the backend, then retrying operation %s once' % (why, op[:8]))
@@ -806,6 +812,8 @@ def exec_module_add(deps, step, e):
     if 'modules' not in record:
         raise Refused(name, 'deployment.json of %s has no "modules" record, so the module would not survive the next update '
                             '(this CLI lacks the durable module record); nothing was changed' % instance)
+    try: api = check_url(str(record.get('backend_url') or '').rstrip('/'), 'backend_url')
+    except PacketError: raise Refused(name, 'deployment.json of %s names no backend of its own (backend_url), so nothing could say the module came up; nothing was changed' % instance)
     code, op = journaled(deps, args)
     if code: raise Refused(name, 'module add failed (exit %d)' % code, op, 'failed')
     record = deps.read_json(base / 'deployment.json')
@@ -814,8 +822,9 @@ def exec_module_add(deps, step, e):
     compose = deps.read_text(base / 'docker-compose.yml')
     if compose is None or not csv_has(compose_modules(compose), module):
         raise Refused(name, 'POLARI_MODULES of %s does not list %s after the add' % (instance, module), op, 'failed')
-    poll(deps, 'modules ready', lambda: modules_ready(deps), deps.modules_limit)
-    return op, 'added module %s to %s (recorded in deployment.json and the compose file; backend ready)' % (module, instance)
+    # The instance's OWN backend, and the module by name: the backend of the core was up all along and says nothing here.
+    poll(deps, 'modules ready', lambda: modules_ready(deps, api, module), deps.instance_limit)
+    return op, 'added module %s to %s (recorded in deployment.json and the compose file; online at %s)' % (module, instance, api)
 
 def exec_hotfix(deps, step, e):
     """isle hotfix apply <name> --yes through the journal. Exit 0 covers both "applied" and "nothing to do"."""

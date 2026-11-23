@@ -471,6 +471,8 @@ publishes and installs nothing. It asks no core anything unless `--agents` is gi
   with `--agents` or without, and `--all-images` and `--runtime-archives` mean the same for it.
 - `--module-add <device>:<instance>:<module>` gives one device a step after its update: add the module to its
   Polari instance (`isle polari module add <module> --to <instance>`), recorded so that later updates keep it.
+  The step is done when the backend of THAT instance (the `backend_url` of its record) says the module is online;
+  it waits up to 10 minutes for that, since the instance starts again with all its modules.
 - Tests: `python3 isle-cli/scripts/test-agent-images.py`, `test-named-images.py` and `test-runtime-publish.py`
   (a made-up Docker and core; no Docker, no network).
 

@@ -156,6 +156,7 @@ class Fake(rr.Deps):
         self.update_rcs, self.status_retryable, self.install_rc = [0], True, 0
         self.status_state, self.notice_fail_until, self.instance = 'failed', 0, None
         self.modules_ok_after, self.updates_body, self.http_log = 0, None, []
+        self.modules_stuck = ()
         self.inspect_image, self.publish_rc = IMG, 0
         self.deps_rc, self.deps_published, self.deps_after, self.deps_unlisted, self.deps_wrong, self.deps_others = 0, None, 0, set(), {}, []
         self.t0 = self.clock
@@ -292,7 +293,12 @@ class Fake(rr.Deps):
             if url != 'https://apt.isle/deps/jammy/Packages' or self.deps_published is None or age < self.deps_after: return 404, b''
             return 200, ''.join('Package: p\nFilename: ./%s\nSHA256: %s\nDescription: one line\n and: another\n\n' % (n, self.deps_wrong.get(n, sha))
                                 for n, sha in self.deps_published.items() if n not in self.deps_unlisted).encode()
-        if url.endswith('/api/modules/status'): return 200, json.dumps({'ok': age >= self.modules_ok_after}).encode()
+        if url.endswith('/api/modules/status'):
+            if not url.startswith('https://api.polari.isle/'):                   # a member's own instance: the modules its compose file names
+                names = next((rr.compose_modules(v) for k, v in self.texts.items() if k.endswith('docker-compose.yml')), '').split(',')
+                up = age >= self.modules_ok_after
+                return 200, json.dumps({'ok': up, 'modules': {n: {'status': 'online' if up and n not in self.modules_stuck else 'loading'} for n in names}}).encode()
+            return 200, json.dumps({'ok': age >= self.modules_ok_after}).encode()
         if url.endswith('/api/islemesh/updates') and self.notice.get('packages') and self.notice['packages'] != [1]:
             n = copy.deepcopy(self.notice)
             if age < self.release_after: n['id'] = 'old' + n['id'][3:]
@@ -1572,7 +1578,7 @@ def packet_copy_is_kept_on_failure_removed_on_success_and_refused_without_space(
 MOD_STEP = [{'verb': 'module-add', 'instance': 'polari-x', 'module': 'mod-a'}]
 def module_world(t, **kw):
     d = make_packet(t, devices={'core1': MOD_STEP}, publish=False); f = Fake(t); f.allow_module = True
-    f.files[str(f.polari_dir / 'polari-x' / 'deployment.json')] = kw.get('record', {'name': 'polari-x', 'modules': 'islemesh'})
+    f.files[str(f.polari_dir / 'polari-x' / 'deployment.json')] = kw.get('record', {'name': 'polari-x', 'modules': 'islemesh', 'backend_url': 'https://api.polari-x.isle'})
     f.texts[str(f.polari_dir / 'polari-x' / 'docker-compose.yml')] = 'POLARI_MODULES=islemesh\n'
     return d, f
 
@@ -1583,10 +1589,17 @@ def module_add_runs_the_real_spelling_and_checks_the_record_compose_and_backend(
         assert rr.main(['run', str(d), '--yes', '--no-wait'], f) == 0, f.said
         assert ['python3', str(f.scripts / 'operations.py'), 'run', 'polari', 'module', 'add', 'mod-a', '--to', 'polari-x'] in f.argv
         assert f.files[str(f.polari_dir / 'polari-x' / 'deployment.json')]['modules'] == 'islemesh,mod-a'
-        assert any(u.endswith('/api/modules/status') for u, _ in f.http_log)
+        asked = [u for u, _ in f.http_log if u.endswith('/api/modules/status')]
+        assert asked and set(asked) == {'https://api.polari-x.isle/api/modules/status'}, asked     # the instance's own backend, not the core's
     with tmp() as t:        # the backend never becomes ready
         d, f = module_world(t); f.modules_ok_after = 10 ** 6
         assert rr.main(['run', str(d), '--yes', '--no-wait'], f) == 1 and 'modules ready' in refused(f)[0]
+    with tmp() as t:        # the backend is up and the module is not: "ok" alone is not the answer
+        d, f = module_world(t); f.modules_stuck = ('mod-a',)
+        assert rr.main(['run', str(d), '--yes', '--no-wait'], f) == 1 and 'does not say module mod-a is online' in refused(f)[0], refused(f)
+    with tmp() as t:        # an instance without a backend of its own: refused before anything is changed
+        d, f = module_world(t, record={'name': 'polari-x', 'modules': 'islemesh'})
+        assert rr.main(['run', str(d), '--yes', '--no-wait'], f) == 1 and 'names no backend of its own' in refused(f)[0] and 'module-add' not in f.events
 
 @test
 def module_add_refuses_when_nothing_would_survive_an_update():
