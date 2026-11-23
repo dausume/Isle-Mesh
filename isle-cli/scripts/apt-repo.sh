@@ -220,10 +220,29 @@ publish() {
     local COPY_PLAN
     COPY_PLAN=$(mktemp) || die "cannot create publication plan"
     if ! python3 - "$FROM" "$DEPENDENCIES_FROM" "$REPO" "$ONLY_DEPENDENCIES" > "$COPY_PLAN" <<'PYPACKAGES'
-import hashlib,pathlib,re,subprocess,sys
+import hashlib,os,pathlib,re,subprocess,sys,time
 platform,dependencies,repository,alone=sys.argv[1:]
 by_filename={};by_identity={};copy=[]
+# Progress goes to stderr (stdout is the copy plan). Sizes come from the file table, nothing is read for them.
+def listed(directory):
+    try:return sorted(pathlib.Path(directory).glob('*.deb')) if directory else []
+    except OSError:return []
+def size_of(path):
+    try:return path.stat().st_size
+    except OSError:return 0
+def packages(n):return format(n,',')+(' package' if n==1 else ' packages')
+def amount(n):return '%.1f GB'%(n/1e9) if n>=1e9 else '%.1f MB'%(n/1e6)
+try:every=int(os.environ.get('ISLE_APT_PROGRESS_S','15')) if re.fullmatch(r'[0-9]{1,6}',os.environ.get('ISLE_APT_PROGRESS_S','15')) else 15
+except ValueError:every=15
+existing_files=listed(repository)
+all_files=existing_files+listed(platform)+listed(dependencies)
+total=sum(size_of(f) for f in all_files);seen=0;seen_size=0;last=time.monotonic()
+if existing_files:
+    print('   checking %s (%s) already in the repository, and the new ones: every file is read once'%(packages(len(existing_files)),amount(sum(size_of(f) for f in existing_files))),file=sys.stderr)
+elif all_files:
+    print('   checking %s new (%s): every file is read once'%(packages(len(all_files)),amount(total)),file=sys.stderr)
 def inspect(directory,required=False,existing=False,third_party=False):
+    global seen,seen_size,last
     root=pathlib.Path(directory)
     if not root.is_dir():
         if required:raise ValueError('package directory missing: '+directory)
@@ -256,6 +275,10 @@ def inspect(directory,required=False,existing=False,third_party=False):
         first=path.name not in by_filename
         by_filename[path.name]=digest;by_identity[identity]=digest
         if first and not existing:copy.append(path.resolve())
+        seen+=1;seen_size+=size_of(path)
+        if time.monotonic()-last>=every:
+            last=time.monotonic()
+            print('   checked %s of %s packages (%s of %s)'%(format(seen,','),format(len(all_files),','),amount(seen_size),amount(total)),file=sys.stderr,flush=True)
 try:
     inspect(repository,existing=True)
     if platform:inspect(platform,required=True)
@@ -283,10 +306,29 @@ PYPACKAGES
     # each package file under the release(s) it was filed for.
     local METADATA COUNTS MAIN_COUNT="" SETS=() DEPS_WORDS="" kind name count
     METADATA=$(mktemp -d) || die "cannot create private metadata stage"
-    if ! ( cd "$REPO" \
+    # The scan reads every package again and prints nothing, so say so and keep saying it while it runs.
+    local BEAT_S="${ISLE_APT_HEARTBEAT_S:-30}" BEAT_PID SCAN_START=$SECONDS SCAN_OK=0 PARENT=$$
+    [[ "$BEAT_S" =~ ^[0-9]{1,6}$ ]] || BEAT_S=30
+    echo "   building the package index: every package is read once more"
+    ( n=0; while kill -0 "$PARENT" 2>/dev/null; do
+          sleep 1; n=$((n+1))
+          [ $((n % (BEAT_S > 0 ? BEAT_S : 1))) -eq 0 ] || continue
+          if [ "$n" -lt 60 ]; then echo "   still building the package index ($n s)"
+          else echo "   still building the package index ($((n / 60)) min)"; fi
+      done ) &
+    BEAT_PID=$!
+    if ( cd "$REPO" \
       && sudo nice -n 15 ionice -c 3 sh -c 'dpkg-scanpackages --multiversion . /dev/null > "$1/scanned" 2>/dev/null' sh "$METADATA" ); then
+        SCAN_OK=1
+    fi
+    # Stopped on both branches, before anything else can exit the script.
+    kill "$BEAT_PID" 2>/dev/null; wait "$BEAT_PID" 2>/dev/null
+    if [ "$SCAN_OK" != 1 ]; then
         sudo rm -rf -- "$METADATA"; die "index build failed"
     fi
+    local SCAN_S=$((SECONDS - SCAN_START))
+    if [ "$SCAN_S" -lt 60 ]; then echo "   package index built in $SCAN_S s"
+    else echo "   package index built in $((SCAN_S / 60)) min $((SCAN_S % 60)) s"; fi
     local SPLIT=("$METADATA/scanned" "$METADATA" "$CODENAME" --served "$REPO")
     [ -z "$DEPS_RELEASE" ] || SPLIT+=(--add "$DEPS_RELEASE" "$DEPENDENCIES_FROM")
     if ! COUNTS=$(sudo python3 "$SCRIPT_DIR/apt_index_split.py" "${SPLIT[@]}"); then

@@ -51,6 +51,8 @@ elif name=='dpkg-deb':
  for key in ('Package','Version','Architecture'):print(key+': '+d[key])
 elif name=='dpkg-scanpackages':
  assert '--multiversion' in a
+ if os.environ.get('SLOW_SCAN'):time.sleep(float(os.environ['SLOW_SCAN']))
+ if os.environ.get('FAIL_SCAN'):sys.exit(1)
  for path in sorted(pathlib.Path('.').glob('*.deb')):
   d=json.loads(path.read_text())
   for key in ('Package','Version','Architecture'):print(key+': '+d[key])
@@ -330,6 +332,50 @@ else:sys.exit(90)
         self.assertIn(b'bootstrap v1',b''.join((objects/e['sha256']).read_bytes() for e in document['entries'] if e['path']=='isle-bootstrap.sh'))
         two=storage_placement.publish_manifest(self.repo,device='core-a')
         self.assertNotEqual(one['manifestSha'],two['manifestSha'])
+    def leftovers(self,token):
+        """Processes still carrying this run's token in their environment (the script and anything it started)."""
+        found=[]
+        for entry in Path('/proc').iterdir():
+            if entry.name.isdigit() and int(entry.name)!=os.getpid():
+                try:
+                    if ('ISLE_TEST_RUN='+token).encode() in (entry/'environ').read_bytes():found.append(entry.name)
+                except OSError:pass
+        return found
+    def progress_fixture(self):
+        self.deb(self.repo,'old.deb','package-old','1');self.deb(self.platform,'a_1_all.deb','polari-a','1','all')
+        self.deb(self.platform,'b_1_all.deb','polari-b','1','all')
+    def test_progress_lines_are_said_and_the_published_result_is_the_same(self):
+        self.progress_fixture()
+        quiet=self.publish(ISLE_APT_PROGRESS_S='99999',ISLE_APT_HEARTBEAT_S='99999')
+        self.assertEqual(quiet.returncode,0,quiet.stderr)
+        self.assertIn('   checking 1 package (',quiet.stderr);self.assertIn('already in the repository, and the new ones: every file is read once',quiet.stderr)
+        self.assertNotIn('   checked ',quiet.stderr)
+        self.assertIn('   building the package index: every package is read once more',quiet.stdout)
+        self.assertRegex(quiet.stdout,r'   package index built in \d+ s')
+        packages=(self.repo/'Packages').read_text()
+        for name in ('a_1_all.deb','b_1_all.deb'):(self.repo/name).unlink()
+        loud=self.publish(ISLE_APT_PROGRESS_S='0',ISLE_APT_HEARTBEAT_S='1')
+        self.assertEqual(loud.returncode,0,loud.stderr)
+        self.assertIn('   checked 3 of 3 packages (',loud.stderr)
+        self.assertEqual((self.repo/'Packages').read_text(),packages)
+        self.assertEqual(sorted(l for l in loud.stdout.splitlines() if l.startswith('   + ')),['   + a_1_all.deb','   + b_1_all.deb'])
+    def test_an_interval_that_is_not_a_number_falls_back_and_the_publish_passes(self):
+        self.progress_fixture()
+        result=self.publish(ISLE_APT_PROGRESS_S='soon',ISLE_APT_HEARTBEAT_S='-3')
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertNotIn('   checked ',result.stderr);self.assertIn('package index built in',result.stdout)
+    def test_the_heartbeat_speaks_while_the_scan_runs_and_never_outlives_the_script(self):
+        self.progress_fixture()
+        for flags in ({},{'FAIL_SCAN':'1'}):
+            token=os.urandom(8).hex()
+            result=self.publish(ISLE_TEST_RUN=token,ISLE_APT_HEARTBEAT_S='1',SLOW_SCAN='2.5',**flags)
+            self.assertIn('   still building the package index (',result.stdout)
+            if flags:
+                self.assertNotEqual(result.returncode,0);self.assertIn('index build failed',result.stdout)
+                self.assertNotIn('package index built in',result.stdout)
+            else:self.assertEqual(result.returncode,0,result.stderr)
+            time.sleep(1.5)  # the stand-in sleep command of a last tick may still be finishing
+            self.assertEqual(self.leftovers(token),[])
     def test_existing_callers_publish_platform_without_dependency_flag(self):
         self.deb(self.platform,'platform_2_all.deb','polari-platform','2','all')
         result=self.publish();self.assertEqual(result.returncode,0,result.stderr)
