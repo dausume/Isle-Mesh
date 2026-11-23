@@ -62,12 +62,15 @@ class Apps(unittest.TestCase):
         install = {'verb': 'store-install', 'app': 'esp-engines', 'version': '2026.11.22-1', 'manifestSha256': sha}
         self.assertEqual(doc['devices'], {'*': every, 'econ': [install]})
         self.assertEqual(rr.steps_for(doc, 'econ'), every + [install])                 # the runner: the update first
-        self.assertEqual(doc['publish'], [{'kind': 'debs', 'dir': 'debs'}, {'kind': 'catalog', 'release': 'catalog/esp-engines/release.json'}])
+        # the only store app of a packet lies at its root: the runner of release 92 reads it there
+        self.assertEqual(doc['publish'], [{'kind': 'debs', 'dir': 'debs'}, {'kind': 'catalog', 'release': 'release.json'}])
         pk = rr.load_packet(self.out / 'packet')
         self.assertEqual([(p['kind'], p.get('app')) for p in pk.publications], [('debs', None), ('catalog', 'esp-engines')])
         for name in ('release.json', 'images/engine.tar', 'docker-compose.yml', 'notes.txt'):
-            self.assertEqual((self.out / 'packet/catalog/esp-engines' / name).read_bytes(), (esp / name).read_bytes())
-            self.assertIn('catalog/esp-engines/' + name, pk.files)
+            self.assertEqual((self.out / 'packet' / name).read_bytes(), (esp / name).read_bytes())
+            self.assertIn(name, pk.files)
+        self.assertFalse((self.out / 'packet/catalog').exists())
+        self.assertIn('lies at the root of the packet, which a core on release 92 reads as well', self.io.text())
         made = json.loads((self.out / 'build.json').read_text())['storeApps']
         self.assertEqual([(m['name'], m['version'], m['manifestSha256'], m['devices']) for m in made], [('esp-engines', '2026.11.22-1', sha, ['econ'])])
         self.assertIn('The packet carries the store app esp-engines 2026.11.22-1', self.io.text())
@@ -77,7 +80,7 @@ class Apps(unittest.TestCase):
         esp = built(self.tmp / 'esp')
         self.assertEqual(self.build('--store-app', 'econ:%s' % esp), 0, self.io.text())
         step = self.doc()['devices']['econ'][0]
-        name, stored = catalog_publish._publish(self.out / 'packet/catalog/esp-engines/release.json', self.tmp / 'served')
+        name, stored = catalog_publish._publish(self.out / 'packet/release.json', self.tmp / 'served')
         self.assertEqual((name, stored['sha256']), ('esp-engines', step['manifestSha256']))
         kept = self.tmp / 'served/catalog/esp-engines/2026.11.22-1' / (stored['sha256'] + '.json')
         self.assertEqual(hashlib.sha256(kept.read_bytes()).hexdigest(), step['manifestSha256'])
@@ -93,14 +96,16 @@ class Apps(unittest.TestCase):
         self.assertEqual([s['verb'] for s in doc['devices']['core']], ['update-apply'])
         made = {m['name']: m['devices'] for m in json.loads((self.out / 'build.json').read_text())['storeApps']}
         self.assertEqual(made, {'esp-engines': ['econ', 'pol'], 'scope-engines': ['pol']})
-        rr.load_packet(self.out / 'packet')
+        pk = rr.load_packet(self.out / 'packet')
+        self.assertIn('catalog/scope-engines/images/engine.tar', pk.files); self.assertNotIn('release.json', pk.files)
+        self.assertIn('needs the CLI of release 93 or later', self.io.text())
 
     def test_store_apps_alone_build_no_package(self):
         esp = built(self.tmp / 'esp')
         self.assertEqual(rb.main([str(self.out), '--store-app', 'econ:%s' % esp, '--verify', 'https://esp-engines.isle/capability'], self.io), 0, self.io.text())
         doc = self.doc()
         self.assertEqual(doc['name'], 'store-apps-esp-engines')
-        self.assertEqual(doc['publish'], [{'kind': 'catalog', 'release': 'catalog/esp-engines/release.json'}])
+        self.assertEqual(doc['publish'], [{'kind': 'catalog', 'release': 'release.json'}])
         self.assertEqual([s['verb'] for s in doc['devices']['econ']], ['store-install'])
         self.assertEqual(doc['verify'], [{'url': 'https://esp-engines.isle/capability', 'expectStatus': 200}])
         self.assertFalse((self.out / 'members').exists()); self.assertFalse((self.out / 'packet/debs').exists())
@@ -117,7 +122,11 @@ class Apps(unittest.TestCase):
         unfit = built(self.tmp / 'unfit')
         doc = json.loads((unfit / 'release.json').read_text()); doc['deploy']['port'] = 0
         (unfit / 'release.json').write_text(json.dumps(doc))
+        own = built(self.tmp / 'own')
+        doc = json.loads((own / 'release.json').read_text()); doc['files'] = [{'path': 'notes.txt', 'source': 'debs/notes.txt'}]
+        (own / 'debs').mkdir(); (own / 'debs/notes.txt').write_text('x\n'); (own / 'release.json').write_text(json.dumps(doc))
         for more, words in ((['--store-app', 'econ'], 'wants <device>:<folder'),
+                            (['--store-app', 'econ:%s' % own], 'is where the packet keeps its own'),
                             (['--store-app', 'econ core:%s' % esp], 'wants <device>:<folder'),
                             (['--store-app', 'econ:%s' % (self.tmp / 'none')], 'holds no release.json'),
                             (['--store-app', 'econ:%s' % definition], 'is a definition, not a built release'),

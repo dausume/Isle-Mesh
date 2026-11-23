@@ -60,7 +60,7 @@
 
 It leaves in <out-dir>:
   packet/      release-run.json, SHA256SUMS, debs/ (what the release publishes); with --agents or --runtime-image
-               also runtime/, with --store-app also catalog/<app>/
+               also runtime/, with --store-app also the store app (one: at the root; several: catalog/<app>/)
   members/     every member package of this build: the --previous of the next one
   source/      the files of the commit, as they were built
   build.json   what was built from what: the commit, the versions, every checksum
@@ -232,11 +232,11 @@ def set_plan(chosen, devices, verify):
     return doc
 
 
-def pack(packet, doc, chosen):
+def pack(packet, doc, chosen, apps=None):
     """release-run.json, the set (when the packet carries one) and SHA256SUMS over everything that is in the packet."""
     listed = ['release-run.json'] + (sorted('debs/' + deb.name for deb in (packet / 'debs').iterdir()) if (packet / 'debs').is_dir() else [])
-    for folder in ('runtime', store_apps.DIR):
-        listed += sorted(path.relative_to(packet).as_posix() for path in (packet / folder).rglob('*') if path.is_file())
+    listed += sorted(path.relative_to(packet).as_posix() for path in (packet / 'runtime').rglob('*') if path.is_file())
+    if apps: listed += store_apps.listed(apps)
     if chosen:
         (packet / chosen['dir']).mkdir(parents=True)
         for name in chosen['names']: shutil.copy2(chosen['folder'] / name, packet / chosen['dir'] / name)
@@ -377,7 +377,7 @@ def build(io, out, source, builder, p):
     if p['apps']:
         io.say('  the store apps: %s' % ', '.join('%s %s' % (app['name'], app['version']) for app in p['apps']['apps']))
         store_apps.place(packet, p['apps'])
-    pk = pack(packet, p['doc'], p['set'])
+    pk = pack(packet, p['doc'], p['set'], p['apps'])
     record = {'schemaVersion': 1, 'release': p['number'], 'runId': pk.run_id, 'builtAt': io.now(),
               **({'dependencySet': set_record(pk, p['set'])} if p['set'] else {}),
               **({'agentImages': wanted['made']} if wanted is not None else {}),
@@ -559,7 +559,7 @@ def only_apps(io, out, apps, doc):
     io.say('Store apps, each as `isle store build` left it: %s' % ', '.join('%s %s' % (app['name'], app['version']) for app in apps['apps']))
     (out / 'packet').mkdir(parents=True)
     store_apps.place(out / 'packet', apps)
-    pk = pack(out / 'packet', doc, None)
+    pk = pack(out / 'packet', doc, None, apps)
     (out / 'build.json').write_text(json.dumps({'schemaVersion': 1, 'runId': pk.run_id, 'builtAt': io.now(),
                                                  'storeApps': store_apps.records(apps)}, indent=1) + '\n')
     io.say('Packet: %s' % (out / 'packet'))

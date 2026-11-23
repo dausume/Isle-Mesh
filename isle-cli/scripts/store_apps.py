@@ -5,7 +5,9 @@
   <folder>  what `isle store build` left: release.json with the real image names and digests, the image
             archives, the compose file and the files the release names
 
-The packet carries the folder as catalog/<app>/ (a store app each in a folder of its own).  The core publishes it
+Where the packet holds it: ONE store app lies at the root of the packet (release.json and its files beside it), which
+every runner since release 92 reads.  SEVERAL lie in catalog/<app>/ each, which the core that runs the packet reads
+from release 93 on (`isle release check` on an older core refuses the packet as a whole).  The core publishes it
 as a step of the run (`isle store publish`), after the packages; the device waits until the core serves that very
 release (the sha256 of the manifest as the core stores it, worked out here the way `isle store build` prints it),
 installs it, and the run stops on that device when the app is not on that release afterwards.
@@ -14,7 +16,7 @@ One app may go to several devices (the option once per device, the same folder):
 
 Refused, before anything is written: a folder that is not a built release (a definition still carries
 PIN-AT-BUILD), a file the release names that is not there, two folders for one app, one app twice on one device, a
-device the packet does not name.
+device the packet does not name, a single app with a file where the packet keeps its own (debs/, runtime/, ...).
 
 Nothing here asks Docker or a core anything: the folder is taken as it is.
 """
@@ -28,6 +30,8 @@ import release_run as rr
 from agent_images import Refused
 
 DIR = 'catalog'
+#: what a packet keeps at its root for itself; a store app that lies there may not name a file among these
+OWN = ('release-run.json', 'SHA256SUMS', 'debs', 'runtime', 'dependencies', DIR)
 
 
 def read(folder):
@@ -72,22 +76,39 @@ def parse(values, devices):
         step = {'verb': 'store-install', 'app': app['name'], 'version': app['version'], 'manifestSha256': app['manifestSha256']}
         if step in steps.get(device, []): raise Refused('--store-app puts %s on %s twice' % (app['name'], device))
         steps.setdefault(device, []).append(step)
-    return {'apps': [apps[name] for name in sorted(apps)], 'steps': steps}
+    wanted = {'apps': [apps[name] for name in sorted(apps)], 'steps': steps}
+    if len(wanted['apps']) == 1:
+        app = wanted['apps'][0]
+        for source in app['sources']:
+            if Path(source).parts[0] in OWN:
+                raise Refused('--store-app %s: the one store app of a packet lies at its root, and its file %s is where the packet '
+                              'keeps its own (%s)' % (app['folder'], source, ', '.join(OWN)))
+    return wanted
+
+
+def prefix(wanted, app):
+    """Where the packet holds the app: '' (its root) for the only one, catalog/<app>/ for one of several."""
+    return '' if len(wanted['apps']) == 1 else '%s/%s/' % (DIR, app['name'])
 
 
 def publish(wanted):
-    return [{'kind': 'catalog', 'release': '%s/%s/release.json' % (DIR, app['name'])} for app in wanted['apps']]
+    return [{'kind': 'catalog', 'release': prefix(wanted, app) + 'release.json'} for app in wanted['apps']]
 
 
 def place(packet, wanted):
-    """The folders into the packet, catalog/<app>/ each.  A large archive is linked when the packet lies on the same
-    disk, and copied when it does not."""
+    """The folders into the packet (prefix).  A large archive is linked when the packet lies on the same disk, and
+    copied when it does not."""
     for app in wanted['apps']:
         for name in ['release.json'] + app['sources']:
-            target = packet / DIR / app['name'] / name
+            target = packet / (prefix(wanted, app) + name)
             target.parent.mkdir(parents=True, exist_ok=True)
             try: os.link(app['folder'] / name, target)
             except OSError: shutil.copy2(app['folder'] / name, target)
+
+
+def listed(wanted):
+    """The files `place` put into the packet, as SHA256SUMS names them."""
+    return [prefix(wanted, app) + name for app in wanted['apps'] for name in ['release.json'] + app['sources']]
 
 
 def records(wanted):
@@ -100,6 +121,11 @@ def words(io, wanted, reserve):
     for made in records(wanted):
         io.say('The packet carries the store app %s %s (%d MiB; manifest %s). The core publishes it, and %s installs it after '
                'its other steps.' % (made['name'], made['version'], made['bytes'] >> 20, made['manifestSha256'][:12], ' and '.join(made['devices'])))
+    if len(wanted['apps']) == 1:
+        io.say('The store app lies at the root of the packet, which a core on release 92 reads as well.')
+    else:
+        io.say('Each store app lies in a folder of its own (%s/<app>/): the core that runs this packet needs the CLI of release 93 '
+               'or later, and `isle release check <packet>` there says so.' % DIR)
     carried = sum(app['bytes'] for app in wanted['apps'])
     io.say('The core that runs it needs %d MiB and %d MiB more free where it keeps its runs, and the backend of the core has to '
            'know each of these apps (its catalog entry): `isle store show <app>` says so.' % (carried >> 20, reserve >> 20))
