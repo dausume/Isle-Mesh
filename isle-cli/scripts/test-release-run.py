@@ -395,6 +395,22 @@ def refuse_bad_version():
 @test
 def refuse_path_escape():
     expect_refusal('esc', lambda t: make_packet(t, mutate=lambda d: d['publish'].__setitem__(0, {'kind': 'catalog', 'release': '../release.json'})), 'leaves the packet')
+def two_apps(t, second='two', escape=None):
+    """The packet of make_packet plus a second store app in a folder of its own."""
+    d = make_packet(t)
+    (d / 'apps/two').mkdir(parents=True); (d / 'apps/two/compose.yml').write_text('services: {two: {}}\n')
+    (d / 'apps/two/release.json').write_text(json.dumps({'schemaVersion': 1, 'name': second, 'version': VER, 'compose': {'source': escape or 'compose.yml'}}))
+    doc = json.loads((d / 'release-run.json').read_text()); doc['publish'].append({'kind': 'catalog', 'release': 'apps/two/release.json'})
+    (d / 'release-run.json').write_text(json.dumps(doc)); write_sums(d)
+    return d
+@test
+def a_packet_holds_several_store_apps_each_in_its_own_folder():
+    with tmp() as t:
+        pk = rr.load_packet(two_apps(t))
+        assert [(p['app'], p['path']) for p in pk.publications] == [(APP, 'release.json'), ('two', 'apps/two/release.json')]
+        assert {'compose.yml', 'apps/two/compose.yml', 'apps/two/release.json'} <= set(pk.files)   # each source beside its own release.json
+    expect_refusal('twice', lambda t: two_apps(t, second=APP), 'names the store app %s twice' % APP)
+    expect_refusal('up', lambda t: two_apps(t, escape='../../compose.yml'), 'leaves the packet')
 @test
 def refuse_absolute_path():
     expect_refusal('abs', lambda t: make_packet(t, mutate=lambda d: d['publish'].__setitem__(0, {'kind': 'catalog', 'release': '/etc/passwd'})), 'leaves the packet')

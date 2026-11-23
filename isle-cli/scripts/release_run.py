@@ -492,8 +492,14 @@ def load_packet(path):
         if not isinstance(release, dict) or not isinstance(release.get('name'), str) or not NAME.fullmatch(release['name']) \
                 or not isinstance(release.get('version'), str) or not re.fullmatch(r'[a-zA-Z0-9.+_-]{1,80}', release['version']):
             raise PacketError('%s has an invalid name/version' % rel)
+        if any(c['app'] == release['name'] for c in catalogs): raise PacketError('publish names the store app %s twice' % release['name'])
+        # A source is read from the folder of its release.json, as `isle store publish` reads it: so a packet can hold
+        # several store apps, each in a folder of its own.
+        beside = Path(rel).parent
         for source in release_sources(release):
             if not isinstance(source, str): raise PacketError('%s has an invalid source' % rel)
+            safe_relpath(source, rel + ' source')
+            source = source if beside == Path('.') else (beside / source).as_posix()
             files[source] = hashed_file(directory, sums, source, rel + ' source')
         catalogs.append({'kind': 'catalog', 'app': release['name'], 'version': release['version'], 'path': rel})
     # Fixed execution order whatever the packet order: a dependency set, runtime images, packages, then catalog apps.
@@ -1723,6 +1729,7 @@ A packet is SHA256SUMS + release-run.json (docs/release-run.example.json) and ma
   {"kind":"debs","dir":"<dir>"}            CLI/shell packages (isle apt-repo publish --from); every file in the dir must be a .deb
                                            listed in SHA256SUMS; publishing assigns the release id
   {"kind":"catalog","release":"<file>"}    a store app (isle store publish)
+                                           (several: each release.json in a folder of its own, with its files beside it)
   {"kind":"dependencies","dir":"<dir>"}    one dependency set: operating system packages and one file <system id>.txt that says
                                            the system they are for (isle apt-repo publish --only-dependencies); every file in the
                                            dir must be listed in SHA256SUMS; added first and waited for, and the release the core
