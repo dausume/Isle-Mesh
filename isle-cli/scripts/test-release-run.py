@@ -485,6 +485,17 @@ def wait_served_waits_on_old_sha_then_proceeds():
         waits = [l for l in f.said if l.startswith('wait-served') and 'still missing' in l]
         assert waits and 'names ' + OLDSHA[:12] in waits[0], f.said
         assert f.events.index('install') > f.events.index('publish')
+        # the wait that said "still missing" says so when it is over, once, after its last waiting line
+        solved = [l for l in f.said if l.startswith('wait-served') and 'resolved after' in l]
+        assert len(solved) == 1 and 'Everything it waited for is there now.' in solved[0], f.said
+        assert f.said.index(solved[0]) > f.said.index(waits[-1]), f.said
+
+@test
+def a_wait_that_found_everything_at_once_says_nothing():
+    with tmp() as t:
+        d = make_packet(t); f = Fake(t)
+        assert rr.main(['run', str(d), '--yes'], f) == 0, f.said
+        assert not [l for l in f.said if 'still missing' in l or 'resolved after' in l], f.said
 
 @test
 def wait_served_refuses_on_timeout_without_installing():

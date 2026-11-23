@@ -628,12 +628,15 @@ class Receipt:
 # ---------------------------------------------------------------- waiting and probes
 
 def poll(deps, label, check, limit):
-    """Call check() -> list of what is still missing, until empty or the limit; one progress line per poll."""
-    start = deps.time()
+    """Call check() -> list of what is still missing, until empty or the limit; one progress line per poll.
+    A wait that said "still missing" ends with a line that says it is resolved, so the last word is not a refusal."""
+    start, said = deps.time(), 0
     while True:
         missing = check()
-        if not missing: return
-        waited = int(deps.time() - start)
+        if not missing:
+            if said: deps.say('%s: resolved after %ds. Everything it waited for is there now.' % (label, int(deps.time() - start)))
+            return
+        waited, said = int(deps.time() - start), said + 1
         if waited >= limit:
             raise Refused(label, 'gave up after %ds; never appeared: %s' % (waited, '; '.join(missing)))
         deps.say('%s (%ds of %ds): still missing: %s' % (label, waited, limit, '; '.join(missing)))
