@@ -4,8 +4,9 @@
   isle release build <out-dir> --previous <dir> [--source <checkout>] [--commit <ref>] [--combined-builder <file>]
                      [--dependencies <set dir>] [--device <name>]... [--verify <url>]... [--backup]
                      [--agents] [--runtime-image <container>=<image>]... [--all-images] [--runtime-archives <dir>]
-                     [--module-add <device>:<instance>:<module>]...
+                     [--module-add <device>:<instance>:<module>]... [--store-app <device>:<folder>]...
   isle release build <out-dir> --dependencies <set dir> [--device <name>]... [--verify <url>]...
+  isle release build <out-dir> --store-app <device>:<folder>... [--device <name>]... [--verify <url>]...
 
   <out-dir>            made by this command; it must not exist yet, or be empty
   --previous <dir>     the folder `members` of the build before this one.  Its packages give the next version
@@ -41,6 +42,12 @@
                        after its update, the device adds the module to its Polari instance (`isle polari module
                        add <module> --to <instance>`, recorded so that it stays through later updates).  The run
                        stops on that device when the module is not recorded afterwards
+  --store-app <device>:<folder>
+                       the packet carries a store app, and the device installs it after its other steps.  <folder>
+                       is what `isle store build` left (store_apps.py).  The core publishes the app as a step of the
+                       run.  Several apps: the option once for each; one app on several devices: once per device.
+                       Without --previous the packet holds the store apps and nothing else: no package of the isle
+                       is built, and the release the core announces stays the one it is
   --all-images         with --agents or --runtime-image: the packet carries the archive of EVERY runtime image the core publishes,
                        also the ones this release does not change.  Without it the packet names those by the file
                        the core publishes already, which a core reads from the release after 91 on; an older core
@@ -52,12 +59,13 @@
                        when the folder does not hold it
 
 It leaves in <out-dir>:
-  packet/      release-run.json, SHA256SUMS, debs/ (what the release publishes); with --agents also runtime/
+  packet/      release-run.json, SHA256SUMS, debs/ (what the release publishes); with --agents or --runtime-image
+               also runtime/, with --store-app also catalog/<app>/
   members/     every member package of this build: the --previous of the next one
   source/      the files of the commit, as they were built
   build.json   what was built from what: the commit, the versions, every checksum
   build.log    what the builders printed
-(a packet that holds only a dependency set: packet/ and build.json)
+(a packet that holds only a dependency set or only store apps: packet/ and build.json)
 Nothing is installed, published or sent, and nothing needs sudo.  Without --agents and --runtime-image a core is
 not asked anything; with one of them the build reads the list of runtime images the core serves, and fetches from the
 core an image it needs and finds neither in Docker here nor in --runtime-archives.
@@ -78,6 +86,7 @@ sys.path.insert(0, str(SCRIPTS))
 import release_run as rr
 import agent_images
 import named_images
+import store_apps
 from agent_images import Refused        # one kind of refusal for the whole build
 
 VERSION = re.compile(r'(\d+)\.(\d+)\.(\d+)\+release(\d+)\Z')
@@ -93,8 +102,10 @@ VERIFY = (rr.API + '/api/islemesh/updates', 'https://apt.isle/InRelease', rr.API
 BUILD_ENV = {'DPKG_DEB_THREADS_MAX': '1', 'DPKG_DEB_COMPRESSOR_TYPE': 'zstd', 'DPKG_DEB_COMPRESSOR_LEVEL': '3'}
 USAGE = ('usage: isle release build <out-dir> --previous <dir> [--source <checkout>] [--commit <ref>] '
          '[--combined-builder <file>] [--dependencies <set dir>] [--device <name>]... [--verify <url>]... [--backup] '
-         '[--agents [--all-images] [--runtime-archives <dir>]]\n'
-         '       isle release build <out-dir> --dependencies <set dir> [--device <name>]... [--verify <url>]...')
+         '[--agents] [--runtime-image <container>=<image>]... [--all-images] [--runtime-archives <dir>] '
+         '[--module-add <device>:<instance>:<module>]... [--store-app <device>:<folder>]...\n'
+         '       isle release build <out-dir> --dependencies <set dir> [--device <name>]... [--verify <url>]...\n'
+         '       isle release build <out-dir> --store-app <device>:<folder>... [--device <name>]... [--verify <url>]...')
 FIRST_PARTY = re.compile(r'(?:isle|polari)-')     # the packages the core's release is read from; never part of a set
 
 
@@ -224,7 +235,8 @@ def set_plan(chosen, devices, verify):
 def pack(packet, doc, chosen):
     """release-run.json, the set (when the packet carries one) and SHA256SUMS over everything that is in the packet."""
     listed = ['release-run.json'] + (sorted('debs/' + deb.name for deb in (packet / 'debs').iterdir()) if (packet / 'debs').is_dir() else [])
-    listed += sorted(path.relative_to(packet).as_posix() for path in (packet / 'runtime').rglob('*') if path.is_file())
+    for folder in ('runtime', store_apps.DIR):
+        listed += sorted(path.relative_to(packet).as_posix() for path in (packet / folder).rglob('*') if path.is_file())
     if chosen:
         (packet / chosen['dir']).mkdir(parents=True)
         for name in chosen['names']: shutil.copy2(chosen['folder'] / name, packet / chosen['dir'] / name)
@@ -255,7 +267,17 @@ def module_steps(values, devices):
     return out
 
 
-def plan(io, previous, source, commit, builder, devices, verify, backup, chosen=None, modules=()):
+def apps_plan(apps, devices, verify):
+    """A packet that holds store apps and nothing else: the core publishes them, and a device has the installs
+    that name it.  A check without a device is asked of every device that has a step."""
+    doc = {'schemaVersion': 1, 'name': ('store-apps-' + '-'.join(app['name'] for app in apps['apps']))[:80], 'publish': store_apps.publish(apps),
+           'devices': {name: [] for name in devices}, 'verify': checks((), verify)}
+    for device, steps in apps['steps'].items(): doc['devices'].setdefault(device, []).extend(steps)
+    rr.validate_doc(doc)
+    return doc
+
+
+def plan(io, previous, source, commit, builder, devices, verify, backup, chosen=None, modules=(), apps=None):
     """Everything that can refuse, before anything is written.  Returns what the build does."""
     members = previous_members(io, previous)
     cli, number = next_version(field(io, members[CLI], 'Version'), CLI)
@@ -279,8 +301,11 @@ def plan(io, previous, source, commit, builder, devices, verify, backup, chosen=
            'devices': {name: list(steps) for name in (devices or ['*'])}, 'verify': checks(served, verify)}
     for device, more in module_steps(modules, devices).items():        # a run gives a device the steps of "*" and then its own
         doc['devices'].setdefault(device, []).extend(more)
+    if apps:
+        doc['publish'] += store_apps.publish(apps)
+        for device, more in apps['steps'].items(): doc['devices'].setdefault(device, []).extend(more)
     rr.validate_doc(doc)
-    return {'number': number, 'cli': cli, 'store': store, 'commit': sha.strip(), 'members': members, 'doc': doc, 'set': chosen,
+    return {'number': number, 'apps': apps, 'cli': cli, 'store': store, 'commit': sha.strip(), 'members': members, 'doc': doc, 'set': chosen,
             'uncommitted': len([line for line in changed.splitlines() if line.strip()]) if status == 0 else None}
 
 
@@ -349,11 +374,15 @@ def build(io, out, source, builder, p):
             agent_images.finish(io, out, manifest, images['folder'], images['whole'])
             p['doc']['publish'].append({'kind': 'runtime', 'manifest': agent_images.MANIFEST})
     if p['set']: io.say('  the dependency set of %s, as it is in %s' % (p['set']['system'], p['set']['folder']))
+    if p['apps']:
+        io.say('  the store apps: %s' % ', '.join('%s %s' % (app['name'], app['version']) for app in p['apps']['apps']))
+        store_apps.place(packet, p['apps'])
     pk = pack(packet, p['doc'], p['set'])
     record = {'schemaVersion': 1, 'release': p['number'], 'runId': pk.run_id, 'builtAt': io.now(),
               **({'dependencySet': set_record(pk, p['set'])} if p['set'] else {}),
               **({'agentImages': wanted['made']} if wanted is not None else {}),
               **({'namedImages': images['made']} if images and images['named'] else {}),
+              **({'storeApps': store_apps.records(p['apps'])} if p['apps'] else {}),
               'source': {'commit': p['commit'], 'uncommittedFilesLeftOut': p['uncommitted'], 'comparedFiles': len(names)},
               'combinedBuilder': {'file': builder.name, 'sha256': rr.sha256_file(builder)},
               'packages': [{'name': name, 'version': field(io, deb, 'Version'), 'file': deb.name, 'sha256': rr.sha256_file(deb),
@@ -366,7 +395,7 @@ def build(io, out, source, builder, p):
 def parse(argv):
     one = {'--previous': None, '--source': None, '--commit': None, '--combined-builder': None, '--dependencies': None,
            '--runtime-archives': None}
-    many = {'--device': [], '--verify': [], '--runtime-image': [], '--module-add': []}
+    many = {'--device': [], '--verify': [], '--runtime-image': [], '--module-add': [], '--store-app': []}
     flags, rest, i = set(), [], 0
     while i < len(argv):
         word = argv[i]
@@ -379,13 +408,16 @@ def parse(argv):
         elif word.startswith('-'): raise ValueError('unknown option %s' % word)
         else: rest.append(word)
         i += 1
-    if len(rest) != 1 or not (one['--previous'] or one['--dependencies']):
-        raise ValueError('one <out-dir> is needed, and --previous <dir> (a release) or --dependencies <set dir> (a set alone)')
+    if len(rest) != 1 or not (one['--previous'] or one['--dependencies'] or many['--store-app']):
+        raise ValueError('one <out-dir> is needed, and --previous <dir> (a release), --dependencies <set dir> (a set alone) '
+                         'or --store-app <device>:<folder> (store apps alone)')
     if not one['--previous']:
         said = sorted(flags | {word for word in ('--source', '--commit', '--combined-builder', '--runtime-archives') if one[word]}
                       | {word for word in ('--runtime-image', '--module-add') if many[word]})
         if said: raise ValueError('%s is for a release, which needs --previous <dir>; a packet that holds only a dependency '
-                                  'set builds no package and has no step for a device' % ', '.join(said))
+                                  'set or only store apps builds no package' % ', '.join(said))
+        if one['--dependencies'] and many['--store-app']:
+            raise ValueError('a dependency set and store apps in one packet are a release, which needs --previous <dir>')
     if '--agents' not in flags and not many['--runtime-image']:
         said = sorted(({'--all-images'} & flags) | ({'--runtime-archives'} if one['--runtime-archives'] else set()))
         if said: raise ValueError('%s is about the runtime images, which a build makes with --agents or takes with --runtime-image' % ', '.join(said))
@@ -404,12 +436,17 @@ def main(argv, io=None):
     try:
         writable(io, out, many['--device'])
         chosen = chosen_set(io, Path(os.path.abspath(one['--dependencies']))) if one['--dependencies'] else None
+        apps = store_apps.parse(many['--store-app'], many['--device']) if many['--store-app'] else None
+        if apps and not one['--previous']:
+            doc = apps_plan(apps, many['--device'], many['--verify'])
+            started = True
+            return only_apps(io, out, apps, doc)
         if not one['--previous']:
             doc = set_plan(chosen, many['--device'], many['--verify'])
             started = True
             return only_a_set(io, out, chosen, doc, many['--device'])
         p = plan(io, Path(os.path.abspath(one['--previous'])), source, one['--commit'] or 'HEAD', builder,
-                 many['--device'], many['--verify'], '--backup' in flags, chosen, many['--module-add'])
+                 many['--device'], many['--verify'], '--backup' in flags, chosen, many['--module-add'], apps)
         if '--agents' in flags or many['--runtime-image']:
             folder = Path(os.path.abspath(one['--runtime-archives'])) if one['--runtime-archives'] else None
             release = agent_images.prepare(io, folder)
@@ -438,6 +475,7 @@ def main(argv, io=None):
     if p['set']: set_words(io, p['set'])
     if p.get('images'): image_words(io, p, pk)
     module_words(io, p['doc'])
+    if p['apps']: store_apps.words(io, p['apps'], rr.Deps.copy_reserve)
     io.say('It is built only: nothing is published or installed. To run it, on the core:')
     io.say('  sudo isle release run <the folder packet, copied there> --expect %s' % pk.run_id)
     io.say('The next build: isle release build <out-dir> --previous %s' % (out / 'members'))
@@ -511,6 +549,24 @@ def only_a_set(io, out, chosen, doc, named):
     if named: io.say('Each device the packet names then asks for the index of the set from where it is.')
     if not named:
         io.say('The packet names no device: it is for the core and every member the core heard from in the last 24 hours.')
+    io.say('It is built only: nothing is published or installed. To run it, on the core:')
+    io.say('  sudo isle release run <the folder packet, copied there> --expect %s' % pk.run_id)
+    return 0
+
+
+def only_apps(io, out, apps, doc):
+    """The third form: store apps and nothing else.  Raises what main reports."""
+    io.say('Store apps, each as `isle store build` left it: %s' % ', '.join('%s %s' % (app['name'], app['version']) for app in apps['apps']))
+    (out / 'packet').mkdir(parents=True)
+    store_apps.place(out / 'packet', apps)
+    pk = pack(out / 'packet', doc, None)
+    (out / 'build.json').write_text(json.dumps({'schemaVersion': 1, 'runId': pk.run_id, 'builtAt': io.now(),
+                                                 'storeApps': store_apps.records(apps)}, indent=1) + '\n')
+    io.say('Packet: %s' % (out / 'packet'))
+    for line in rr.summary_lines(pk.record, pk.run_id, pk.publications): io.say('  ' + line)
+    store_apps.words(io, apps, rr.Deps.copy_reserve)
+    io.say('No package of the isle is in it: the release the core announces stays the one it is, and a device does what the '
+           'packet says for it and nothing else.')
     io.say('It is built only: nothing is published or installed. To run it, on the core:')
     io.say('  sudo isle release run <the folder packet, copied there> --expect %s' % pk.run_id)
     return 0

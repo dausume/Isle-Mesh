@@ -473,8 +473,15 @@ publishes and installs nothing. It asks no core anything unless `--agents` is gi
   Polari instance (`isle polari module add <module> --to <instance>`), recorded so that later updates keep it.
   The step is done when the backend of THAT instance (the `backend_url` of its record) says the module is online;
   it waits up to 10 minutes for that, since the instance starts again with all its modules.
-- Tests: `python3 isle-cli/scripts/test-agent-images.py`, `test-named-images.py` and `test-runtime-publish.py`
-  (a made-up Docker and core; no Docker, no network).
+- `--store-app <device>:<folder>` puts a store app into the packet and gives the device the step that installs it,
+  after its other steps. `<folder>` is what `isle store build <definition> <folder>` left; the packet carries it
+  as `catalog/<app>/`, the core publishes it as a step of the run, and the device waits until the core serves
+  that very release before it installs. Once for each app; once per device for an app that goes to several.
+  Without `--previous` it is a third form: a packet that holds store apps and nothing else, with no package of
+  the isle built (`isle release build <out-dir> --store-app <device>:<folder>...`). Refused before anything is
+  written: a definition that was not built, a file the release names that is missing, two folders for one app.
+- Tests: `python3 isle-cli/scripts/test-agent-images.py`, `test-named-images.py`, `test-store-apps.py` and
+  `test-runtime-publish.py` (a made-up Docker and core; no Docker, no network).
 
 The second form builds a packet that holds one dependency set and no package of the isle. Nothing is built for
 it: the set is checked and copied into the packet. `--dependencies <set dir>` can also be added to the first form,
