@@ -13,5 +13,6 @@
   ],
   "compose": {"source": "docker-compose.yml"},
   "deploy": {"service": "esp-engines", "port": 9850, "engine": "esp", "maxUpload": "32m"},
+  "doors": [{"name": "twin", "service": "twin-door", "port": 9864}],
   "health": {"path": "/capability"}
 }

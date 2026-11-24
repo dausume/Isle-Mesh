@@ -214,7 +214,11 @@ class Deploy(unittest.TestCase):
     def test_the_registration_is_handed_the_size(self):
         call = DEPLOY.split('sudo bash "$AGENT_MANAGER" register', 1)[1].split('|| die', 1)[0]
         self.assertIn('"${UPLOAD_ARGS[@]+"${UPLOAD_ARGS[@]}"}"', call)
-        self.assertEqual(DEPLOY.count('"$AGENT_MANAGER" register'), 1)
+        self.assertEqual(DEPLOY.count('"$AGENT_MANAGER" register --name "$NAME" '), 1)
+        # the app's doors are registered as well (<app>--<door>), each without the app's upload size
+        door = DEPLOY.split('"$AGENT_MANAGER" register --name "$NAME--', 1)[1].split('|| die', 1)[0]
+        self.assertNotIn('UPLOAD_ARGS', door)
+        self.assertEqual(DEPLOY.count('"$AGENT_MANAGER" register'), 2)
 
 
 class PolarisOwnNames(unittest.TestCase):

@@ -70,6 +70,12 @@ for e in d.get("entries", []):
         if ip:
             seen.add(dom)
             print("%s %s" % (dom, ip))
+            # a store release's doors (isle app deploy --door): served by the same device's agent, so the same address
+            for door in i.get("doors", []) if isinstance(i.get("doors"), list) else []:
+                dd = door.get("domain", "") if isinstance(door, dict) else ""
+                if re.fullmatch(r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+isle", dd) and dd not in seen:
+                    seen.add(dd)
+                    print("%s %s" % (dd, ip))
 PYEOF
 )
 

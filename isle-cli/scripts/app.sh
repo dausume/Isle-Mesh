@@ -196,6 +196,12 @@ case $COMMAND in
         fi
         sudo docker compose -p "isle-$NAME" -f "/etc/isle-mesh/apps/$NAME/docker-compose.yml" -f "/etc/isle-mesh/apps/$NAME/isle-overlay.yml" down 2>/dev/null
         sudo bash "$SCRIPT_DIR/../../isle-agent/scripts/agent-manager.sh" unregister --name "$NAME" 2>/dev/null || true
+        # the app's doors (a store release's "doors", registered as <app>--<door> by app-deploy.sh)
+        if [ -f "/etc/isle-mesh/apps/$NAME/doors.json" ]; then
+            for door in $(python3 -c 'import json,sys;print(" ".join(d["name"] for d in json.load(open(sys.argv[1]))))' "/etc/isle-mesh/apps/$NAME/doors.json" 2>/dev/null); do
+                sudo bash "$SCRIPT_DIR/../../isle-agent/scripts/agent-manager.sh" unregister --name "$NAME--$door" 2>/dev/null || true
+            done
+        fi
         echo "undeployed $NAME (DNS entry remains; isle dns unregister to drop)"
         ;;
 

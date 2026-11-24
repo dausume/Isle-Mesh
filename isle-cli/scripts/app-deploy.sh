@@ -48,6 +48,7 @@ die(){ echo -e "${R}[FAIL]${N} $*"; exit 1; }
 
 NAME="${1:-}"; shift || true
 [ -n "$NAME" ] && [ "${NAME#-}" = "$NAME" ] || die "usage: isle app deploy <name> --compose <file> [--service <svc>] [--port <p>] [--domain <d>] [--engine <kind>=<url>]"
+DOORS=()
 COMPOSE=""; IMAGE=""; SERVICE=""; PORT=""; DOMAIN="$NAME.isle"; PROTOCOL="http"; ENGINE=""; HEALTH_PATH="/"; STAGED=0; BIND=""; DATASET=""; MAX_UPLOAD=""
 while [ $# -gt 0 ]; do case "$1" in
     --compose) COMPOSE="$2"; shift 2 ;;
@@ -62,6 +63,7 @@ while [ $# -gt 0 ]; do case "$1" in
     --staged) STAGED=1; shift ;;
     --bind) BIND="${2:-}"; shift 2 || die "--bind needs PARAM=PATH" ;;
     --dataset) DATASET="${2:-}"; shift 2 || die "--dataset needs a name" ;;
+    --door) DOORS+=("${2:-}"); shift 2 || die "--door needs NAME=SERVICE:PORT" ;;
     *) die "unknown arg: $1" ;;
 esac; done
 python3 "$SCRIPT_DIR/health_probe.py" "$HEALTH_PATH" || die "invalid health path"
@@ -113,6 +115,21 @@ print(80)
 PYEOF
 )
 fi
+
+# ---- --door NAME=SERVICE:PORT (a store release's "doors"): another service of this app served under its own name,
+# <NAME>.<the app's domain>, plain HTTPS through the agent (WebSocket upgrades included). Its registry entry is
+# <app>--<NAME>: the core counts it as a door of this app, never as another instance of it.
+DOOR_NAMES=(); DOOR_SERVICES=(); DOOR_PORTS=()
+for door in "${DOORS[@]+"${DOORS[@]}"}"; do
+    dn="${door%%=*}"; rest="${door#*=}"; ds="${rest%%:*}"; dp="${rest##*:}"
+    [ "$dn" != "$door" ] && [ "$ds" != "$rest" ] || die "--door $door: write NAME=SERVICE:PORT; nothing was changed"
+    [[ "$dn" =~ ^[a-z0-9][a-z0-9-]{0,30}$ ]] || die "--door $door: the name is lowercase letters, digits and dashes; nothing was changed"
+    [[ "$dp" =~ ^[0-9]{1,5}$ ]] && [ "$dp" -ge 1 ] && [ "$dp" -le 65535 ] || die "--door $door: the port is 1 to 65535; nothing was changed"
+    printf '%s\n' "${SERVICES[@]}" | grep -qx "$ds" || die "--door $door: service '$ds' is not in the compose file (${SERVICES[*]}); nothing was changed"
+    [ "$ds" != "$SERVICE" ] || die "--door $door: '$ds' is the app's own service; a door names another one"
+    printf '%s\n' "${DOOR_NAMES[@]+"${DOOR_NAMES[@]}"}" | grep -qx "$dn" && die "--door $dn is named twice"
+    DOOR_NAMES+=("$dn"); DOOR_SERVICES+=("$ds"); DOOR_PORTS+=("$dp")
+done
 
 # ---- --bind PARAM=PATH: only for a staged deploy or an app that already has a binding;
 # the path is proven read-only by `storage_cli check-path` before anything is generated.
@@ -204,6 +221,28 @@ sudo bash "$AGENT_MANAGER" register --name "$NAME" --domain "$DOMAIN" \
     --container "$CONTAINER" --port "$PORT" --protocol "$PROTOCOL" "${UPLOAD_ARGS[@]+"${UPLOAD_ARGS[@]}"}" \
     || die "agent registration failed"
 
+# ---- 2b. the app's doors: one registry entry each; a door the previous deploy had and this one does not is removed
+DOORS_FILE="$APPS_DIR/$NAME/doors.json"
+if [ -f "$DOORS_FILE" ]; then
+    for old in $(python3 -c 'import json,sys;print(" ".join(d["name"] for d in json.load(open(sys.argv[1]))))' "$DOORS_FILE" 2>/dev/null); do
+        printf '%s\n' "${DOOR_NAMES[@]+"${DOOR_NAMES[@]}"}" | grep -qx "$old" \
+            || sudo bash "$AGENT_MANAGER" unregister --name "$NAME--$old" >/dev/null 2>&1 || true
+    done
+fi
+for i in "${!DOOR_NAMES[@]}"; do
+    DC=$(sudo env "${BIND_ENV[@]+"${BIND_ENV[@]}"}" docker compose -p "isle-$NAME" -f "$APPS_DIR/$NAME/docker-compose.yml" -f "$APPS_DIR/$NAME/isle-overlay.yml" ps --format '{{.Name}}' "${DOOR_SERVICES[$i]}" 2>/dev/null | head -1)
+    [ -n "$DC" ] || DC="isle-$NAME-${DOOR_SERVICES[$i]}-1"
+    sudo bash "$AGENT_MANAGER" register --name "$NAME--${DOOR_NAMES[$i]}" --domain "${DOOR_NAMES[$i]}.$DOMAIN" \
+        --container "$DC" --port "${DOOR_PORTS[$i]}" --protocol http \
+        || die "agent registration of the door ${DOOR_NAMES[$i]}.$DOMAIN failed"
+    ok "door registered: https://${DOOR_NAMES[$i]}.$DOMAIN -> ${DOOR_SERVICES[$i]}:${DOOR_PORTS[$i]}"
+done
+DOOR_SERVICES_S="${DOOR_SERVICES[*]-}" DOOR_PORTS_S="${DOOR_PORTS[*]-}" python3 - "${DOOR_NAMES[@]+"${DOOR_NAMES[@]}"}" <<'PYEOF' | sudo tee "$DOORS_FILE" > /dev/null
+import json, os, sys
+names, services, ports = sys.argv[1:], os.environ.get('DOOR_SERVICES_S', '').split(), os.environ.get('DOOR_PORTS_S', '').split()
+print(json.dumps([{'name': n, 'service': s, 'port': int(p)} for n, s, p in zip(names, services, ports)], indent=1))
+PYEOF
+
 # Make the new local app reachable from the core desktop immediately.
 # This edits only the owned hosts block; Wi-Fi and resolver settings are untouched.
 sudo bash "$SCRIPT_DIR/hosts-reconcile.sh" || die "core-local name registration failed"
@@ -223,6 +262,9 @@ else
         || { rm -f "$VIEW"; die "refusing to publish $DOMAIN (see above); the owner moves it through the core cutover operation"; }
     rm -f "$VIEW"
     sudo python3 "$SCRIPT_DIR/dns_publication.py" "$DOMAIN" "$AGENT_IP" || die "core DNS publication pending; retry shared operation"
+    for dn in "${DOOR_NAMES[@]+"${DOOR_NAMES[@]}"}"; do
+        sudo python3 "$SCRIPT_DIR/dns_publication.py" "$dn.$DOMAIN" "$AGENT_IP" || die "core DNS publication pending for the door $dn.$DOMAIN; retry shared operation"
+    done
     DNS_OK=1
 fi
 
@@ -318,6 +360,19 @@ for attempt in {1..12}; do
     sleep 2
 done
 [ "$READY" = 1 ] || die "installed files retained, but https://$DOMAIN is not healthy yet; retry this same instance after checking its route and service logs"
+# A door is reached when its name answers over verified HTTPS with any status: the door's own paths are its own.
+if [ "$STAGED" != 1 ]; then
+    for dn in "${DOOR_NAMES[@]+"${DOOR_NAMES[@]}"}"; do
+        code=000
+        for attempt in {1..12}; do
+            code=$(curl --http1.1 --silent --connect-timeout 2 --max-time 4 -o /dev/null -w '%{http_code}' "https://$dn.$DOMAIN/" 2>/dev/null) || code=000
+            [ "$code" != 000 ] && break
+            sleep 2
+        done
+        [ "$code" != 000 ] || die "installed files retained, but the door https://$dn.$DOMAIN does not answer over trusted HTTPS yet; retry this same instance"
+        ok "door reached: https://$dn.$DOMAIN (trusted HTTPS, HTTP $code)"
+    done
+fi
 python3 "$SCRIPT_DIR/capabilities.py" status --publish https://api.polari.isle || warn "app is reachable, but resource publication needs retry"
 ok "Deployment verified: $NAME on $(python3 "$SCRIPT_DIR/names.py" current-device), trusted HTTPS https://$DOMAIN"
 

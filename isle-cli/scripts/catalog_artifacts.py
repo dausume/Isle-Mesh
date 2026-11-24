@@ -55,6 +55,23 @@ def declared_domain(instance,domain,parent,apps):
         if name!=instance and isinstance(app,dict) and app.get('domain')==domain:raise ValueError('Domain '+domain+' is already held by app '+name)
     return domain
 
+DOOR=re.compile(r'[a-z0-9][a-z0-9-]{0,30}')
+def doors(m):
+    """A release's "doors": other services of the app, each served under its own name <name>.<the app's domain>
+    (plain HTTPS through the agent, WebSocket upgrades included).  [{name, service, port}]; refused before anything
+    is fetched when one is malformed, named twice, or is the app's own service."""
+    ds=m.get('doors',[])
+    if not isinstance(ds,list):raise ValueError('Release doors must be a list')
+    seen=set()
+    for x in ds:
+        if not isinstance(x,dict) or set(x)-{'name','service','port'}:raise ValueError('A release door is {name, service, port}')
+        name,service,port=x.get('name'),x.get('service'),x.get('port')
+        if not isinstance(name,str) or not DOOR.fullmatch(name) or name in seen:raise ValueError('Invalid or repeated release door name')
+        if not isinstance(service,str) or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}',service) or service==m['deploy']['service']:raise ValueError('Invalid release door service')
+        if type(port)is not int or not 1<=port<=65535:raise ValueError('Invalid release door port')
+        seen.add(name)
+    return ds
+
 def validate_manifest(m):
     d=m['deploy'];service=d['service'];port=d['port']
     if not isinstance(service,str) or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}',service) or type(port)is not int or not 1<=port<=65535:raise ValueError('Invalid release service/port')
@@ -65,6 +82,7 @@ def validate_manifest(m):
     path=m.get('health',{'path':'/'}).get('path')
     validate_path(path)
     if 'maxUpload' in d:upload_size.validate(d['maxUpload'])   # the largest request body the app takes through its agent
+    doors(m)
     if 'storageSlots' in m:   # the storage slots of the release (isle storage slot): refused here, before anything is fetched
         from storage_slots import declared
         declared(m['storageSlots'])
@@ -102,6 +120,8 @@ def prepare(release, expected_name, instance=None):
     services=config.get('services',{})
     if not services or any('build' in v for v in services.values()):raise ValueError('Published compose must use release images, not source builds')
     if m['deploy']['service'] not in services:raise ValueError('Release ingress service missing from Compose')
+    for door in doors(m):
+        if door['service'] not in services:raise ValueError('Release door '+door['name']+' names a service missing from Compose')
     for slot in m.get('storageSlots',[]):
         if (slot.get('service') or m['deploy']['service']) not in services:raise ValueError('Storage slot '+slot['name']+' names a service missing from Compose')
     declared={i['ref']:i for i in m['images']}
@@ -153,6 +173,7 @@ def install(catalog,instance,staged=False,binds=(),dataset=None,served=None):
     validate_path(path)
     args+=['--health-path',path]
     if 'maxUpload' in d:args+=['--max-upload',upload_size.validate(d['maxUpload'])]
+    for door in doors(m):args+=['--door','%s=%s:%d'%(door['name'],door['service'],door['port'])]
     if staged:args+=['--staged']
     for bind in binds:
         if not BIND.fullmatch(bind) or '..' in bind.split('/'):raise ValueError('Invalid --bind value')

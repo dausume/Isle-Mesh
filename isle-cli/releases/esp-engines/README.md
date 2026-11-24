@@ -21,10 +21,11 @@ From 2026.11.23-1 the worker also holds twin sessions of a C3 and advertises its
 with `python3 /srv/twin_door.py` on 9864, reaching the worker by its service name. `isle store install` starts it
 with the worker, so a release packet needs no extra step for it.
 
-Its name `twin.esp-engines.isle` is not registered yet: the agent registers one name per app (the `deploy`
-service). A store app declaring its extra doors is asked of isle-core, together with a node's gRPC door
-(`AI-Notes/plans/ISLE_GRPC_ROUTE_REQUEST.md` in the suite). Until it lands, the backend refuses a C3 session in
-words: the worker names a door that does not answer.
+Its name is a door the release declares (`"doors": [{"name": "twin", "service": "twin-door", "port": 9864}]`):
+`isle store install` passes it to `isle app deploy --door twin=twin-door:9864`, which registers
+`twin.<the app's domain>` (here `twin.esp-engines.isle`) with the agent under the entry `esp-engines--twin`, with its
+own certificate, publishes its DNS like the app's own name and checks it answers over trusted HTTPS. The core counts
+it as a door of the app, never as another instance. `isle app undeploy` removes it.
 
 ## Uploads
 

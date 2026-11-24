@@ -28,7 +28,8 @@ class StagedScript(unittest.TestCase):
         branch, _, other = rest.partition('\nelse\n')
         self.assertNotIn('dns_publication', branch)
         self.assertIn('dns_publication.py', other)
-        self.assertEqual(TEXT.count('dns_publication.py'), 1)
+        self.assertEqual(TEXT.count('dns_publication.py'), 2)          # the app's name, then each of its doors
+        self.assertEqual(other.split('\nfi\n', 1)[0].count('dns_publication.py'), 2)   # both in the published branch
         self.assertLess(other.index('guard-domain'), other.index('dns_publication.py'))
 
     def test_health_check_uses_resolve_when_staged(self):

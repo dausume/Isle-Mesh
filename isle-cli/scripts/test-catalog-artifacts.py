@@ -119,8 +119,8 @@ class Artifacts(unittest.TestCase):
   for extra in (dict(domain='x',parent='alpha'),dict(domain='twin.alpha.isle',parent='Bad'),dict(domain=5,parent='alpha')):
    m=dict(deploy=dict(service='web',port=80),images=[]);m['deploy'].update(extra)
    with self.assertRaises(ValueError):artifacts.validate_manifest(m)
- def install_domain(self,deploy,registry,instance,served=None,name='twin-board-engines',health=None,staged=False,slots=None,declare=None):
-  m=dict(name=name,version='v1',deploy=dict(service='web',port=80,**deploy),**({'health':health} if health else {}),**({'storageSlots':slots} if slots is not None else {}));calls=self.calls=[]
+ def install_domain(self,deploy,registry,instance,served=None,name='twin-board-engines',health=None,staged=False,slots=None,declare=None,doors=None):
+  m=dict(name=name,version='v1',deploy=dict(service='web',port=80,**deploy),**({'health':health} if health else {}),**({'storageSlots':slots} if slots is not None else {}),**({'doors':doors} if doors is not None else {}));calls=self.calls=[]
   reg=self.root/'registry.json';reg.write_text(json.dumps({'apps':registry}))
   real=artifacts.Path
   class P(type(real())):
@@ -144,6 +144,15 @@ class Artifacts(unittest.TestCase):
   _,c=self.install_domain({},{'twin-board-engines':{'domain':'old.isle'}},'twin-board-engines');self.assertEqual(used(c),'old.isle')
   _,c=self.install_domain({},{},'twin-board-engines');self.assertEqual(used(c),'twin-board-engines.isle')
   _,c=self.install_domain({},{},'twin-board-engines-2');self.assertEqual(used(c),'twin-board-engines-2.isle')
+ def test_the_doors_of_a_release_reach_the_deploy_one_option_each(self):
+  _,calls=self.install_domain({},{},'esp-engines',name='esp-engines',doors=[dict(name='twin',service='twin-door',port=9864)])
+  deploy=calls[-1];self.assertEqual(deploy[deploy.index('--door')+1],'twin=twin-door:9864')
+  _,calls=self.install_domain({},{},'alpha',name='alpha');self.assertNotIn('--door',calls[-1])   # none declared: the app as before
+ def test_a_malformed_door_is_refused_when_the_release_is_validated(self):
+  ok=dict(deploy=dict(service='web',port=80),images=[],doors=[dict(name='twin',service='door',port=9864)]);artifacts.validate_manifest(ok)
+  for bad in ([dict(name='Twin',service='door',port=9864)],[dict(name='twin',service='web',port=9864)],[dict(name='twin',service='door',port=0)],
+              [dict(name='twin',service='door',port=9864)]*2,[dict(name='twin',service='door',port=9864,domain='x.isle')],{'twin':1},[dict(name='twin.x',service='door',port=1)]):
+   with self.assertRaises(ValueError,msg=repr(bad)):artifacts.validate_manifest(dict(ok,doors=bad))
  def test_the_upload_size_of_a_release_reaches_the_deploy(self):
   _,calls=self.install_domain(dict(maxUpload='2g'),{},'alpha',name='alpha')
   deploy=calls[-1];self.assertEqual(deploy[deploy.index('--max-upload')+1],'2g')
