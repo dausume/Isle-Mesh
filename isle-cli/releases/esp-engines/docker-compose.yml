@@ -11,5 +11,22 @@ services:
     environment:
       WORKER_KEEPALIVE_S: "20"
       WORKER_MAX_MB: "16"
-      # c3g-4: where callers on other devices reach this worker's twin sessions (the door app twin-esp-engines, twin-door/)
+      # c3g-4: where callers on other devices reach this worker's twin sessions (the twin-door service below)
       TWIN_DOOR_URL: "wss://twin.esp-engines.isle"
+  # c3g-4: the twin door, the same image with the door's command. It joins a caller on another device to a twin
+  # session's control line or serial stream after the worker has checked the session's token, and reaches the worker
+  # by its service name. Its own name (twin.esp-engines.isle -> this service's 9864) is a declared door of the app,
+  # which the isle registers once the release format carries extra doors (asked of isle-core; ISLE_GRPC_ROUTE_REQUEST.md).
+  twin-door:
+    image: esp-engines/esp-engines:PIN-AT-BUILD
+    command: ["python3", "/srv/twin_door.py"]
+    restart: unless-stopped
+    mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 64
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    environment:
+      TWIN_DOOR_WORKER: "http://esp-engines:9850"
+      TWIN_DOOR_PORT: "9864"
