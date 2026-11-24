@@ -14,6 +14,18 @@ Then `isle store build` pins it; it pulls nothing, so the image must be on the m
 A device gets it with `isle release build ... --store-app <device>:<output folder>`. After install the engine
 binds on the backend's boot, or at once with `pol engines sync`.
 
+## The twin door (twin-door/)
+
+From 2026.11.23-1 the worker also holds twin sessions of a C3 and advertises its door
+(`TWIN_DOOR_URL=wss://twin.esp-engines.isle`). The door is a small app of its own, `twin-esp-engines`: the same
+image with `python3 /srv/twin_door.py`, as the board worker's door `twin-board-engines` is. After the worker is
+installed on its device:
+
+    isle app deploy twin-esp-engines --compose twin-door/docker-compose.yml --service twin-door --port 9864 --domain twin.esp-engines.isle
+
+Until the door is deployed, the backend refuses a C3 session in words: the worker names a door that does not answer.
+The image tag in `twin-door/docker-compose.yml` follows `release.json`'s version.
+
 ## Uploads
 
 A run posts the 4 MB flash image as base64, and the agent's default request limit is 1 MiB. The release

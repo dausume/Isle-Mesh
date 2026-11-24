@@ -11,3 +11,5 @@ services:
     environment:
       WORKER_KEEPALIVE_S: "20"
       WORKER_MAX_MB: "16"
+      # c3g-4: where callers on other devices reach this worker's twin sessions (the door app twin-esp-engines, twin-door/)
+      TWIN_DOOR_URL: "wss://twin.esp-engines.isle"
