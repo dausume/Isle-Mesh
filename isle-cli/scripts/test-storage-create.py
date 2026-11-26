@@ -309,8 +309,19 @@ class OnAPartition(Case):
                              (FileNotFoundError(2, 'No such file'), 'blkid is not installed on this machine (package util-linux)')):
             self.on_disk = found
             self.refused(self.create('--expect', approved), words)
+        self.on_disk = dict(PART_ENTRY_NUMBER='3', PART_ENTRY_SCHEME='gpt', PART_ENTRY_TYPE='0fc63daf-8483-4772-8e79-3d69d8477de4', TYPE='ext4')
+        self.refused(self.create('--expect', approved), 'partition sdc3 is not empty: the disk itself shows TYPE=ext4 there')   # the entry is not shown
         self.on_disk = (2, 'DEVNAME=/dev/sdc3\n')                        # the name alone is nothing found
         self.assertEqual(self.create('--expect', approved), 0, self.m.text())
+
+    def test_the_partitions_own_entry_in_the_table_is_nothing_found(self):
+        # what blkid --probe prints for an empty GPT partition: the entry alone, with exit 0 (seen on a real 2 TB dock disk)
+        entry = ('DEVNAME=/dev/sdc3\nPART_ENTRY_SCHEME=gpt\nPART_ENTRY_UUID=e12c3873-29bd-42a3-a922-29159a33ce12\n'
+                 'PART_ENTRY_TYPE=0fc63daf-8483-4772-8e79-3d69d8477de4\nPART_ENTRY_NUMBER=1\nPART_ENTRY_OFFSET=2048\n'
+                 'PART_ENTRY_SIZE=3907027087\nPART_ENTRY_DISK=8:32\n')
+        self.on_disk = (0, entry)
+        self.assertEqual(self.create('--expect', self.plan_id()), 0, self.m.text())
+        self.assertEqual(len(self.tools('mkfs.ext4')), 1)
 
     def test_a_missing_mkfs_is_a_refusal(self):
         self.mkfs = FileNotFoundError(2, 'No such file')
@@ -414,6 +425,12 @@ class OnAWholeDevice(Case):
                     'No filesystem was made and this machine records nothing for it.')
         self.assertEqual(self.tools('mkfs.ext4'), [])
         self.assertEqual(len(self.tools('sfdisk')), 2)
+
+    def test_the_new_partitions_own_entry_does_not_stop_it(self):
+        # the real 2 TB dock disk: right after the table is written the new partition shows only its entry in the table
+        self.old = (0, 'DEVNAME=/dev/sde1\nPART_ENTRY_SCHEME=gpt\nPART_ENTRY_NUMBER=1\nPART_ENTRY_OFFSET=2048\nPART_ENTRY_DISK=8:64\n')
+        self.assertEqual(self.whole('--expect', self.whole_id()), 0, self.m.text())
+        self.assertIn('now holds one ext4 filesystem', self.m.text())
 
     def test_failures_once_the_table_is_written_are_never_refusals(self):
         approved = self.whole_id()

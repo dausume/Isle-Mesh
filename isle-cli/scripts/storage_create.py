@@ -161,7 +161,12 @@ def probe(io, path):
     except FileNotFoundError: raise Refused('%s is not installed on this machine (package util-linux)' % PROBER)
     found = dict(line.split('=', 1) for line in (done.stdout or '').splitlines() if '=' in line)
     found.pop('DEVNAME', None)
+    # On a partition blkid also reports the partition's own entry in the table (PART_ENTRY_*): that is the partition itself,
+    # never something written inside it, so it is not what this probe looks for.
+    entry = [key for key in found if key.startswith('PART_ENTRY_')]
+    for key in entry: found.pop(key)
     if done.returncode == 2 and not found: return {}
+    if done.returncode == 0 and entry and not found: return {}
     if done.returncode not in (0, 2) or not found:
         raise Refused('the disk could not be probed (%s ended with exit %d)' % (PROBER, done.returncode))
     return found
