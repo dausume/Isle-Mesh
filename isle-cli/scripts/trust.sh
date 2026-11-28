@@ -138,6 +138,22 @@ import_docker() { # only where Docker is installed; written whole, so a rotation
             || { fail "Docker trust for $host failed"; return 1; }
     done
     ok "Docker: trusted for $DOCKER_HOSTS (no daemon restart needed)"
+    prune_docker
+}
+
+prune_docker() { # a certs.d entry that holds only a ca.crt of an earlier isle root still trusts that root: remove it
+    local dir cert
+    for dir in "$DOCKER_CERTS"/*/; do
+        [ -d "$dir" ] || continue
+        cert="${dir}ca.crt"
+        [ "$(ls -A "$dir")" = "ca.crt" ] || continue               # anything else in it (client certs) is not ours
+        cmp -s "$CA" "$cert" && continue
+        openssl x509 -in "$cert" -noout -subject 2>/dev/null | grep -q 'Polari Root CA' || continue
+        openssl x509 -in "$cert" -noout -text 2>/dev/null | grep -q 'CA:TRUE' || continue
+        sudo rm -f "$cert" && sudo rmdir "$dir" \
+            && ok "Docker: removed an earlier isle root ($(basename "$dir"))" \
+            || { fail "Docker: could not remove $(basename "$dir")"; return 1; }
+    done
 }
 
 import_browser() {
