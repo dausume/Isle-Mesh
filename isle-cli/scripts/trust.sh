@@ -37,6 +37,11 @@ as_trust_user() {
     fi
 }
 NICK="Isle Root CA"
+# Docker does not read the system store again after the daemon starts, so a root installed or rotated later
+# is not trusted for pushes and pulls until a restart. It reads certs.d/<host>/ca.crt on every connection, so
+# the root goes there for each isle name a daemon pulls images from (the registry App Store app's name).
+DOCKER_CERTS=/etc/docker/certs.d
+DOCKER_HOSTS="registry.isle"
 TRUST_URL_DEFAULT="https://apt.isle/isle-root.crt"
 G="\033[0;32m"; Y="\033[1;33m"; R="\033[0;31m"; N="\033[0m"
 ok(){ echo -e "${G}[ OK ]${N} $*"; }
@@ -91,6 +96,14 @@ status() {
     if [ -f /etc/firefox/policies/isle-root.crt ] && cmp -s "$CA" /etc/firefox/policies/isle-root.crt; then
         ok "Firefox: current public root policy present (restart browser to load it)"
     else warn "Firefox: current root policy missing — isle trust install"; fi
+    if command -v docker >/dev/null 2>&1; then
+        local host
+        for host in $DOCKER_HOSTS; do
+            cmp -s "$CA" "$DOCKER_CERTS/$host/ca.crt" \
+                && ok "Docker: current isle CA trusted for $host" \
+                || warn "Docker: current isle CA NOT trusted for $host — isle trust install"
+        done
+    fi
     local probe; probe=$(mktemp)
     if curl_trust "$probe" && [ -s "$probe" ]; then
         ok "live probe: apt.isle answered over a channel this root authenticates"
@@ -112,7 +125,19 @@ do_import() {
         sudo bash "$(dirname "${BASH_SOURCE[0]}")/apt-install.sh" libnss3-tools >/dev/null 2>&1 || true
     fi
     sudo python3 "$(dirname "${BASH_SOURCE[0]}")/firefox_trust.py" policy || return 1
+    import_docker || return 1
     import_browser
+}
+
+import_docker() { # only where Docker is installed; written whole, so a rotation replaces the old root
+    command -v docker >/dev/null 2>&1 || return 0
+    local host
+    for host in $DOCKER_HOSTS; do
+        sudo install -d -m 755 "$DOCKER_CERTS/$host" \
+            && sudo install -m 644 "$CA" "$DOCKER_CERTS/$host/ca.crt" \
+            || { fail "Docker trust for $host failed"; return 1; }
+    done
+    ok "Docker: trusted for $DOCKER_HOSTS (no daemon restart needed)"
 }
 
 import_browser() {
