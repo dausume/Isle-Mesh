@@ -22,7 +22,12 @@ spec=importlib.util.spec_from_file_location('cert_enroll',Path(__file__).with_na
 enroll=importlib.util.module_from_spec(spec);spec.loader.exec_module(enroll)
 STATE=Path('/etc/isle-mesh')
 CORE_NAMES={'polari.isle','api.polari.isle','auth.polari.isle','apt.isle',
-            'trust.isle','registry.isle','certs.isle','router.isle','health.isle'}
+            'trust.isle','certs.isle','router.isle','health.isle'}
+
+# registry.isle is the isle's image registry. It is the core's only while the core runs the registry of
+# `isle registry setup` (its folder /etc/isle-mesh/registry exists); otherwise the registry App Store app
+# (isle-cli/releases/registry) may answer at it from the one member that installs it, the first to claim it.
+REGISTRY_NAME,REGISTRY_FOLDER='registry.isle','registry'
 
 # The name under which a member offers a release packet to the core (release_offer.py PREFIX). The core reads what is
 # served there as the word of the member the name ends in, so no other device may ever hold its certificate.
@@ -94,6 +99,7 @@ class Authority:
             registry=self.read(self.state/'agent/registry.json')
             reserved=CORE_NAMES|set(registry.get('domains',{}))|set(registry.get('subdomains',{}))
             reserved.update(a.get('domain','') for a in registry.get('apps',{}).values())
+            if (self.state/REGISTRY_FOLDER).exists():reserved.add(REGISTRY_NAME)
             if not granted and (domain in reserved or (self.state/'agent/ssl/certs'/(domain+'.crt')).exists()):
                 raise PermissionError('service name belongs to the core')
             if len([v for v in claims.values() if v==device])>=128 and not owner:

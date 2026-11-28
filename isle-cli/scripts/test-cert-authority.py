@@ -41,6 +41,16 @@ class AuthorityTest(unittest.TestCase):
   with self.assertRaises(PermissionError):self.authority.issue('member',self.token,'board.isle',self.csr.read_text())
   self.authority.revoke('member')
   with self.assertRaises(PermissionError):self.authority.issue('member',self.token,'new.isle',self.csr.read_text())
+ def test_the_registry_name_goes_to_one_member_unless_the_core_runs_the_registry(self):
+  csr=self.work/'registry.csr';self.member.request('registry.isle',csr)
+  (self.core.state/'registry').mkdir()                          # the core runs `isle registry setup`: the name is the core's
+  with self.assertRaisesRegex(PermissionError,'belongs to the core'):self.authority.issue('member',self.token,'registry.isle',csr.read_text())
+  self.assertNotIn('registry.isle',self.authority.read(self.authority.claims))
+  (self.core.state/'registry').rmdir()                          # no core registry: the App Store app on a member may hold it
+  self.assertIn('CERTIFICATE',self.authority.issue('member',self.token,'registry.isle',csr.read_text()))
+  self.assertEqual(self.authority.read(self.authority.claims)['registry.isle'],'member')
+  other=self.work/'other';self.authority.authorize('other',other)   # and then no other member
+  with self.assertRaisesRegex(PermissionError,'another member'):self.authority.issue('other',json.loads(other.read_text())['token'],'registry.isle',csr.read_text())
  def test_invalid_csr_does_not_reserve(self):
   with self.assertRaises(ValueError):self.authority.issue('member',self.token,'bad.isle','bad CSR')
   self.assertNotIn('bad.isle',self.authority.read(self.authority.claims))
